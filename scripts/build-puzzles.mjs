@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import { pipeline } from 'stream/promises';
 import { createInterface } from 'readline';
 import { createRequire } from 'module';
+import Chess from 'chess.js';
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -95,7 +96,6 @@ function puzzleFromRow(columns, values) {
   const moves = String(row.Moves || '').trim().split(/\s+/).filter(Boolean);
   if (!row.FEN || moves.length < 2) return null;
 
-  const Chess = require('chess.js');
   const chess = new Chess(row.FEN);
   const setup = chess.move({
     from: moves[0].slice(0, 2),
