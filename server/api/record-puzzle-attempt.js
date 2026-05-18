@@ -1,4 +1,5 @@
 // Record puzzle attempt and update rating in real-time database
+const { requireUser } = require('./_lib/user-service');
 let admin;
 try {
   admin = require('firebase-admin');
@@ -145,6 +146,7 @@ exports.handler = async (event) => {
       };
     }
 
+    const authUser = await requireUser(event);
     const body = JSON.parse(event.body || '{}');
     const { userId, puzzleRating, won, puzzleId } = body;
 
@@ -153,6 +155,13 @@ exports.handler = async (event) => {
         statusCode: 400,
         headers,
         body: JSON.stringify({ error: 'Missing required fields: userId, puzzleRating, won' }),
+      };
+    }
+    if (userId !== authUser.uid) {
+      return {
+        statusCode: 403,
+        headers,
+        body: JSON.stringify({ error: 'Cannot update another user.' }),
       };
     }
 
@@ -217,16 +226,8 @@ exports.handler = async (event) => {
     if (!useRest) {
       const profileRef = database.ref(`users/${userId}/profile`);
       await profileRef.update(update);
-      if (safePuzzleId) {
-        const historyRef = database.ref(`users/${userId}/puzzleHistory/${Date.now()}`);
-        await historyRef.set({ puzzleId: safePuzzleId, puzzleRating, won, delta, ratingAfter: newRating, timestamp: admin.database.ServerValue.TIMESTAMP });
-      }
     } else {
       await restPatch(`users/${encodeURIComponent(userId)}/profile`, update);
-      if (safePuzzleId) {
-        const entry = { puzzleId: safePuzzleId, puzzleRating, won, delta, ratingAfter: newRating, timestamp: Date.now() };
-        await restRequest('PUT', `${process.env.REALTIME_DATABASE_URL.replace(/\/$/, '')}/users/${encodeURIComponent(userId)}/puzzleHistory/${Date.now()}.json${process.env.REALTIME_DATABASE_SECRET ? `?auth=${encodeURIComponent(process.env.REALTIME_DATABASE_SECRET)}` : ''}`, entry);
-      }
     }
 
     return {

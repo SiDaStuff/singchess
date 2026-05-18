@@ -2012,7 +2012,7 @@ body[data-mode="puzzle"] .eval-graph-card {
 
 .account-stats {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -2026,6 +2026,34 @@ body[data-mode="puzzle"] .eval-graph-card {
 .account-stats strong {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 1.04rem;
+}
+
+.account-stats strong.boost-plan {
+  color: #6d28d9;
+}
+
+.account-usage {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.admin-boost-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #c4b5fd;
+  border-radius: 8px;
+  background: #f5f3ff;
+}
+
+.admin-boost-panel[hidden] {
+  display: none;
+}
+
+.admin-boost-panel h3 {
+  margin: 0 0 10px;
+  color: #5b21b6;
+  font-size: 1rem;
 }
 
 .coach-setup-grid {

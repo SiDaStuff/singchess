@@ -3,6 +3,7 @@ const { loadAnalyzer, loadChess } = require('./_lib/analysis-loader');
 const {
   incrementPublicStats,
 } = require('./_lib/firebase-stats');
+const { requireQuota } = require('./_lib/user-service');
 
 const SERVER_REVIEW_PROFILE = {
   depth: 14,
@@ -161,6 +162,18 @@ exports.handler = async (event, context = {}) => {
     return json(405, { error: 'Use POST.' });
   }
 
+  let quotaState = null;
+  try {
+    quotaState = await requireQuota(event, 'serverReviews');
+  } catch (err) {
+    return json(err.statusCode || 500, {
+      error: err.message || 'Server review quota check failed.',
+      code: err.code,
+      quota: err.quota,
+      plan: err.plan,
+    });
+  }
+
   let payload = {};
   try {
     payload = JSON.parse(event.body || '{}');
@@ -223,6 +236,8 @@ exports.handler = async (event, context = {}) => {
           depth: analyzer.analysisDepth,
           multiPv: analyzer.multiPvCount,
            source: 'server',
+          quota: quotaState.quota,
+          plan: quotaState.plan,
           publicStats,
         });
       }
@@ -266,6 +281,8 @@ exports.handler = async (event, context = {}) => {
       depth: analyzer.analysisDepth,
       multiPv: analyzer.multiPvCount,
        source: 'server',
+      quota: quotaState.quota,
+      plan: quotaState.plan,
       publicStats,
     });
       });
@@ -297,6 +314,24 @@ exports.streamHandler = async (req, res) => {
     'X-Accel-Buffering': 'no',
   });
   res.flushHeaders?.();
+
+  let quotaState = null;
+  try {
+    quotaState = await requireQuota({
+      httpMethod: req.method,
+      headers: req.headers || {},
+      body: req.body === undefined ? undefined : JSON.stringify(req.body),
+    }, 'serverReviews');
+  } catch (err) {
+    sseWrite(res, 'error', {
+      error: err.message || 'Server review quota check failed.',
+      code: err.code,
+      quota: err.quota,
+      plan: err.plan,
+    });
+    res.end();
+    return;
+  }
 
   let payload = {};
   try {
@@ -397,12 +432,14 @@ exports.streamHandler = async (req, res) => {
         blackAcpl: results.blackAcpl,
         whiteCaps: results.whiteCaps,
         blackCaps: results.blackCaps,
-        phaseSummary: results.phaseSummary,
-        depth: analyzer.analysisDepth,
-        multiPv: analyzer.multiPvCount,
-        source: 'server-stream',
-        publicStats,
-      });
+	        phaseSummary: results.phaseSummary,
+	        depth: analyzer.analysisDepth,
+	        multiPv: analyzer.multiPvCount,
+	        source: 'server-stream',
+        quota: quotaState.quota,
+        plan: quotaState.plan,
+	        publicStats,
+	      });
     }, (queue) => {
       sseWrite(res, 'queued', queue);
     });

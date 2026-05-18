@@ -76,12 +76,17 @@ class ChessReviewApp {
 	      results: null,
 	    };
 	    this.authMode = 'signin';
-	    this.authState = {
-	      user: null,
-	      profile: null,
-	      initialized: false,
-	      dbReady: false,
-	    };
+		    this.authState = {
+		      user: null,
+		      profile: null,
+		      me: null,
+		      plan: { plan: 'free', name: 'Free' },
+		      usage: {},
+		      limits: {},
+		      isAdmin: false,
+		      initialized: false,
+		      dbReady: false,
+		    };
 
     this.board.setChessInstance(this.chess);
     this.board.interactive = true;
@@ -103,9 +108,11 @@ class ChessReviewApp {
       check: '/sounds/check.mp3',
       promote: '/sounds/promote.mp3',
       end: '/sounds/end.mp3',
-    };
-    this.soundPool = {};
-    this.soundPreloadPromise = null;
+	    };
+	    this.soundPool = {};
+	    this.soundPoolIndex = {};
+	    this.soundPreloadPromise = null;
+	    this._preloadSounds().catch(() => {});
 
     this._bindElements();
 	    this._initEngineControls();
@@ -296,10 +303,17 @@ class ChessReviewApp {
 	    this.elAccountStatus = document.getElementById('account-status');
 	    this.elAccountDisplayName = document.getElementById('account-display-name');
 	    this.elAccountEmailLabel = document.getElementById('account-email-label');
-	    this.elAccountPuzzleRating = document.getElementById('account-puzzle-rating');
-	    this.elAccountPuzzlesSolved = document.getElementById('account-puzzles-solved');
-	    this.elAccountPuzzlesAttempted = document.getElementById('account-puzzles-attempted');
-  }
+		    this.elAccountPuzzleRating = document.getElementById('account-puzzle-rating');
+		    this.elAccountPuzzlesSolved = document.getElementById('account-puzzles-solved');
+		    this.elAccountPuzzlesAttempted = document.getElementById('account-puzzles-attempted');
+		    this.elAccountPlan = document.getElementById('account-plan');
+		    this.elAccountUsage = document.getElementById('account-usage');
+		    this.elAdminBoostPanel = document.getElementById('admin-boost-panel');
+		    this.elGiftBoostEmail = document.getElementById('gift-boost-email');
+		    this.elGiftBoostDays = document.getElementById('gift-boost-days');
+		    this.elBtnGiftBoost = document.getElementById('btn-gift-boost');
+		    this.elGiftBoostStatus = document.getElementById('gift-boost-status');
+	  }
 
   _initEngineControls() {
     this.elEngineSource.value = this.engineSettings.source;
@@ -513,24 +527,32 @@ class ChessReviewApp {
 		    });
 		  }
 
-	  async _loadUserProfile(user) {
-	    const fallback = {
-	      uid: user.uid,
-	      username: user.displayName || (user.email ? user.email.split('@')[0] : 'Player'),
-	      email: user.email || '',
-	      puzzleRating: 1500,
-	      puzzleStats: { solved: 0, attempted: 0, streak: 0 },
-	    };
-
-	    try {
-	      const firebase = this._ensureFirebase();
-	      if (!firebase?.database) return fallback;
-	      const snap = await firebase.database().ref(`users/${user.uid}/profile`).once('value');
-	      const profile = snap.val() || {};
-	      const hasServerProfile = Object.keys(profile).length > 0;
-	      const localProfile = hasServerProfile ? null : this._localPuzzleProfile();
-	      const profileFallback = localProfile
-	        ? {
+		  async _loadUserProfile(user) {
+		    const fallback = {
+		      uid: user.uid,
+		      username: user.displayName || (user.email ? user.email.split('@')[0] : 'Player'),
+		      email: user.email || '',
+		      puzzleRating: 1500,
+		      puzzleStats: { solved: 0, attempted: 0, streak: 0 },
+		    };
+	
+		    try {
+		      const response = await fetch('/api/users/me', {
+		        headers: await this._authHeaders(),
+		        cache: 'no-store',
+		      });
+		      if (!response.ok) throw new Error(`Account API responded with ${response.status}`);
+		      const me = await response.json();
+		      this.authState.me = me;
+		      this.authState.plan = me.plan || { plan: 'free', name: 'Free' };
+		      this.authState.usage = me.usage || {};
+		      this.authState.limits = me.limits || {};
+		      this.authState.isAdmin = !!me.isAdmin;
+		      const profile = me.profile || {};
+		      const hasServerProfile = Object.keys(profile).length > 0;
+		      const localProfile = hasServerProfile ? null : this._localPuzzleProfile();
+		      const profileFallback = localProfile
+		        ? {
 	            ...fallback,
 	            puzzleRating: localProfile.rating,
 	            puzzleStats: {
@@ -550,16 +572,47 @@ class ChessReviewApp {
 	      };
 	      if (!profile.uid) await this._saveUserProfile(merged);
 	      return merged;
-	    } catch (_err) {
-	      return fallback;
-	    }
-	  }
+		    } catch (_err) {
+		      this.authState.me = null;
+		      this.authState.plan = { plan: 'free', name: 'Free' };
+		      this.authState.usage = {};
+		      this.authState.limits = {};
+		      this.authState.isAdmin = false;
+		      return fallback;
+		    }
+		  }
+
+		  async _refreshMe() {
+		    const user = this.authState.user;
+		    if (!user) return null;
+		    const response = await fetch('/api/users/me', {
+		      headers: await this._authHeaders(),
+		      cache: 'no-store',
+		    });
+		    if (!response.ok) throw new Error(`Account API responded with ${response.status}`);
+		    const me = await response.json();
+		    this.authState.me = me;
+		    this.authState.profile = me.profile || this.authState.profile;
+		    this.authState.plan = me.plan || { plan: 'free', name: 'Free' };
+		    this.authState.usage = me.usage || {};
+		    this.authState.limits = me.limits || {};
+		    this.authState.isAdmin = !!me.isAdmin;
+		    this._applyProfileToPuzzleMode(this.authState.profile);
+		    this._syncAccountUi();
+		    this._syncPuzzlePanel();
+		    return me;
+		  }
+
+		  async _authHeaders(extra = {}) {
+		    const token = await this.authState.user?.getIdToken?.();
+		    return token ? { ...extra, Authorization: `Bearer ${token}` } : { ...extra };
+		  }
 
 	  async _saveUserProfile(profile = this.authState.profile) {
 	    const user = this.authState.user;
 	    if (!user || !profile) return;
-	    this.authState.profile = {
-	      ...profile,
+		      this.authState.profile = {
+		      ...profile,
 	      uid: user.uid,
 	      email: user.email || profile.email || '',
 	      updatedAt: Date.now(),
@@ -567,7 +620,8 @@ class ChessReviewApp {
 	    try {
 	      const firebase = this._ensureFirebase();
 	      if (!firebase?.database) return;
-	      await firebase.database().ref(`users/${user.uid}/profile`).set(this.authState.profile);
+		      await firebase.database().ref(`users/${user.uid}/profile`).set(this.authState.profile);
+		      this._refreshMe().catch(() => {});
 	    } catch (_err) {
 	      // Auth remains useful even if the database rules reject profile writes.
 	    }
@@ -654,20 +708,39 @@ class ChessReviewApp {
 	    const user = this.authState.user;
 	    const profile = this.authState.profile || {};
 	    const signedIn = !!user;
-	    if (this.elAccountSignedOut) this.elAccountSignedOut.hidden = signedIn;
-	    if (this.elAccountSignedIn) this.elAccountSignedIn.hidden = !signedIn;
-	    if (this.elAccountBtnLabel) {
-	      this.elAccountBtnLabel.textContent = signedIn ? (profile.username || user.displayName || 'Account') : 'Account';
-	    }
-	    if (!signedIn) return;
-
-	    const stats = profile.puzzleStats || {};
-	    if (this.elAccountDisplayName) this.elAccountDisplayName.textContent = profile.username || user.displayName || 'Player';
-	    if (this.elAccountEmailLabel) this.elAccountEmailLabel.textContent = user.email || profile.email || '';
-	    if (this.elAccountPuzzleRating) this.elAccountPuzzleRating.textContent = Math.round(Number(profile.puzzleRating) || this.puzzleMode.rating || 1500);
-	    if (this.elAccountPuzzlesSolved) this.elAccountPuzzlesSolved.textContent = Math.max(0, Number(stats.solved) || 0);
-	    if (this.elAccountPuzzlesAttempted) this.elAccountPuzzlesAttempted.textContent = Math.max(0, Number(stats.attempted) || 0);
-	  }
+		    if (this.elAccountSignedOut) this.elAccountSignedOut.hidden = signedIn;
+		    if (this.elAccountSignedIn) this.elAccountSignedIn.hidden = !signedIn;
+		    if (this.elAccountBtnLabel) {
+		      this.elAccountBtnLabel.textContent = signedIn ? (profile.username || user.displayName || 'Account') : 'Account';
+		    }
+		    if (!signedIn && this.elAdminBoostPanel) this.elAdminBoostPanel.hidden = true;
+		    if (!signedIn) return;
+	
+		    const stats = profile.puzzleStats || {};
+		    const plan = this.authState.plan || { name: 'Free', plan: 'free' };
+		    const usage = this.authState.usage || {};
+		    const limits = this.authState.limits || {};
+		    if (this.elAccountDisplayName) this.elAccountDisplayName.textContent = profile.username || user.displayName || 'Player';
+		    if (this.elAccountEmailLabel) this.elAccountEmailLabel.textContent = user.email || profile.email || '';
+		    if (this.elAccountPuzzleRating) this.elAccountPuzzleRating.textContent = Math.round(Number(profile.puzzleRating) || this.puzzleMode.rating || 1500);
+		    if (this.elAccountPuzzlesSolved) this.elAccountPuzzlesSolved.textContent = Math.max(0, Number(stats.solved) || 0);
+		    if (this.elAccountPuzzlesAttempted) this.elAccountPuzzlesAttempted.textContent = Math.max(0, Number(stats.attempted) || 0);
+		    if (this.elAccountPlan) {
+		      const expires = plan.expiresAt ? ` until ${new Date(plan.expiresAt).toLocaleDateString()}` : '';
+		      this.elAccountPlan.textContent = `${plan.name || 'Free'}${expires}`;
+		      this.elAccountPlan.classList.toggle('boost-plan', plan.plan === 'boost');
+		    }
+		    if (this.elAccountUsage) {
+		      if (plan.plan === 'boost') {
+		        this.elAccountUsage.textContent = 'Boost includes unlimited server reviews and anticheat runs.';
+		      } else {
+		        const anticheat = Math.max(0, Number(usage.anticheat) || 0);
+		        const reviews = Math.max(0, Number(usage.serverReviews) || 0);
+		        this.elAccountUsage.textContent = `Today: ${anticheat}/${limits.anticheatRunsPerDay || 1} anticheat, ${reviews}/${limits.serverReviewsPerDay || 3} server reviews. Extra reviews run in the browser until reset.`;
+		      }
+		    }
+		    if (this.elAdminBoostPanel) this.elAdminBoostPanel.hidden = !this.authState.isAdmin;
+		  }
 
 	  _setAuthMode(mode) {
 	    this.authMode = mode === 'signup' ? 'signup' : 'signin';
@@ -799,13 +872,37 @@ class ChessReviewApp {
 	    }
 	  }
 
-	  async _handleSignOut() {
-	    const firebase = this._ensureFirebase();
-	    if (!firebase?.auth) return;
-	    await firebase.auth().signOut();
-	    this._setAccountStatus('');
-	    this._syncAccountUi();
-	  }
+		  async _handleSignOut() {
+		    const firebase = this._ensureFirebase();
+		    if (!firebase?.auth) return;
+		    await firebase.auth().signOut();
+		    this._setAccountStatus('');
+		    this._syncAccountUi();
+		  }
+
+		  async _giftBoost() {
+		    if (!this.authState.isAdmin) return;
+		    const email = (this.elGiftBoostEmail?.value || '').trim();
+		    const days = Math.max(1, Math.min(parseInt(this.elGiftBoostDays?.value || '30', 10) || 30, 366));
+		    if (!email) {
+		      if (this.elGiftBoostStatus) this.elGiftBoostStatus.textContent = 'Enter an email first.';
+		      return;
+		    }
+		    if (this.elGiftBoostStatus) this.elGiftBoostStatus.textContent = 'Gifting Boost...';
+		    try {
+		      const response = await fetch('/api/admin/gift-boost', {
+		        method: 'POST',
+		        headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
+		        cache: 'no-store',
+		        body: JSON.stringify({ email, days }),
+		      });
+		      const data = await response.json().catch(() => null);
+		      if (!response.ok) throw new Error(data?.error || `Gift failed with ${response.status}`);
+		      if (this.elGiftBoostStatus) this.elGiftBoostStatus.textContent = `Boost gifted to ${data.email} until ${new Date(data.expiresAt).toLocaleDateString()}.`;
+		    } catch (err) {
+		      if (this.elGiftBoostStatus) this.elGiftBoostStatus.textContent = err.message || 'Could not gift Boost.';
+		    }
+		  }
 
 	  _syncPuzzleVisibility() {
 	    if (this.elPuzzleCard) this.elPuzzleCard.hidden = !this.puzzleMode.active;
@@ -840,15 +937,18 @@ class ChessReviewApp {
 	  _syncPuzzlePanel() {
 	    if (!this.elPuzzleCard) return;
 	    const mode = this.puzzleMode;
+	    const needsLogin = !this.authState.user;
+	    const currentPuzzleId = mode.current?.puzzle?.id || '';
+	    const alreadyAttempted = !!(currentPuzzleId && mode.attemptedPuzzleIds?.has(currentPuzzleId));
 	    if (this.elPuzzleUserRating) this.elPuzzleUserRating.textContent = Math.round(mode.rating || 1500);
 	    if (this.elPuzzleTargetRating) this.elPuzzleTargetRating.textContent = mode.current?.puzzle?.rating || mode.rating || 1500;
 	    if (this.elPuzzleStreak) this.elPuzzleStreak.textContent = String(mode.streak || 0);
 	    if (this.elPuzzleScore) this.elPuzzleScore.textContent = `${mode.solvedCount || 0} / ${mode.attemptedCount || 0}`;
 	    if (this.elPuzzleSource) this.elPuzzleSource.textContent = mode.source || 'Lichess training';
-	    if (this.elBtnPuzzleNext) this.elBtnPuzzleNext.disabled = !!mode.loading;
-	    if (this.elBtnPuzzleDaily) this.elBtnPuzzleDaily.disabled = !!mode.loading;
-	    if (this.elBtnPuzzleRetry) this.elBtnPuzzleRetry.disabled = !mode.current || !!mode.loading;
-	    if (this.elBtnPuzzleHint) this.elBtnPuzzleHint.disabled = !mode.current || mode.loading || mode.solved;
+	    if (this.elBtnPuzzleNext) this.elBtnPuzzleNext.disabled = needsLogin || !!mode.loading;
+	    if (this.elBtnPuzzleDaily) this.elBtnPuzzleDaily.disabled = needsLogin || !!mode.loading;
+	    if (this.elBtnPuzzleRetry) this.elBtnPuzzleRetry.disabled = !mode.current || !!mode.loading || alreadyAttempted;
+	    if (this.elBtnPuzzleHint) this.elBtnPuzzleHint.disabled = needsLogin || !mode.current || mode.loading || mode.solved;
 	    if (this.elBtnPuzzleReview) this.elBtnPuzzleReview.disabled = this.gameMoves.length === 0 || this.isAnalyzing || !mode.solved;
 	    if (this.elPuzzleTags) {
 	      const themes = mode.current?.puzzle?.themes || [];
@@ -912,6 +1012,7 @@ class ChessReviewApp {
 	    this.elBtnAuthSubmit?.addEventListener('click', () => this._handleEmailAuth());
 	    this.elBtnGoogleAuth?.addEventListener('click', () => this._handleGoogleAuth());
 	    this.elBtnAuthSignout?.addEventListener('click', () => this._handleSignOut());
+	    this.elBtnGiftBoost?.addEventListener('click', () => this._giftBoost());
     this.elModalClose.addEventListener('click', () => this._hidePgnModal());
     this.elSettingsClose.addEventListener('click', () => this._hideSettingsModal());
     this.elPgnModal.addEventListener('click', (e) => {
@@ -1230,36 +1331,43 @@ class ChessReviewApp {
 	  }
 
   _preloadSounds(onProgress) {
-    if (this.soundPreloadPromise) return this.soundPreloadPromise;
-    const entries = Object.entries(this.soundFiles);
-    let complete = 0;
-    const report = () => {
-      complete += 1;
-      if (onProgress) onProgress(entries.length ? complete / entries.length : 1);
-    };
+	    if (this.soundPreloadPromise) return this.soundPreloadPromise;
+	    const entries = Object.entries(this.soundFiles);
+	    const total = entries.length * 3;
+	    let complete = 0;
+	    const report = () => {
+	      complete += 1;
+	      if (onProgress) onProgress(total ? complete / total : 1);
+	    };
 
-    this.soundPreloadPromise = Promise.all(entries.map(([name, file]) => new Promise((resolve) => {
-      const audio = new Audio(file);
-      audio.preload = 'auto';
-      let settled = false;
-      let timer = null;
-      const done = () => {
+	    this.soundPreloadPromise = Promise.all(entries.flatMap(([name, file]) => {
+	      const pool = [0, 1, 2].map(() => {
+	        const audio = new Audio(file);
+	        audio.preload = 'auto';
+	        return audio;
+	      });
+	      this.soundPool[name] = pool;
+	      this.soundPoolIndex[name] = 0;
+	      return pool.map((audio) => new Promise((resolve) => {
+	      let settled = false;
+	      let timer = null;
+	      const done = () => {
         if (settled) return;
         settled = true;
         if (timer) clearTimeout(timer);
-        audio.removeEventListener('canplaythrough', done);
-        audio.removeEventListener('loadeddata', done);
-        audio.removeEventListener('error', done);
-        this.soundPool[name] = audio;
-        report();
-        resolve();
-      };
+	        audio.removeEventListener('canplaythrough', done);
+	        audio.removeEventListener('loadeddata', done);
+	        audio.removeEventListener('error', done);
+	        report();
+	        resolve();
+	      };
       audio.addEventListener('canplaythrough', done, { once: true });
       audio.addEventListener('loadeddata', done, { once: true });
-      audio.addEventListener('error', done, { once: true });
-      timer = setTimeout(done, 2500);
-      audio.load();
-    }))).then(() => true);
+	      audio.addEventListener('error', done, { once: true });
+	      timer = setTimeout(done, 2500);
+	      audio.load();
+	      }));
+	    })).then(() => true);
 
     return this.soundPreloadPromise;
   }
@@ -1278,9 +1386,11 @@ class ChessReviewApp {
 	    if (this.elBtnPuzzleReview) {
 	      this.elBtnPuzzleReview.disabled = this.isAnalyzing || this.gameMoves.length === 0;
 	    }
-	    if (this.elBtnPuzzleRetry) {
-	      this.elBtnPuzzleRetry.disabled = this.isAnalyzing || this.puzzleMode.loading || !this.puzzleMode.current;
-	    }
+		    if (this.elBtnPuzzleRetry) {
+		      const puzzleId = this.puzzleMode.current?.puzzle?.id || '';
+		      const alreadyAttempted = !!(puzzleId && this.puzzleMode.attemptedPuzzleIds?.has(puzzleId));
+		      this.elBtnPuzzleRetry.disabled = this.isAnalyzing || this.puzzleMode.loading || !this.puzzleMode.current || alreadyAttempted;
+		    }
 	    if (this.elBtnPuzzleHint) {
 	      this.elBtnPuzzleHint.disabled = this.isAnalyzing
 	        || this.puzzleMode.loading
@@ -1577,9 +1687,9 @@ class ChessReviewApp {
 	    this._enterCoachMode(setup);
 	  }
 
-			  async _enterPuzzleMode() {
-			    document.body.classList.remove('menu-active');
-			    document.body.dataset.mode = 'puzzle';
+				  async _enterPuzzleMode() {
+				    document.body.classList.remove('menu-active');
+				    document.body.dataset.mode = 'puzzle';
 			    if (this.elLiveEval) this.elLiveEval.hidden = true;
 	    if (this.coachMode.active) {
 	      this.coachMode.active = false;
@@ -1588,10 +1698,16 @@ class ChessReviewApp {
 	    }
 		    this.puzzleMode.active = true;
 		    this.anticheatMode.active = false;
-		    this._syncPuzzleVisibility();
-		    this._syncAnticheatVisibility();
-		    this._syncPuzzlePanel();
-		    const rating = Math.round(Number(this.puzzleMode.rating) || 1500);
+			    this._syncPuzzleVisibility();
+			    this._syncAnticheatVisibility();
+			    this._syncPuzzlePanel();
+			    if (!this.authState.user) {
+			      this._setPuzzleStatus('Log in to solve puzzles. Your rating and completed puzzle list are kept on your account.', 'error');
+			      this._showAccountModal();
+			      this._syncActionButtons();
+			      return;
+			    }
+			    const rating = Math.round(Number(this.puzzleMode.rating) || 1500);
 		    this._setPuzzleStatus(this.puzzleMode.current ? 'Continue the current puzzle.' : `Loading a ${rating}-rated puzzle...`, this.puzzleMode.current ? '' : 'loading');
 		    this._syncActionButtons();
 		    if (!this.puzzleMode.current) {
@@ -1636,32 +1752,35 @@ class ChessReviewApp {
 	    return response.json();
 	  }
 
-	  async _loadDailyPuzzle() {
-	    await this._loadPuzzleFromSource(async () => {
-	      try {
-			const response = await fetch('/api/puzzle?type=daily', {
-	          cache: 'no-store',
-	        });
-	        if (response.ok) {
-	          return response.json();
-	        }
-	      } catch (_err) {
-	        // Fallback to direct Lichess API
-	      }
-	      // Fallback: call Lichess directly
-	      const data = await this._fetchLichessJson('/api/puzzle/daily');
-	      return { data, source: 'Daily Lichess puzzle' };
-	    });
-	  }
+		  async _loadDailyPuzzle() {
+		    if (!this.authState.user) {
+		      this._setPuzzleStatus('Log in to load puzzles.', 'error');
+		      this._showAccountModal();
+		      return;
+		    }
+		    await this._loadPuzzleFromSource(async () => {
+				const response = await fetch('/api/puzzle?type=daily', {
+		          headers: await this._authHeaders(),
+		          cache: 'no-store',
+		        });
+		      const loaded = await response.json().catch(() => null);
+		      if (!response.ok) throw new Error(loaded?.error || `Puzzle API responded with ${response.status}`);
+		      return loaded;
+		    });
+		  }
 
-		  async _loadNextPuzzle(options = {}) {
-		    const theme = this.elPuzzleTheme?.value || 'mix';
+			  async _loadNextPuzzle(options = {}) {
+			    if (!this.authState.user) {
+			      this._setPuzzleStatus('Log in to load puzzles.', 'error');
+			      this._showAccountModal();
+			      return;
+			    }
+			    const theme = this.elPuzzleTheme?.value || 'mix';
 		    const target = Number(options.target) || Number(this.puzzleMode.rating) || 1500;
 		    const difficulty = options.difficulty || this._puzzleDifficultyForRating();
 		    const excludeId = options.excludeId || this.puzzleMode.current?.puzzle?.id || '';
-	    await this._loadPuzzleFromSource(async () => {
-	      try {
-	        const params = new URLSearchParams({
+		    await this._loadPuzzleFromSource(async () => {
+		        const params = new URLSearchParams({
 	          type: 'next',
 	          theme,
 	          difficulty,
@@ -1669,43 +1788,16 @@ class ChessReviewApp {
 	          exclude: excludeId,
 	          nonce: String(Date.now()),
 	        });
-			const response = await fetch(`/api/puzzle?${params}`, {
-	          cache: 'no-store',
-	        });
-	        if (response.ok) {
-	          const loaded = await response.json();
-	          if (loaded?.data?.puzzle?.id !== excludeId) return loaded;
-	        }
-	      } catch (_err) {
-	        // Fallback to direct Lichess API
-	      }
-	      
-	      // Fallback: call Lichess directly
-	      let puzzles = [];
-	      try {
-	        const batch = await this._fetchLichessJson(`/api/puzzle/batch/${encodeURIComponent(theme || 'mix')}`, {
-	          difficulty,
-	          nb: 10,
-	        });
-	        puzzles = Array.isArray(batch?.puzzles) ? batch.puzzles : [];
-	      } catch (_err) {
-	        puzzles = [];
-	      }
-	      const candidates = puzzles
-	        .filter((entry) => entry?.puzzle?.id !== excludeId)
-	        .sort((a, b) => Math.abs((a?.puzzle?.rating || 1500) - target) - Math.abs((b?.puzzle?.rating || 1500) - target));
-	      let data = candidates.length
-	        ? candidates[Math.floor(Math.random() * Math.min(candidates.length, 3))]
-	        : await this._fetchLichessJson('/api/puzzle/next', { angle: theme, difficulty });
-	      if (data?.puzzle?.id === excludeId && candidates.length) {
-	        data = candidates[0];
-	      }
-	      return {
-	        data,
-	        source: `Lichess ${theme === 'mix' ? 'mixed' : this._formatPuzzleTheme(theme)} puzzle`,
-	      };
-	    }, { target });
-	  }
+				const response = await fetch(`/api/puzzle?${params}`, {
+		          headers: await this._authHeaders(),
+		          cache: 'no-store',
+		        });
+		      const loaded = await response.json().catch(() => null);
+		      if (!response.ok) throw new Error(loaded?.error || `Puzzle API responded with ${response.status}`);
+		      if (loaded?.data?.puzzle?.id === excludeId) throw new Error('That puzzle was already on the board. Try again.');
+		      return loaded;
+		    }, { target });
+		  }
 
 	  async _loadPuzzleFromSource(loader, options = {}) {
 	    const token = ++this.puzzleMode.requestToken;
@@ -1952,17 +2044,10 @@ class ChessReviewApp {
 	      color: '#E6EEF7',
 	      ringColor: '#346ea5',
 	    }));
-	    this._playMoveSound(move, this.currentMoveIndex);
-		    if (this.puzzleMode.step >= this.puzzleMode.solution.length) {
-		      this.puzzleMode.solved = true;
-		      const rated = !this.puzzleMode.failed ? await this._recordPuzzleAttempt(true) : false;
-		      this._celebrate();
-		      this._setPuzzleStatus(!rated && !this.puzzleMode.failed
-	        ? 'Solved again. Rating is unchanged.'
-	        : this.puzzleMode.failed
-	        ? 'Solved in practice. The rating change was already applied after the miss.'
-	        : `Solved. Rating ${this.puzzleMode.lastDelta >= 0 ? '+' : ''}${this.puzzleMode.lastDelta}.`, 'success');
-	    } else {
+		    this._playMoveSound(move, this.currentMoveIndex);
+			    if (this.puzzleMode.step >= this.puzzleMode.solution.length) {
+			      this._setPuzzleStatus('The puzzle line ended after the automatic reply. Load a new puzzle to continue.', 'error');
+		    } else {
 	      this._setBoardOrientationForColor(this.chess.turn());
 	      this._setPuzzleStatus(`${this.chess.turn() === 'w' ? 'White' : 'Black'} to move.`);
 	    }
@@ -2113,9 +2198,9 @@ class ChessReviewApp {
 		    if (!user) return null;
 	    
 	    try {
-		const response = await fetch('/api/record-puzzle-attempt', {
-	        method: 'POST',
-	        headers: { 'Content-Type': 'application/json' },
+			const response = await fetch('/api/record-puzzle-attempt', {
+		        method: 'POST',
+		        headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
 	        cache: 'no-store',
 		        body: JSON.stringify({
 		          userId: user.uid,
@@ -2147,7 +2232,11 @@ class ChessReviewApp {
 	  }
 
 	  _retryCurrentPuzzle() {
-	    if (!this.puzzleMode.current) return;
+	    const puzzleId = this.puzzleMode.current?.puzzle?.id || '';
+	    if (!this.puzzleMode.current || (puzzleId && this.puzzleMode.attemptedPuzzleIds?.has(puzzleId))) {
+	      this._setPuzzleStatus('This puzzle was already attempted. Load a new puzzle instead.', 'error');
+	      return;
+	    }
 	    this._setupPuzzle(this.puzzleMode.current, this.puzzleMode.source || 'Lichess puzzle');
 	  }
 
@@ -2810,8 +2899,13 @@ class ChessReviewApp {
 	    }
 	  }
 
-	  async _startAnticheatCheck() {
-	    if (this.anticheatMode.checking) return;
+		  async _startAnticheatCheck() {
+		    if (this.anticheatMode.checking) return;
+		    if (!this.authState.user) {
+		      this._setAnticheatStatus('Log in to run anticheat. Free accounts get 1 server run per day; Boost removes that limit.', 'error');
+		      this._showAccountModal();
+		      return;
+		    }
 	    const source = this.elAnticheatSource?.value || 'pgn';
 	    const username = (this.elAnticheatUsername?.value || '').trim();
 	    const pgn = this.elAnticheatPgn?.value || '';
@@ -2833,30 +2927,37 @@ class ChessReviewApp {
 	      this.elAnticheatRiskPill.className = 'anticheat-risk-pill watch';
 	    }
 
-		try {
-			if (source === 'pgn') {
-				const games = this._splitPgnGames(pgn).slice(0, limit);
-				const aggregatedGames = [];
-				const allMetrics = [];
-				let skipped = 0;
-
-				for (let gi = 0; gi < games.length; gi += 1) {
-					const gameText = games[gi];
-					this._setAnticheatStatus(`Analyzing game ${gi + 1}/${games.length} (server engine)...`, 'loading');
+			try {
+				if (source === 'pgn') {
+					const games = this._splitPgnGames(pgn).slice(0, limit);
+					const aggregatedGames = [];
+					const allMetrics = [];
+					let skipped = 0;
+					let data = null;
+					let serverResults = [];
 					try {
 						const response = await fetch('/api/anticheat', {
 							method: 'POST',
-							headers: { 'Content-Type': 'application/json' },
+							headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
 							cache: 'no-store',
-							body: JSON.stringify({ source: 'pgn', pgn: gameText, mode: 'engine' }),
-						});
-						const data = await response.json().catch(() => null);
-						if (!response.ok) throw new Error(data?.error || `Anticheat responded with ${response.status}`);
-
-						// server returns { results: [{ headers, moves, positions, evals, pgn }], profile }
-						const serverResults = data.results || [];
-						for (const res of serverResults) {
-							try {
+							body: JSON.stringify({ source: 'pgn', pgn: games.join('\n\n'), limit: games.length, mode: 'engine' }),
+							});
+							data = await response.json().catch(() => null);
+							if (!response.ok) {
+							  const error = new Error(data?.error || `Anticheat responded with ${response.status}`);
+							  error.code = data?.code;
+							  throw error;
+							}
+							serverResults = data.results || [];
+					} catch (err) {
+						throw err;
+					}
+	
+					for (let gi = 0; gi < serverResults.length; gi += 1) {
+						const res = serverResults[gi];
+						this._setAnticheatStatus(`Scoring game ${gi + 1}/${serverResults.length}...`, 'loading');
+						try {
+								try {
 								const positions = res.positions || [];
 								const moves = res.moves || [];
 								const headers = res.headers || {};
@@ -2904,15 +3005,14 @@ class ChessReviewApp {
 										note: `Accuracy ${Math.round(metrics.accuracy)}%, ACPL ${Math.round(metrics.acpl)}, fast bests ${Math.round(metrics.fastBestRate)}%`,
 									});
 								}
-							} catch (err) {
-								skipped += 1;
-								console.warn('Client-side anticheat analysis failed for a game:', err);
-							}
+								} catch (err) {
+									skipped += 1;
+									console.warn('Client-side anticheat analysis failed for a game:', err);
+								}
+						} catch (err) {
+							skipped += 1;
+							console.error('Anticheat fetch failed for one game:', err);
 						}
-					} catch (err) {
-						skipped += 1;
-						console.error('Anticheat fetch failed for one game:', err);
-					}
 				}
 
 				if (!allMetrics.length) {
@@ -2929,34 +3029,104 @@ class ChessReviewApp {
 					profile: data?.profile || {},
 				};
 
-				this.anticheatMode.results = out;
-				this._renderAnticheatResults(out);
-				this._setAnticheatStatus(`Checked ${out.gamesAnalyzed || 0} game${out.gamesAnalyzed === 1 ? '' : 's'} on the server.`, 'success');
-			} else {
-				// non-PGN sources (lichess/chesscom) - legacy server-side behavior
-				const response = await fetch('/api/anticheat', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					cache: 'no-store',
-					body: JSON.stringify({ source, username, pgn, limit }),
-				});
+					this.anticheatMode.results = out;
+					this._renderAnticheatResults(out);
+					this._setAnticheatStatus(`Checked ${out.gamesAnalyzed || 0} game${out.gamesAnalyzed === 1 ? '' : 's'} on the server.`, 'success');
+					this._refreshMe().catch(() => {});
+				} else {
+					// non-PGN sources (lichess/chesscom) - legacy server-side behavior
+					const response = await fetch('/api/anticheat', {
+						method: 'POST',
+						headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
+						cache: 'no-store',
+						body: JSON.stringify({ source, username, pgn, limit }),
+					});
 				const data = await response.json().catch(() => null);
-				if (!response.ok) throw new Error(data?.error || `Anticheat responded with ${response.status}`);
-				this.anticheatMode.results = data;
-				this._renderAnticheatResults(data);
-				this._setAnticheatStatus(`Checked ${data.gamesAnalyzed || 0} game${data.gamesAnalyzed === 1 ? '' : 's'} on the server.`, 'success');
-			}
-		} catch (err) {
-			console.error('Anticheat failed:', err);
-			this._setAnticheatStatus(err.message || 'Anticheat check failed.', 'error');
-			if (this.elAnticheatRiskPill) {
+				if (!response.ok) {
+				  const error = new Error(data?.error || `Anticheat responded with ${response.status}`);
+				  error.code = data?.code;
+				  throw error;
+				}
+					this.anticheatMode.results = data;
+					this._renderAnticheatResults(data);
+					this._setAnticheatStatus(`Checked ${data.gamesAnalyzed || 0} game${data.gamesAnalyzed === 1 ? '' : 's'} on the server.`, 'success');
+					this._refreshMe().catch(() => {});
+				}
+			} catch (err) {
+				console.error('Anticheat failed:', err);
+				if ((err?.message || '').includes('Free plan includes 1 server anticheat run per day') || err?.code === 'quota_exceeded') {
+				  try {
+				    const browserResult = await this._runAnticheatInBrowser({ source, username, pgn, limit });
+				    this.anticheatMode.results = browserResult;
+				    this._renderAnticheatResults(browserResult);
+				    this._setAnticheatStatus(`Daily server anticheat is used. Checked ${browserResult.gamesAnalyzed || 0} game${browserResult.gamesAnalyzed === 1 ? '' : 's'} in the browser instead.`, 'success');
+				    return;
+				  } catch (browserErr) {
+				    err = browserErr;
+				  }
+				}
+				this._setAnticheatStatus(err.message || 'Anticheat check failed.', 'error');
+				if (this.elAnticheatRiskPill) {
 				this.elAnticheatRiskPill.textContent = 'Failed';
 				this.elAnticheatRiskPill.className = 'anticheat-risk-pill high';
 			}
 		} finally {
 			this._setAnticheatChecking(false);
 		}
-	  }
+		  }
+
+		  async _runAnticheatInBrowser({ source, username, pgn, limit }) {
+		    if (!this.engine?.ready) throw new Error('Daily server anticheat is used. Browser engine is still loading; try again when Stockfish is ready.');
+		    let pgnGames = [];
+		    if (source === 'pgn') {
+		      pgnGames = this._splitPgnGames(pgn).slice(0, limit);
+		    } else {
+		      const games = await this._fetchRecentGamesViaServer(source, username, limit);
+		      pgnGames = (games || []).map((game) => game.pgn).filter(Boolean).slice(0, limit);
+		    }
+		    if (!pgnGames.length) throw new Error('No games were available for browser anticheat.');
+
+		    const allMetrics = [];
+		    const aggregatedGames = [];
+		    let skipped = 0;
+		    this.analyzer.setReviewProfile({ depth: 10, multiPv: 1, timeoutMs: 2800 });
+		    for (let i = 0; i < pgnGames.length; i += 1) {
+		      this._setAnticheatStatus(`Daily server anticheat is used. Browser checking game ${i + 1}/${pgnGames.length}...`, 'loading');
+		      try {
+		        const chess = new Chess();
+		        const normalized = this._normalizePgnText(pgnGames[i]);
+		        if (!chess.load_pgn(normalized, { sloppy: true })) throw new Error('Could not parse PGN.');
+		        const headers = { ...this._readPgnHeaders(normalized), ...chess.header() };
+		        const moves = chess.history();
+		        const results = await this.analyzer.analyzeGame(moves, this.engine, null, { headers, initialFen: headers.FEN || headers.Fen || headers.fen, skipMateThreat: true });
+		        const times = moveTimesFromPgn(normalized, moves.length, headers);
+		        const targetSide = sideForUsername(headers, username);
+		        const sides = targetSide ? [targetSide] : ['white', 'black'];
+		        for (const side of sides) {
+		          const metrics = sideMetrics(results, side, times, headers);
+		          allMetrics.push(metrics);
+		          const singleScore = scoreMetrics([metrics]);
+		          aggregatedGames.push({
+		            title: `${metrics.player} as ${side}`,
+		            score: singleScore.score,
+		            note: `Accuracy ${Math.round(metrics.accuracy)}%, ACPL ${Math.round(metrics.acpl)}, fast bests ${Math.round(metrics.fastBestRate)}%`,
+		          });
+		        }
+		      } catch (err) {
+		        skipped += 1;
+		        console.warn('Browser anticheat skipped a game:', err);
+		      }
+		    }
+		    if (!allMetrics.length) throw new Error('Browser anticheat could not analyze any standard games.');
+		    return {
+		      summary: scoreMetrics(allMetrics),
+		      games: aggregatedGames,
+		      gamesAnalyzed: pgnGames.length - skipped,
+		      gamesSkipped: skipped,
+		      subjectsAnalyzed: allMetrics.length,
+		      profile: { source: 'browser', depth: 10, multiPv: 1 },
+		    };
+		  }
 
 	  _renderAnticheatResults(data) {
 	    if (!this.elAnticheatResults || !data?.summary) return;
@@ -3964,13 +4134,18 @@ class ChessReviewApp {
     }
   }
 
-  _playNamedSound(name) {
-    const file = this.soundFiles[name];
-    if (!file) return;
-    const cached = this.soundPool[name];
-    const audio = cached ? cached.cloneNode(true) : new Audio(file);
-    audio.play().catch(() => {});
-  }
+	  _playNamedSound(name) {
+	    const pool = this.soundPool[name];
+	    if (!Array.isArray(pool) || !pool.length) return;
+	    const index = this.soundPoolIndex[name] || 0;
+	    const audio = pool[index % pool.length];
+	    this.soundPoolIndex[name] = (index + 1) % pool.length;
+	    try {
+	      audio.pause();
+	      audio.currentTime = 0;
+	    } catch (_err) {}
+	    audio.play().catch(() => {});
+	  }
 
   _playMoveSound(moveObj, index) {
     if (!moveObj) return;
@@ -4403,18 +4578,23 @@ class ChessReviewApp {
 	    };
 	
 		    try {
-			      if (serverReview) {
-			        try {
-			          this.analysisResults = await this._analyzeGameOnServer();
-				        } catch (serverErr) {
+				      if (serverReview) {
+				        try {
+				          if (!this.authState.user) {
+				            throw new Error('Log in for server review. Running this review in the browser instead.');
+				          }
+				          this.analysisResults = await this._analyzeGameOnServer();
+					        } catch (serverErr) {
 				          console.warn('Server analysis failed:', serverErr);
 				          if (!this.engine?.ready) throw serverErr;
 				          this.elReviewBtnText.textContent = 'Browser fallback...';
 				          this._updateLiveEvalPanel({
 				            busy: true,
 				            score: null,
-				            line: 'Server review unavailable. Using browser Stockfish.',
-				            meta: serverErr.message || 'Local fallback',
+					            line: /Free plan includes|Log in for server review/i.test(serverErr.message || '')
+					              ? serverErr.message
+					              : 'Server review unavailable. Using browser Stockfish.',
+					            meta: serverErr.message || 'Local fallback',
 				          });
 				          this.analysisResults = await this.analyzer.analyzeGame(
 				            this.gameMoves,
@@ -4471,9 +4651,9 @@ class ChessReviewApp {
 			    });
 		
 			    try {
-			      const response = await fetch('/api/analyze/stream', {
-			        method: 'POST',
-			        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+				      const response = await fetch('/api/analyze/stream', {
+				        method: 'POST',
+				        headers: await this._authHeaders({ 'Content-Type': 'application/json', Accept: 'text/event-stream' }),
 			        signal: controller.signal,
 			        cache: 'no-store',
 			        body: JSON.stringify({
@@ -4561,8 +4741,9 @@ class ChessReviewApp {
 				    }
 				    buffer += decoder.decode();
 				    if (buffer.trim()) handleEvent(buffer);
-				    if (!Array.isArray(finalData?.results)) throw new Error('Server analysis returned no results.');
-				    return finalData;
+					    if (!Array.isArray(finalData?.results)) throw new Error('Server analysis returned no results.');
+					    if (finalData.quota || finalData.plan) this._refreshMe().catch(() => {});
+					    return finalData;
 				  }
 
 				  _serverAnalysisResultsFromData(data) {
@@ -4602,9 +4783,9 @@ class ChessReviewApp {
 				    const timeout = setTimeout(() => controller.abort(), 55000);
 		    let response;
 	    try {
-		response = await fetch('/api/analyze', {
-	        method: 'POST',
-	        headers: { 'Content-Type': 'application/json' },
+			response = await fetch('/api/analyze', {
+		        method: 'POST',
+		        headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
 	        signal: controller.signal,
 			        body: JSON.stringify({
 			          positions,
@@ -4640,12 +4821,13 @@ class ChessReviewApp {
 			      error.retryable = response.status >= 500 || response.status === 429;
 			      throw error;
 			    }
-			    if (!Array.isArray(data?.evals)) {
-			      throw new Error(`Server review chunk ${chunkIndex + 1}/${chunkCount} returned no evals.`);
-			    }
-			    if (data.publicStats) this._renderPublicStats(data.publicStats);
-			    return data.evals;
-			  }
+				    if (!Array.isArray(data?.evals)) {
+				      throw new Error(`Server review chunk ${chunkIndex + 1}/${chunkCount} returned no evals.`);
+				    }
+				    if (data.publicStats) this._renderPublicStats(data.publicStats);
+				    if (data.quota || data.plan) this._refreshMe().catch(() => {});
+				    return data.evals;
+				  }
 
 					  async _fetchServerEvalChunkSafely(positions, profile, chunkIndex, chunkCount, baseIndex = 0, retryCount = 0) {
 					    try {

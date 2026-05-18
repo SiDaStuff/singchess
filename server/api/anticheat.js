@@ -22,49 +22,8 @@ const ANTICHEAT_PROFILE = {
   multiPv: 1,
   timeoutMs: 2800,
 };
-const https = require('https');
-const http = require('http');
-
-function fetchCompat(url, options = {}, redirectCount = 0) {
-  if (typeof fetch === 'function') return fetch(url, options);
-  return new Promise((resolve, reject) => {
-    try {
-      const parsed = new URL(url);
-      const transport = parsed.protocol === 'http:' ? http : https;
-      const req = transport.request({
-        method: options.method || 'GET',
-        hostname: parsed.hostname,
-        port: parsed.port || (parsed.protocol === 'http:' ? 80 : 443),
-        path: parsed.pathname + parsed.search,
-        headers: options.headers || {},
-      }, (res) => {
-        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirectCount < 4) {
-          res.resume();
-          const nextUrl = new URL(res.headers.location, parsed).toString();
-          fetchCompat(nextUrl, options, redirectCount + 1).then(resolve, reject);
-          return;
-        }
-        const chunks = [];
-        res.on('data', (chunk) => chunks.push(chunk));
-        res.on('end', () => {
-          const body = Buffer.concat(chunks).toString('utf8');
-          resolve({
-            ok: res.statusCode >= 200 && res.statusCode < 300,
-            status: res.statusCode,
-            headers: res.headers,
-            text: async () => body,
-            json: async () => JSON.parse(body || 'null'),
-          });
-        });
-      });
-      req.on('error', reject);
-      if (options.body) req.write(options.body);
-      req.end();
-    } catch (err) {
-      reject(err);
-    }
-  });
-}
+const { fetchCompat } = require('./_lib/fetch-compat');
+const { requireQuota } = require('./_lib/user-service');
 
 let cachedEngine = null;
 let cachedEngineInit = null;
@@ -444,10 +403,11 @@ exports.handler = async (event, context = {}) => {
   }
 
   try {
+    const quotaState = await requireQuota(event, 'anticheat');
     // Allow 'list' mode even if the server lacks the engine modules.
     if (payload.mode === 'list') {
       const pgns = await loadPgns(payload);
-      return json(200, { pgns });
+      return json(200, { pgns, quota: quotaState.quota, plan: quotaState.plan });
     }
 
     if (_moduleLoadError) return json(500, { error: `Anticheat module load failed: ${_moduleLoadError.message || String(_moduleLoadError)}` });
@@ -510,7 +470,7 @@ exports.handler = async (event, context = {}) => {
         return { results: responses, profile: ANTICHEAT_PROFILE };
       }), overallTimeoutMs, 'Anticheat overall processing timed out.');
 
-      return json(200, result);
+      return json(200, { ...result, quota: quotaState.quota, plan: quotaState.plan });
     }
 
 	    // Full server-side analysis (legacy): use MoveAnalyzer to compute metrics server-side.
@@ -566,8 +526,8 @@ exports.handler = async (event, context = {}) => {
 	      };
 	    }), 30000, 'Anticheat overall processing timed out.');
 
-	    return json(200, result);
-	  } catch (err) {
+		    return json(200, { ...result, quota: quotaState.quota, plan: quotaState.plan });
+		  } catch (err) {
     console.error('Anticheat failed:', err);
     if (/cancelled|not ready|timed out waiting|out of memory|abort/i.test(String(err?.message || err))) {
       try {
@@ -578,6 +538,6 @@ exports.handler = async (event, context = {}) => {
       cachedEngine = null;
       cachedEngineInit = null;
     }
-    return json(500, { error: err.message || 'Anticheat analysis failed.' });
-  }
+	    return json(err.statusCode || 500, { error: err.message || 'Anticheat analysis failed.', code: err.code, quota: err.quota, plan: err.plan });
+	  }
 };

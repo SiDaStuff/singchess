@@ -683,10 +683,14 @@
                 <span id="account-email-label"></span>
               </div>
             </div>
-            <div class="account-stats">
-              <div>
-                <span>Puzzle rating</span>
-                <strong id="account-puzzle-rating">1500</strong>
+	            <div class="account-stats">
+	              <div>
+	                <span>Plan</span>
+	                <strong id="account-plan">Free</strong>
+	              </div>
+	              <div>
+	                <span>Puzzle rating</span>
+	                <strong id="account-puzzle-rating">1500</strong>
               </div>
               <div>
                 <span>Solved</span>
@@ -694,10 +698,29 @@
               </div>
               <div>
                 <span>Attempted</span>
-                <strong id="account-puzzles-attempted">0</strong>
-              </div>
-            </div>
-            <button id="btn-auth-signout" class="btn btn-secondary" type="button">
+	                <strong id="account-puzzles-attempted">0</strong>
+	              </div>
+	            </div>
+	            <p class="account-usage" id="account-usage"></p>
+	            <div class="admin-boost-panel" id="admin-boost-panel" hidden>
+	              <h3>Gift Boost</h3>
+	              <label class="field">
+	                <span class="field-label">Email</span>
+	                <input id="gift-boost-email" class="input-select" type="email" placeholder="player@example.com">
+	              </label>
+	              <label class="field">
+	                <span class="field-label">Days</span>
+	                <input id="gift-boost-days" class="input-select" type="number" min="1" max="366" value="30">
+	              </label>
+	              <button id="btn-gift-boost" class="btn btn-primary" type="button">
+	                <span class="btn-content">
+	                  <span class="material-symbols-outlined btn-symbol">redeem</span>
+	                  <span class="btn-label">Gift Boost</span>
+	                </span>
+	              </button>
+	              <p class="account-status" id="gift-boost-status"></p>
+	            </div>
+	            <button id="btn-auth-signout" class="btn btn-secondary" type="button">
               <span class="btn-content">
                 <span class="material-symbols-outlined btn-symbol">logout</span>
                 <span class="btn-label">Sign Out</span>

@@ -1,3 +1,5 @@
+const { fetchCompat } = require('./_lib/fetch-compat');
+
 const json = (statusCode, body) => ({
   statusCode,
   headers: {
@@ -47,7 +49,7 @@ async function lichessGames(username, limit) {
     finished: 'true',
     sort: 'dateDesc',
   });
-  const response = await fetch(`https://lichess.org/api/games/user/${encodeURIComponent(username)}?${params.toString()}`, {
+  const response = await fetchCompat(`https://lichess.org/api/games/user/${encodeURIComponent(username)}?${params.toString()}`, {
     headers: { Accept: 'application/x-chess-pgn' },
   });
   if (!response.ok) throw new Error(`Lichess responded with ${response.status}`);
@@ -59,7 +61,7 @@ async function lichessGames(username, limit) {
 }
 
 async function chessComGames(username, limit) {
-  const archiveResponse = await fetch(`https://api.chess.com/pub/player/${encodeURIComponent(username)}/games/archives`, {
+  const archiveResponse = await fetchCompat(`https://api.chess.com/pub/player/${encodeURIComponent(username)}/games/archives`, {
     headers: { Accept: 'application/json' },
   });
   if (!archiveResponse.ok) throw new Error(`Chess.com responded with ${archiveResponse.status}`);
@@ -69,7 +71,7 @@ async function chessComGames(username, limit) {
 
   for (const monthUrl of archives) {
     if (games.length >= Math.max(limit, 20)) break;
-    const monthResponse = await fetch(monthUrl, { headers: { Accept: 'application/json' } });
+    const monthResponse = await fetchCompat(monthUrl, { headers: { Accept: 'application/json' } });
     if (!monthResponse.ok) continue;
     const monthData = await monthResponse.json();
     for (const game of Array.isArray(monthData.games) ? monthData.games : []) {
