@@ -273,10 +273,12 @@ class ChessReviewApp {
 	    this.elPuzzleDifficulty = document.getElementById('puzzle-difficulty');
 	    this.elBtnPuzzleNext = document.getElementById('btn-puzzle-next');
 	    this.elBtnPuzzleDaily = document.getElementById('btn-puzzle-daily');
-	    this.elBtnPuzzleRetry = document.getElementById('btn-puzzle-retry');
-	    this.elBtnPuzzleHint = document.getElementById('btn-puzzle-hint');
-	    this.elBtnPuzzleReview = document.getElementById('btn-puzzle-review');
-	    this.elAnticheatCard = document.getElementById('anticheat-card');
+		    this.elBtnPuzzleRetry = document.getElementById('btn-puzzle-retry');
+		    this.elBtnPuzzleHint = document.getElementById('btn-puzzle-hint');
+		    this.elBtnPuzzleReview = document.getElementById('btn-puzzle-review');
+		    this.elBtnExportPgn = document.getElementById('btn-export-pgn');
+		    this.elBtnExportFen = document.getElementById('btn-export-fen');
+		    this.elAnticheatCard = document.getElementById('anticheat-card');
 	    this.elAnticheatSource = document.getElementById('anticheat-source');
 	    this.elAnticheatUsername = document.getElementById('anticheat-username');
 	    this.elAnticheatLimit = document.getElementById('anticheat-limit');
@@ -377,7 +379,7 @@ class ChessReviewApp {
 			      cancelButtonText: options.cancelButtonText || 'Cancel',
 			      showDenyButton: !!options.showDenyButton,
 			      denyButtonText: options.denyButtonText || 'No',
-			      denyButtonColor: options.denyButtonColor || '#7c3aed',
+				      denyButtonColor: options.denyButtonColor || '#c8b6ff',
 			      reverseButtons: options.reverseButtons ?? true,
 			      allowOutsideClick: options.allowOutsideClick ?? true,
 			      focusConfirm: options.focusConfirm ?? true,
@@ -604,31 +606,28 @@ class ChessReviewApp {
 		      return;
 		    }
 
-		    if (route === '/coach') {
-		      this._hideSettingsModal();
-		      this._hideAccountModal();
-		      const savedCoach = this._loadSavedGameState('coach');
-		      if (savedCoach) {
-		        this._loadGame(savedCoach.moves, savedCoach.headers || {});
-		        if (savedCoach.coachMode) Object.assign(this.coachMode, savedCoach.coachMode, { active: false, thinking: false });
-		        this._enterCoachMode(savedCoach.coachMode || {});
-		      } else {
-		        this._showEngineChoiceModal('coach');
-		      }
+			    if (route === '/coach') {
+			      this._hideSettingsModal();
+				      this._hideAccountModal();
+				      const savedCoach = this._loadSavedGameState('coach');
+				      if (savedCoach) {
+				        this._promptSavedGameRestore('coach', savedCoach);
+				      } else {
+				        this._showEngineChoiceModal('coach');
+				      }
 		      document.title = 'Coach | SiDaStuff Chess';
 		      return;
 		    }
 
 		    if (route === '/review') {
 		      this._hideSettingsModal();
-		      this._hideAccountModal();
-		      const savedReview = this._loadSavedGameState('review');
-		      if (savedReview) {
-		        this._loadGame(savedReview.moves, savedReview.headers || {});
-		        this._enterReviewMode();
-		      } else {
-		        this._showEngineChoiceModal('import');
-		      }
+			      this._hideAccountModal();
+				      const savedReview = this._loadSavedGameState('review');
+				      if (savedReview) {
+				        this._promptSavedGameRestore('review', savedReview);
+				      } else {
+			        this._showEngineChoiceModal('import');
+			      }
 		      document.title = 'Review | SiDaStuff Chess';
 		      return;
 		    }
@@ -1377,10 +1376,11 @@ class ChessReviewApp {
 		  _syncServerStrongToggle() {
     const isBoost = this.authState.plan?.plan === 'boost';
     const showInReview = this.engineSettings.analysisLocation === 'server' && document.body.dataset.mode === 'review';
-    if (this.elServerBoostToggle) {
-      this.elServerBoostToggle.classList.toggle('boost-locked', !isBoost);
-      this.elServerBoostToggle.style.display = showInReview ? '' : 'none';
-    }
+	    if (this.elServerBoostToggle) {
+	      this.elServerBoostToggle.classList.toggle('boost-locked', !isBoost);
+	      this.elServerBoostToggle.style.display = showInReview ? '' : 'none';
+	      this.elServerBoostToggle.title = isBoost ? '' : 'Boost unlocks stronger server review.';
+	    }
     const lockIcon = document.getElementById('boost-lock-icon');
     if (lockIcon) lockIcon.style.display = isBoost ? 'none' : '';
     if (!isBoost && this.elServerStrongReview) {
@@ -1457,9 +1457,9 @@ class ChessReviewApp {
 		    if (this.elPuzzleSource) this.elPuzzleSource.textContent = mode.loading ? 'Finding puzzle' : (mode.source || 'Lichess training');
 		    if (this.elBtnPuzzleNext) this.elBtnPuzzleNext.disabled = !!mode.loading;
 		    if (this.elBtnPuzzleDaily) this.elBtnPuzzleDaily.disabled = !!mode.loading;
-		    if (this.elBtnPuzzleRetry) this.elBtnPuzzleRetry.disabled = !mode.current || !!mode.loading || alreadyAttempted;
-		    if (this.elBtnPuzzleHint) this.elBtnPuzzleHint.disabled = !mode.current || mode.loading || mode.solved;
-	    if (this.elBtnPuzzleReview) this.elBtnPuzzleReview.disabled = this.gameMoves.length === 0 || this.isAnalyzing || !mode.solved;
+			    if (this.elBtnPuzzleRetry) this.elBtnPuzzleRetry.disabled = !mode.current || !!mode.loading || alreadyAttempted || mode.solved || mode.failed;
+			    if (this.elBtnPuzzleHint) this.elBtnPuzzleHint.disabled = !mode.current || mode.loading || mode.solved || mode.failed;
+		    if (this.elBtnPuzzleReview) this.elBtnPuzzleReview.disabled = this.gameMoves.length === 0 || this.isAnalyzing;
 	    if (this.elPuzzleTags) {
 	      if (mode.loading) {
 	        this.elPuzzleTags.innerHTML = this._renderSkeletonLines(4, 'puzzle-tag-skeleton');
@@ -1568,10 +1568,12 @@ class ChessReviewApp {
 	    this.elBtnCoachSetupStart?.addEventListener('click', () => this._startCoachFromSetup());
 	    this.elBtnPuzzleNext?.addEventListener('click', () => this._loadNextPuzzle());
 	    this.elBtnPuzzleDaily?.addEventListener('click', () => this._loadDailyPuzzle());
-	    this.elBtnPuzzleRetry?.addEventListener('click', () => this._retryCurrentPuzzle());
-	    this.elBtnPuzzleHint?.addEventListener('click', () => this._showPuzzleHint());
-	    this.elBtnPuzzleReview?.addEventListener('click', () => this._reviewCurrentPuzzleLine());
-	    this.elAnticheatSource?.addEventListener('change', () => this._syncAnticheatForm());
+		    this.elBtnPuzzleRetry?.addEventListener('click', () => this._retryCurrentPuzzle());
+		    this.elBtnPuzzleHint?.addEventListener('click', () => this._showPuzzleHint());
+		    this.elBtnPuzzleReview?.addEventListener('click', () => this._reviewCurrentPuzzleLine());
+		    this.elBtnExportPgn?.addEventListener('click', () => this._exportCurrentPgn());
+		    this.elBtnExportFen?.addEventListener('click', () => this._exportCurrentFen());
+		    this.elAnticheatSource?.addEventListener('change', () => this._syncAnticheatForm());
 	    this.elBtnAnticheatRun?.addEventListener('click', () => this._startAnticheatCheck());
 	    this.elBtnReview.addEventListener('click', () => this._startReview());
 	    this.elBtnLineExplorer?.addEventListener('click', () => this._exploreBestLineFromCurrentMove());
@@ -1586,9 +1588,15 @@ class ChessReviewApp {
 	      this._syncServerStrongToggle();
 	      this._renderIdleEngineInfo();
 	    });
-	    this.elServerStrongReview?.addEventListener('change', () => {
-	      this.engineSettings.serverStrongReview = this.elServerStrongReview.checked;
-	    });
+		    this.elServerStrongReview?.addEventListener('change', () => {
+		      if (this.authState.plan?.plan !== 'boost') {
+		        this.elServerStrongReview.checked = false;
+		        this.engineSettings.serverStrongReview = false;
+		        this._navigateTo('/boost');
+		        return;
+		      }
+		      this.engineSettings.serverStrongReview = this.elServerStrongReview.checked;
+		    });
 	    this.elBtnBoostAccount?.addEventListener('click', () => this._navigateTo(this.authState.user ? '/account' : '/signup'));
 
     this.elBtnFlip.addEventListener('click', () => this.board.flip());
@@ -1648,12 +1656,24 @@ class ChessReviewApp {
 	    this.anticheatMode.active = false;
 	    this._syncPuzzleVisibility();
 	    this._syncAnticheatVisibility();
-    if (this.elLiveEval) this.elLiveEval.hidden = false;
-	    this.elReviewSummary.style.display = 'none';
-	    this.elCriticalMoments.style.display = 'none';
-	    this.elMoveBadge.style.display = 'none';
-	    this._resetInsightPanel();
-    if (options) this.pendingCoachSetup = options;
+	    if (this.elLiveEval) this.elLiveEval.hidden = false;
+		    this.elReviewSummary.style.display = 'none';
+		    this.elCriticalMoments.style.display = 'none';
+		    this.elMoveBadge.style.display = 'none';
+		    this._resetInsightPanel();
+	    const restoredCoachGame = this._isCoachGame() && this.coachMode.active;
+	    if (restoredCoachGame) {
+	      this._setBoardOrientationForColor(this.coachMode.humanColor || this._coachHumanColorFromHeaders() || 'w');
+	      this._setCoachDialog('Coach game restored. Continue from the current position.', 'Coaching');
+	      this._syncBoostPageVisibility();
+	      this._syncServerStrongToggle();
+	      this._syncCoachControls();
+	      this._syncActionButtons();
+	      this._updateCurrentMoveIndicator();
+	      this._requestLiveEvaluation('Analyzing restored coach position...');
+	      return;
+	    }
+	    if (options) this.pendingCoachSetup = options;
     if (this.engine?.ready && !this.isAnalyzing) {
       this._startCoachGame(this.pendingCoachSetup || options || {});
       this.pendingCoachSetup = null;
@@ -1921,11 +1941,13 @@ class ChessReviewApp {
     return this.soundPreloadPromise;
   }
 
-	  _syncActionButtons() {
-		const engineReady = !!this.engine?.ready;
-		const serverReview = this.engineSettings.analysisLocation === 'server';
-	    this.elBtnReview.disabled = this.isAnalyzing || this.gameMoves.length === 0 || (!serverReview && !engineReady);
-    if (this.elBtnCoachStart) this.elBtnCoachStart.disabled = this.isAnalyzing || !engineReady;
+		  _syncActionButtons() {
+			const engineReady = !!this.engine?.ready;
+			const serverReview = this.engineSettings.analysisLocation === 'server';
+		    this.elBtnReview.disabled = this.isAnalyzing || this.gameMoves.length === 0 || (!serverReview && !engineReady);
+		    if (this.elBtnExportPgn) this.elBtnExportPgn.disabled = this.gameMoves.length === 0;
+		    if (this.elBtnExportFen) this.elBtnExportFen.disabled = this.isAnalyzing;
+	    if (this.elBtnCoachStart) this.elBtnCoachStart.disabled = this.isAnalyzing || !engineReady;
     if (this.elBtnCoachTakeback) {
       this.elBtnCoachTakeback.disabled = !this.coachMode.active || this.gameMoves.length === 0;
     }
@@ -1938,13 +1960,14 @@ class ChessReviewApp {
 		    if (this.elBtnPuzzleRetry) {
 		      const puzzleId = this.puzzleMode.current?.puzzle?.id || '';
 		      const alreadyAttempted = !!(puzzleId && this.puzzleMode.attemptedPuzzleIds?.has(puzzleId));
-		      this.elBtnPuzzleRetry.disabled = this.isAnalyzing || this.puzzleMode.loading || !this.puzzleMode.current || alreadyAttempted;
+			      this.elBtnPuzzleRetry.disabled = this.isAnalyzing || this.puzzleMode.loading || !this.puzzleMode.current || alreadyAttempted || this.puzzleMode.solved || this.puzzleMode.failed;
 		    }
 	    if (this.elBtnPuzzleHint) {
 	      this.elBtnPuzzleHint.disabled = this.isAnalyzing
-	        || this.puzzleMode.loading
-	        || !this.puzzleMode.current
-	        || this.puzzleMode.solved;
+		        || this.puzzleMode.loading
+		        || !this.puzzleMode.current
+		        || this.puzzleMode.solved
+		        || this.puzzleMode.failed;
 	    }
 	  }
 
@@ -2619,72 +2642,83 @@ class ChessReviewApp {
 		    return true;
 		  }
 
-	  async _handlePuzzleMove(from, to) {
-	    if (this.puzzleMode.loading || this.puzzleMode.solved || !this.puzzleMode.current) return;
-	    const fenBefore = this.chess.fen();
-	    const promotion = this._isPromotionMove(from, to) ? await this._requestPromotionPiece() : undefined;
-	    const move = this.chess.move({ from, to, promotion }, { sloppy: true });
-	    if (!move) {
-	      this.board.setPositionFromFen(this.chess.fen());
-	      return;
-	    }
-
-	    const moveUci = `${move.from}${move.to}${move.promotion || ''}`;
-	    const expected = this.puzzleMode.solution[this.puzzleMode.step] || '';
-	    if (moveUci !== expected) {
-	      this.chess.undo();
-	      this.board.setChessInstance(this.chess);
-	      this.board.selectedSquare = null;
-	      this.board.legalMoves = [];
-	      this._updateBoard();
-	      this._setBoardOrientationForColor(this.chess.turn());
-	      this.board.setHighlights(this._moveHighlightsForSquares(move.from, move.to, {
-	        color: '#F8D7D4',
-	        ringColor: '#CA3431',
-	      }));
-		      this.board.clearBestMoveArrow();
-		      if (!this.puzzleMode.failed) {
-		        this.puzzleMode.failed = true;
-		        await this._recordPuzzleAttempt(false);
-		      }
-	      this._setPuzzleStatus('Not quite. Try another move, or use Hint if you want a nudge.', 'error');
-	      this._syncPuzzlePanel();
-	      this._syncActionButtons();
-	      return;
-	    }
-
-	    this.gameMoves.push(move.san);
-	    this.currentMoveIndex = this.gameMoves.length - 1;
-	    this.board.setChessInstance(this.chess);
-	    this._updateBoard();
-	    this._updateCurrentMoveIndicator();
-	    this._renderMoveList();
-	    this._playMoveSound(move, this.currentMoveIndex);
-	    this._syncActionButtons();
-
-	    this.puzzleMode.step += 1;
-	    this.puzzleMode.hintLevel = 0;
-	    this.board.setHighlights(this._moveHighlightsForSquares(move.from, move.to, {
-	      color: '#DCEFD7',
-	      ringColor: '#4f7d3c',
-	    }));
-	    this.board.clearBestMoveArrow();
-
-			    if (this.puzzleMode.step >= this.puzzleMode.solution.length) {
-			      this.puzzleMode.solved = true;
-			      const rated = !this.puzzleMode.failed ? await this._recordPuzzleAttempt(true) : false;
-			      this._celebrate();
-			      this._setPuzzleStatus(!rated && !this.puzzleMode.failed
-		        ? 'Solved again. Rating is unchanged.'
-		        : this.puzzleMode.failed
-		        ? 'Solved in practice. The rating change was already applied after the miss.'
-		        : `Solved. Rating ${this.puzzleMode.lastDelta >= 0 ? '+' : ''}${this.puzzleMode.lastDelta}.`, 'success');
+		  async _handlePuzzleMove(from, to) {
+		    if (this.puzzleMode.loading || this.puzzleMode.solved || this.puzzleMode.failed || !this.puzzleMode.current) return;
+		    const fenBefore = this.chess.fen();
+		    const promotion = this._isPromotionMove(from, to) ? await this._requestPromotionPiece() : undefined;
+		    const move = this.chess.move({ from, to, promotion }, { sloppy: true });
+		    if (!move) {
+		      this.board.setPositionFromFen(this.chess.fen());
 		      return;
-	    }
-
-	    this._setPuzzleStatus('Correct. Let the opponent reply...');
-	    window.setTimeout(() => this._playPuzzleReply(), 420);
-	  }
+		    }
+	
+		    const moveUci = `${move.from}${move.to}${move.promotion || ''}`;
+		    const expected = this.puzzleMode.solution[this.puzzleMode.step] || '';
+		    const checkmateSolved = this.chess.in_checkmate();
+		    const isExpected = moveUci === expected;
+		    this.gameMoves.push(move.san);
+		    this.currentMoveIndex = this.gameMoves.length - 1;
+		    this.board.setChessInstance(this.chess);
+		    this.board.selectedSquare = null;
+		    this.board.legalMoves = [];
+		    this._updateBoard();
+		    this._updateCurrentMoveIndicator();
+		    this._renderMoveList();
+		    this._playMoveSound(move, this.currentMoveIndex);
+		    this.board.clearBestMoveArrow();
+	
+		    const liveResultPromise = this._requestLiveEvaluation(`Analyzing ${move.san}`, {
+		      fenBefore,
+		      fenAfter: this.chess.fen(),
+		      moveObj: move,
+		      moveIndex: this.currentMoveIndex,
+		    });
+		    liveResultPromise.catch(() => {});
+	
+		    if (!isExpected && !checkmateSolved) {
+		      this.puzzleMode.failed = true;
+		      if (this.elLiveEval) this.elLiveEval.hidden = false;
+		      this.board.setHighlights(this._moveHighlightsForSquares(move.from, move.to, {
+		        color: '#F8D7D4',
+		        ringColor: '#CA3431',
+		      }));
+		      await this._recordPuzzleAttempt(false);
+		      this._setPuzzleStatus('Puzzle failed. Free analysis is now unlocked for this position.', 'error');
+		      this._syncPuzzlePanel();
+		      this._syncActionButtons();
+		      this._updateGameStatus();
+		      return;
+		    }
+	
+		    this.puzzleMode.step += 1;
+		    this.puzzleMode.hintLevel = 0;
+		    this.board.setHighlights(this._moveHighlightsForSquares(move.from, move.to, {
+		      color: '#DCEFD7',
+		      ringColor: '#4f7d3c',
+		    }));
+	
+				    if (checkmateSolved || this.puzzleMode.step >= this.puzzleMode.solution.length) {
+				      this.puzzleMode.solved = true;
+				      if (this.elLiveEval) this.elLiveEval.hidden = false;
+				      const rated = !this.puzzleMode.failed ? await this._recordPuzzleAttempt(true) : false;
+				      this._celebrate();
+				      this._setPuzzleStatus(checkmateSolved && !isExpected
+				        ? 'Solved by checkmate. Free analysis is now unlocked.'
+				        : !rated && !this.puzzleMode.failed
+			        ? 'Solved again. Rating is unchanged. Free analysis is now unlocked.'
+			        : this.puzzleMode.failed
+			        ? 'Solved in practice. Free analysis is now unlocked.'
+			        : `Solved. Rating ${this.puzzleMode.lastDelta >= 0 ? '+' : ''}${this.puzzleMode.lastDelta}. Free analysis is now unlocked.`, 'success');
+			      this._syncPuzzlePanel();
+			      this._syncActionButtons();
+			      this._updateGameStatus();
+			      return;
+		    }
+	
+		    this._syncActionButtons();
+		    this._setPuzzleStatus('Correct. Let the opponent reply...');
+		    window.setTimeout(() => this._playPuzzleReply(), 420);
+		  }
 
 				  async _playPuzzleReply() {
 		    if (!this.puzzleMode.active || this.puzzleMode.solved) return;
@@ -3363,10 +3397,11 @@ class ChessReviewApp {
 		        ringColor: '#2F6F9F',
 		      });
 		      this.board.setHighlights([...feedbackHighlights, ...coachMoveHighlights]);
-      this._renderMoveList();
-      this._updateActiveMoveInList();
-      this._updateGameStatus();
-      this._playMoveSound(move, this.currentMoveIndex);
+	      this._renderMoveList();
+	      this._updateActiveMoveInList();
+	      this._updateGameStatus();
+	      this._saveGameState();
+	      this._playMoveSound(move, this.currentMoveIndex);
 	      this._requestLiveEvaluation(`Coach played ${move.san}`, {
 	        fenBefore,
 	        fenAfter: this.chess.fen(),
@@ -4155,12 +4190,15 @@ class ChessReviewApp {
 	    if (resolve) resolve(['q', 'r', 'b', 'n'].includes(piece) ? piece : 'q');
 	  }
 
-		  async _handleBoardMove(from, to) {
-		    if (this.isAnalyzing) return;
-		    if (this.puzzleMode.active) {
-		      await this._handlePuzzleMove(from, to);
-		      return;
-		    }
+			  async _handleBoardMove(from, to) {
+			    if (this.isAnalyzing) return;
+			    if (this.puzzleMode.active && !this.puzzleMode.solved && !this.puzzleMode.failed) {
+			      await this._handlePuzzleMove(from, to);
+			      return;
+			    }
+			    if (this.puzzleMode.active && (this.puzzleMode.solved || this.puzzleMode.failed) && this.elLiveEval) {
+			      this.elLiveEval.hidden = false;
+			    }
 		    if (this.coachMode.active && !this._isCoachHumanTurn()) return;
 
 	    const fenBefore = this.chess.fen();
@@ -4613,10 +4651,11 @@ class ChessReviewApp {
       const key = type === 'coach' ? 'sidastuff.coachGame' : 'sidastuff.reviewGame';
       const raw = localStorage.getItem(key);
       if (!raw) return null;
-      const state = JSON.parse(raw);
-      const MAX_AGE = 12 * 60 * 60 * 1000;
-      if (!state?.moves?.length || (Date.now() - (state.savedAt || 0)) >= MAX_AGE) return null;
-      return state;
+	      const state = JSON.parse(raw);
+	      const MAX_AGE = 12 * 60 * 60 * 1000;
+	      const isCoach = type === 'coach' && (state?.headers?.Event === 'Coach' || state?.coachMode);
+	      if ((!state?.moves?.length && !isCoach) || (Date.now() - (state.savedAt || 0)) >= MAX_AGE) return null;
+	      return state;
     } catch (_) { return null; }
   }
 
@@ -4625,12 +4664,13 @@ class ChessReviewApp {
       const isCoach = this.gameHeaders?.Event === 'Coach';
       const key = isCoach ? 'sidastuff.coachGame' : 'sidastuff.reviewGame';
       if (!this.gameMoves.length && !isCoach) { localStorage.removeItem(key); return; }
-      const state = {
-        moves: this.gameMoves.slice(),
-        headers: this.gameHeaders || {},
-        initialFen: this.initialFen,
-        savedAt: Date.now(),
-      };
+	      const state = {
+	        moves: this.gameMoves.slice(),
+	        headers: this.gameHeaders || {},
+	        initialFen: this.initialFen,
+	        currentMoveIndex: this.currentMoveIndex,
+	        savedAt: Date.now(),
+	      };
       if (isCoach) {
         state.coachMode = {
           elo: this.coachMode.elo,
@@ -4643,9 +4683,137 @@ class ChessReviewApp {
     } catch (_) {}
   }
 
-  _restoreGameState() {}
+	  _restoreGameState() {}
 
-  _goToMove(index) {
+	  _savedGameStorageKey(type) {
+	    return type === 'coach' ? 'sidastuff.coachGame' : 'sidastuff.reviewGame';
+	  }
+
+	  _forgetSavedGameState(type) {
+	    try {
+	      localStorage.removeItem(this._savedGameStorageKey(type));
+	    } catch (_) {}
+	  }
+
+	  _savedGameRestoreHtml(type, state = {}) {
+	    const label = type === 'coach' ? 'Coach game' : 'Review game';
+	    const moves = Array.isArray(state.moves) ? state.moves.length : 0;
+	    const savedDate = state.savedAt ? new Date(state.savedAt).toLocaleString() : 'recently';
+	    const headers = state.headers || {};
+	    const white = headers.White || (type === 'coach' ? 'You/Coach' : 'White');
+	    const black = headers.Black || (type === 'coach' ? 'Coach/You' : 'Black');
+	    return `
+	      <div class="restore-game-popup">
+	        <div class="restore-game-title">${this._escapeHtml(label)}</div>
+	        <div class="restore-game-row"><span>Players</span><strong>${this._escapeHtml(`${white} vs ${black}`)}</strong></div>
+	        <div class="restore-game-row"><span>Moves</span><strong>${moves}</strong></div>
+	        <div class="restore-game-row"><span>Saved</span><strong>${this._escapeHtml(savedDate)}</strong></div>
+	      </div>`;
+	  }
+
+	  async _promptSavedGameRestore(type, state) {
+	    const isCoach = type === 'coach';
+	    const result = await this._showPopup({
+	      form: true,
+	      icon: 'question',
+	      title: `Restore previous ${isCoach ? 'coach game' : 'review'}?`,
+	      html: this._savedGameRestoreHtml(type, state),
+	      confirmButtonText: 'Restore',
+	      showCancelButton: true,
+	      cancelButtonText: isCoach ? 'New coach game' : 'Import new game',
+	      allowOutsideClick: false,
+	      reverseButtons: false,
+	    });
+
+	    if (result.isConfirmed) {
+	      if (isCoach) {
+	        this._restoreSavedCoachGame(state);
+	      } else {
+	        this._restoreSavedReviewGame(state);
+	      }
+	      return;
+	    }
+
+	    this._forgetSavedGameState(type);
+	    if (isCoach) {
+	      this._showEngineChoiceModal('coach');
+	    } else {
+	      this._showEngineChoiceModal('import');
+	    }
+	  }
+
+	  _restoreSavedCoachGame(state) {
+	    this._loadGame(state.moves || [], state.headers || { Event: 'Coach' });
+	    if (state.coachMode) {
+	      Object.assign(this.coachMode, state.coachMode, {
+	        active: true,
+	        thinking: false,
+	        gameOverCelebrated: false,
+	      });
+	    } else {
+	      this.coachMode.active = true;
+	      this.coachMode.thinking = false;
+	    }
+	    const restoreIndex = Number.isInteger(state.currentMoveIndex) ? state.currentMoveIndex : this.gameMoves.length - 1;
+	    this._goToMove(restoreIndex);
+	    this._enterCoachMode();
+	  }
+
+	  _restoreSavedReviewGame(state) {
+	    this._loadGame(state.moves || [], state.headers || {});
+	    if (Number.isInteger(state.currentMoveIndex)) this._goToMove(state.currentMoveIndex);
+	    this._enterReviewMode();
+	  }
+
+	  _currentPgn() {
+	    const headers = { ...(this.gameHeaders || {}) };
+	    const chess = new Chess(this.initialFen || undefined);
+	    for (const [key, value] of Object.entries(headers)) {
+	      if (value !== undefined && value !== null && value !== '') chess.header(key, String(value));
+	    }
+	    const limit = this.currentMoveIndex >= 0 ? this.currentMoveIndex + 1 : this.gameMoves.length;
+	    for (const san of this.gameMoves.slice(0, Math.max(0, limit))) {
+	      if (!chess.move(san, { sloppy: true })) break;
+	    }
+	    return chess.pgn() || '';
+	  }
+
+	  async _copyTextToClipboard(text) {
+	    if (navigator.clipboard?.writeText) {
+	      await navigator.clipboard.writeText(text);
+	      return true;
+	    }
+	    return false;
+	  }
+
+	  async _exportCurrentPgn() {
+	    const pgn = this._currentPgn();
+	    if (!pgn) {
+	      this._showPopup({ icon: 'info', title: 'No PGN yet', text: 'Make or import moves before exporting PGN.' });
+	      return;
+	    }
+	    const copied = await this._copyTextToClipboard(pgn).catch(() => false);
+	    this._showPopup({
+	      icon: copied ? 'success' : 'info',
+	      title: copied ? 'PGN copied' : 'PGN export',
+	      html: `<textarea class="export-textarea" readonly>${this._escapeHtml(pgn)}</textarea>`,
+	      confirmButtonText: 'Done',
+	    });
+	  }
+
+	  async _exportCurrentFen() {
+	    const fen = this.chess?.fen?.() || '';
+	    if (!fen) return;
+	    const copied = await this._copyTextToClipboard(fen).catch(() => false);
+	    this._showPopup({
+	      icon: copied ? 'success' : 'info',
+	      title: copied ? 'FEN copied' : 'FEN export',
+	      html: `<textarea class="export-textarea" readonly>${this._escapeHtml(fen)}</textarea>`,
+	      confirmButtonText: 'Done',
+	    });
+	  }
+
+	  _goToMove(index) {
     if (index < -1) index = -1;
     if (index >= this.gameMoves.length) index = this.gameMoves.length - 1;
     if (index === this.currentMoveIndex) return;
@@ -4743,10 +4911,11 @@ class ChessReviewApp {
       );
     }
 
-	    this._updateGameStatus();
-	    this._updateActiveMoveInList();
-	    this._updateCurrentMoveIndicator();
-	  }
+		    this._updateGameStatus();
+		    this._updateActiveMoveInList();
+		    this._updateCurrentMoveIndicator();
+		    if (!this.isAnalyzing) this._saveGameState();
+		  }
 
   _drawEvalGraph() {
     const ctx = this.evalGraphCtx;

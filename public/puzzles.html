@@ -39,7 +39,7 @@
 				          <span>Anticheat</span>
 				        </a>
 				        <a id="btn-menu-boost" class="menu-button menu-button-boost" href="/boost.html">
-				          <span class="material-symbols-outlined btn-symbol">card_membership</span>
+				          <span class="material-symbols-outlined btn-symbol">bolt</span>
 				          <span>Get Boost</span>
 				        </a>
 		      </div>
@@ -120,7 +120,7 @@
       </div>
       <div class="boost-pricing">
         <button id="btn-boost-purchase" class="menu-button menu-button-primary boost-purchase-button">
-          <span class="material-symbols-outlined btn-symbol" style="font-size: 1.4rem;">card_membership</span>
+          <span class="material-symbols-outlined btn-symbol" style="font-size: 1.4rem;">bolt</span>
           <span>Get Boost</span>
         </button>
         <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 12px;">
@@ -337,6 +337,14 @@
             <span class="material-symbols-outlined btn-symbol">restart_alt</span>
             <span class="btn-label">Reset</span>
           </button>
+          <button id="btn-export-pgn" class="btn-control" title="Export PGN" aria-label="Export PGN" disabled>
+            <span class="material-symbols-outlined btn-symbol">description</span>
+            <span class="btn-label">PGN</span>
+          </button>
+          <button id="btn-export-fen" class="btn-control" title="Export FEN" aria-label="Export FEN">
+            <span class="material-symbols-outlined btn-symbol">content_copy</span>
+            <span class="btn-label">FEN</span>
+          </button>
         </div>
       </div>
 
@@ -420,11 +428,13 @@
           <label class="switch-row app-switch-row">
             <span>
               <strong>Stronger server review</strong>
-              <small>Boost only. Use Stockfish 18 server review at depth 14.</small>
             </span>
-            <span class="app-switch">
-              <input id="server-strong-review" type="checkbox" role="switch" aria-label="Stronger server review">
-              <span class="app-switch-track" aria-hidden="true"></span>
+            <span class="boost-switch-wrap">
+              <span class="material-symbols-outlined boost-lock-icon" id="boost-lock-icon" style="display:none">lock</span>
+              <span class="app-switch">
+                <input id="server-strong-review" type="checkbox" role="switch" aria-label="Stronger server review">
+                <span class="app-switch-track" aria-hidden="true"></span>
+              </span>
             </span>
           </label>
         </div>

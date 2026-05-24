@@ -120,7 +120,7 @@
       </div>
       <div class="boost-pricing">
         <button id="btn-boost-purchase" class="menu-button menu-button-primary boost-purchase-button">
-          <span class="material-symbols-outlined btn-symbol" style="font-size: 1.4rem;">card_membership</span>
+          <span class="material-symbols-outlined btn-symbol" style="font-size: 1.4rem;">bolt</span>
           <span>Get Boost</span>
         </button>
         <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 12px;">
@@ -337,11 +337,19 @@
             <span class="material-symbols-outlined btn-symbol">play_arrow</span>
             <span class="btn-label">Auto</span>
           </button>
-          <button id="btn-reset" class="btn-control" title="Reset Board" aria-label="Reset Board">
-            <span class="material-symbols-outlined btn-symbol">restart_alt</span>
-            <span class="btn-label">Reset</span>
-          </button>
-        </div>
+	          <button id="btn-reset" class="btn-control" title="Reset Board" aria-label="Reset Board">
+	            <span class="material-symbols-outlined btn-symbol">restart_alt</span>
+	            <span class="btn-label">Reset</span>
+	          </button>
+	          <button id="btn-export-pgn" class="btn-control" title="Export PGN" aria-label="Export PGN" disabled>
+	            <span class="material-symbols-outlined btn-symbol">description</span>
+	            <span class="btn-label">PGN</span>
+	          </button>
+	          <button id="btn-export-fen" class="btn-control" title="Export FEN" aria-label="Export FEN">
+	            <span class="material-symbols-outlined btn-symbol">content_copy</span>
+	            <span class="btn-label">FEN</span>
+	          </button>
+	        </div>
       </div>
 
       <!-- Analysis Panel -->
@@ -425,7 +433,7 @@
             <span>
               <strong>Stronger server review</strong>
             </span>
-            <span style="display:inline-flex;align-items:center;gap:8px">
+	            <span class="boost-switch-wrap">
               <span class="material-symbols-outlined boost-lock-icon" id="boost-lock-icon" style="display:none">lock</span>
               <span class="app-switch">
                 <input id="server-strong-review" type="checkbox" role="switch" aria-label="Stronger server review">
