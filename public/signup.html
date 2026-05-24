@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign Up | SiDaStuff Chess</title>
+  <link rel="icon" type="image/png" href="./assets/logo.png">
+  <link rel="stylesheet" href="./css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
+</head>
+<body class="standalone-body" data-page="signup">
+  <div data-site-header></div>
+  <div class="standalone-shell">
+    <main class="standalone-main">
+      <section class="card standalone-card">
+        <h1>Create Account</h1>
+        <p>Start syncing your puzzle rating, stats, and server usage.</p>
+        <label class="field">
+          <span class="field-label">Email</span>
+          <input id="email" class="input-select" type="email" autocomplete="email" placeholder="you@example.com">
+        </label>
+        <label class="field">
+          <span class="field-label">Password</span>
+          <input id="password" class="input-select" type="password" autocomplete="new-password" placeholder="Password">
+        </label>
+        <div class="auth-actions">
+          <button id="btn-email-auth" class="btn btn-primary" type="button">Sign Up</button>
+          <button id="btn-google-auth" class="btn btn-google" type="button">Continue with Google</button>
+        </div>
+        <p class="account-status" id="page-status"></p>
+        <div class="standalone-actions">
+          <a class="btn btn-secondary" href="/signin.html">Already have an account</a>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div data-site-footer></div>
+  <div class="modal-overlay app-loading-overlay" id="app-loading-overlay" style="display:none">
+    <div class="modal modal-loading" role="status" aria-live="polite">
+      <div class="modal-body"><div class="modal-loading-spinner" aria-hidden="true"></div><h2>Loading</h2><p id="app-loading-text">Creating account...</p></div>
+    </div>
+  </div>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js" crossorigin="anonymous"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js" crossorigin="anonymous"></script>
+  <script src="./js/header.js"></script>
+  <script src="./js/footer.js"></script>
+  <script src="./js/page-auth.js"></script>
+</body>
+</html>

@@ -1,7 +1,13 @@
 node_modules/
+*.log
+public/vendor/
+server/vendor/
 server/data/lichess_db_puzzle.csv.zst
 server/data/lichess_db_puzzle.csv
 server/data/puzzles.db
 server/data/puzzles.db-wal
 server/data/puzzles.db-shm
+server/data/puzzles/
+server/data/puzzles-next/
+server/data/puzzle-build-buckets/
 .env

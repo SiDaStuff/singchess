@@ -1,12 +1,7 @@
-const { getProfile, json, requireUser } = require('./_lib/user-service');
 const puzzleDb = require('./_lib/puzzle-db');
 
 function safePuzzleId(id) {
   return String(id || '').replace(/[.#$\[\]/]/g, '_');
-}
-
-function attemptedSet(profile = {}) {
-  return new Set(Object.keys(profile.attemptedPuzzleIds || {}).filter((id) => profile.attemptedPuzzleIds[id]));
 }
 
 function corsHeaders() {
@@ -23,7 +18,7 @@ function dbUnavailableResponse(headers) {
     statusCode: 503,
     headers,
     body: JSON.stringify({
-      error: 'Local puzzle database is not built yet. Run npm run build on the server.',
+      error: 'Local puzzle chunks are not built yet. Run npm run build:puzzles on the server.',
       code: 'puzzle_db_missing',
     }),
   };
@@ -42,9 +37,7 @@ exports.handler = async (event) => {
     }
 
     const { type, theme, difficulty, target, exclude } = event.queryStringParameters || {};
-    const user = await requireUser(event);
-    const profile = await getProfile(user.uid, user);
-    const attemptedIds = attemptedSet(profile);
+    const attemptedIds = new Set();
 
     if (event.httpMethod === 'GET' && type === 'daily') {
       const payload = await puzzleDb.getDailyPuzzle({ attemptedIds });
@@ -102,6 +95,10 @@ exports.handler = async (event) => {
     };
   } catch (err) {
     console.error('Puzzle API error:', err);
-    return json(err.statusCode || 500, { error: err.message || 'Server error' });
+    return {
+      statusCode: err.statusCode || 500,
+      headers,
+      body: JSON.stringify({ error: err.message || 'Server error' }),
+    };
   }
 };

@@ -15,11 +15,15 @@ const getPuzzleFn = require('./api/get-puzzle.js');
 const publicStatsFn = require('./api/public-stats.js');
 const recentGamesFn = require('./api/recent-games.js');
 const recordPuzzleAttemptFn = require('./api/record-puzzle-attempt.js');
+const puzzleSolveFn = require('./api/puzzle-solve.js');
 const usersMeFn = require('./api/users-me.js');
 const giftBoostFn = require('./api/gift-boost.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const publicDir = path.resolve(__dirname, '../public');
+const serveStatic = process.env.SERVE_STATIC !== '0';
+const isDev = process.env.NODE_ENV === 'development' || process.env.CHESS_REVIEW_DEV_SERVER === '1';
 
 app.use(morgan('tiny'));
 app.use(express.json({ limit: '2mb' }));
@@ -91,12 +95,37 @@ app.get('/api/puzzle', wrapHandler(getPuzzleFn));
 app.get('/api/recent-games', wrapHandler(recentGamesFn));
 app.get('/api/public-stats', wrapHandler(publicStatsFn));
 app.post('/api/public-stats', wrapHandler(publicStatsFn));
+app.post('/api/puzzle/solve', wrapHandler(puzzleSolveFn));
 app.post('/api/record-puzzle-attempt', wrapHandler(recordPuzzleAttemptFn));
 app.get('/api/users/me', wrapHandler(usersMeFn));
 app.post('/api/admin/gift-boost', wrapHandler(giftBoostFn));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
+if (serveStatic) {
+  app.use(express.static(publicDir, {
+    etag: true,
+    maxAge: isDev ? 0 : '10m',
+    setHeaders(res, filePath) {
+      if (isDev || path.basename(filePath) === 'index.html') {
+        res.setHeader('Cache-Control', 'no-store');
+      }
+    },
+  }));
+
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/') || path.extname(req.path)) return next();
+    const htmlPath = path.join(publicDir, `${req.path.replace(/^\/+/, '')}.html`);
+    if (req.path !== '/' && require('fs').existsSync(htmlPath)) {
+      res.set('Cache-Control', 'no-store');
+      return res.sendFile(htmlPath);
+    }
+    res.set('Cache-Control', 'no-store');
+    return res.sendFile(path.join(publicDir, 'index.html'));
+  });
+}
+
 app.listen(PORT, () => {
-  console.log(`API server listening on port ${PORT}`);
+  const mode = serveStatic ? 'web/API' : 'API';
+  console.log(`${mode} server listening at http://localhost:${PORT}`);
 });

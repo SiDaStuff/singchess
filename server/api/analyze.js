@@ -214,15 +214,9 @@ exports.handler = async (event, context = {}) => {
         const { MoveAnalyzer } = loadAnalyzer();
 	      const analyzer = new MoveAnalyzer();
 	      const profile = payload.profile || {};
-      // Free and boost users are limited to lite engine (Stockfish 18 lite)
-      // Only boost users can toggle to full Stockfish 18 with serverEngine: 'full'
       const preferFullServer = quotaState.plan?.plan === 'boost' && profile.serverEngine === 'full';
-      // Free and boost users are strictly limited to depth 14 for server review
-      const maxDepth = quotaState.plan?.plan === 'free' || quotaState.plan?.plan === 'boost'
-        ? 14
-        : Math.max(14, Number(profile.depth) || SERVER_REVIEW_PROFILE.depth);
       analyzer.setReviewProfile({
-        depth: Math.min(maxDepth, SERVER_REVIEW_PROFILE.depth),
+        depth: 14,
         multiPv: Math.max(1, Math.min(Number(profile.multiPv) || SERVER_REVIEW_PROFILE.multiPv, 2)),
         timeoutMs: Math.max(1200, Math.min(Number(profile.timeoutMs) || SERVER_REVIEW_PROFILE.timeoutMs, SERVER_REVIEW_PROFILE.timeoutMs)),
       });
@@ -377,15 +371,9 @@ exports.streamHandler = async (req, res) => {
       const { MoveAnalyzer } = loadAnalyzer();
 	      const analyzer = new MoveAnalyzer();
 	      const profile = payload.profile || {};
-      // Free and boost users are limited to lite engine (Stockfish 18 lite)
-      // Only boost users can toggle to full Stockfish 18 with serverEngine: 'full'
       const preferFullServer = quotaState.plan?.plan === 'boost' && profile.serverEngine === 'full';
-      // Free and boost users are strictly limited to depth 14 for server review
-      const maxDepth = quotaState.plan?.plan === 'free' || quotaState.plan?.plan === 'boost'
-        ? 14
-        : Math.max(14, Number(profile.depth) || SERVER_REVIEW_PROFILE.depth);
       analyzer.setReviewProfile({
-        depth: Math.min(maxDepth, SERVER_REVIEW_PROFILE.depth),
+        depth: 14,
         multiPv: Math.max(1, Math.min(Number(profile.multiPv) || SERVER_REVIEW_PROFILE.multiPv, 2)),
         timeoutMs: Math.max(1200, Math.min(Number(profile.timeoutMs) || SERVER_REVIEW_PROFILE.timeoutMs, SERVER_REVIEW_PROFILE.timeoutMs)),
       });

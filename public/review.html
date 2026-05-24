@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SiDaStuff CHESS</title>
+  <title>Review | SiDaStuff Chess</title>
 	  <link rel="icon" type="image/png" href="./assets/logo.png">
 	  <link rel="apple-touch-icon" href="./assets/logo.png">
 	  <link rel="stylesheet" href="./css/example.css">
@@ -13,60 +13,60 @@
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0" rel="stylesheet" crossorigin="anonymous">
 </head>
-<body class="menu-active">
+<body class="menu-active" data-page="review">
   <div id="app">
 	    <section id="main-menu" class="main-menu" aria-label="Main menu">
-      <div class="main-menu-brand" aria-hidden="true">
-        <img src="./assets/logo.png" alt="">
-        <span>SiDaStuff Chess</span>
-        <small>Game review and coach</small>
-      </div>
-      <div class="main-menu-actions">
-        <a id="btn-menu-import" class="menu-button menu-button-primary menu-button-full" href="/review.html">
-          <span class="material-symbols-outlined btn-symbol">upload_file</span>
-          <span>Review Game</span>
-        </a>
-        <a id="btn-menu-coach" class="menu-button" href="/coach.html">
-          <span class="material-symbols-outlined btn-symbol">psychology</span>
-          <span>Play Coach</span>
-        </a>
-        <a id="btn-menu-puzzles" class="menu-button" href="/puzzles.html">
-          <span class="material-symbols-outlined btn-symbol">extension</span>
-          <span>Puzzles</span>
-        </a>
-        <a id="btn-menu-anticheat" class="menu-button" href="/anticheat.html">
-          <span class="material-symbols-outlined btn-symbol">shield</span>
-          <span>Anticheat</span>
-        </a>
-        <a id="btn-menu-boost" class="menu-button menu-button-boost" href="/boost.html">
-          <span class="material-symbols-outlined btn-symbol">bolt</span>
-          <span>Get Boost</span>
-        </a>
-      </div>
-      <div class="public-stats stats-loading" id="public-stats" aria-label="Public site stats">
-        <div class="public-stat">
-          <span class="public-stat-value" id="stats-games-analyzed">--</span>
-          <span class="public-stat-label">Moves analyzed</span>
-        </div>
-        <div class="public-stat">
-          <span class="public-stat-value" id="stats-coach-games">--</span>
-          <span class="public-stat-label">Coach games</span>
-        </div>
-        <div class="public-stat">
-          <span class="public-stat-value" id="stats-puzzles-solved">--</span>
-          <span class="public-stat-label">Puzzles solved</span>
-        </div>
-      </div>
-      <div class="main-menu-status" aria-hidden="true">
-        <span>Stockfish 18</span>
-        <span>Depth 14</span>
-      </div>
-    </section>
+	      <div class="main-menu-brand" aria-hidden="true">
+	        <img src="./assets/logo.png" alt="">
+	        <span>SiDaStuff Chess</span>
+	        <small>Game review and coach</small>
+	      </div>
+		      <div class="main-menu-actions">
+			        <a id="btn-menu-import" class="menu-button menu-button-primary" href="/review.html">
+			          <span class="material-symbols-outlined btn-symbol">upload_file</span>
+			          <span>Review Game</span>
+		        </a>
+			        <a id="btn-menu-coach" class="menu-button" href="/coach.html">
+		          <span class="material-symbols-outlined btn-symbol">psychology</span>
+			          <span>Play Coach</span>
+			        </a>
+		        <a id="btn-menu-puzzles" class="menu-button" href="/puzzles.html">
+		          <span class="material-symbols-outlined btn-symbol">extension</span>
+			          <span>Puzzles</span>
+			        </a>
+			        <a id="btn-menu-anticheat" class="menu-button" href="/anticheat.html">
+			          <span class="material-symbols-outlined btn-symbol">shield</span>
+				          <span>Anticheat</span>
+				        </a>
+				        <a id="btn-menu-boost" class="menu-button menu-button-boost" href="/boost.html">
+				          <span class="material-symbols-outlined btn-symbol">card_membership</span>
+				          <span>Get Boost</span>
+				        </a>
+		      </div>
+		      <div class="public-stats stats-loading" id="public-stats" aria-label="Public site stats">
+		        <div class="public-stat">
+		          <span class="public-stat-value" id="stats-games-analyzed">--</span>
+			          <span class="public-stat-label">Moves analyzed</span>
+		        </div>
+		        <div class="public-stat">
+		          <span class="public-stat-value" id="stats-coach-games">--</span>
+		          <span class="public-stat-label">Coach games</span>
+		        </div>
+		        <div class="public-stat">
+		          <span class="public-stat-value" id="stats-puzzles-solved">--</span>
+		          <span class="public-stat-label">Puzzles solved</span>
+		        </div>
+		      </div>
+		      <div class="main-menu-status" aria-hidden="true">
+		        <span>Stockfish 18</span>
+		        <span>Server review</span>
+		      </div>
+	    </section>
 
     <!-- Boost Page Overlay -->
     <section id="boost-page" class="main-menu" aria-label="Boost upgrade page" hidden>
       <div class="main-menu-brand" aria-hidden="true">
-        <span class="material-symbols-outlined boost-page-icon">bolt</span>
+        <span class="material-symbols-outlined boost-page-icon">workspace_premium</span>
         <span>Unlock Boost</span>
         <small>Unlimited reviews & priority queue</small>
       </div>
@@ -297,10 +297,6 @@
           <div class="board-coordinates-file" id="coords-file"></div>
           <div class="board-coordinates-rank" id="coords-rank"></div>
           <div id="chess-board" class="chess-board"></div>
-          <div class="board-skeleton-overlay" id="board-skeleton-overlay" style="display:none">
-            <div class="board-skeleton-spinner"></div>
-            <span class="board-skeleton-label" id="board-skeleton-label">Loading...</span>
-          </div>
           <div class="move-classification-badge" id="move-badge" style="display:none">
             <span class="badge-icon" id="badge-icon"></span>
             <span class="badge-text" id="badge-text"></span>
@@ -420,17 +416,15 @@
 	          </div>
 	        </div>
 
-        <div class="server-boost-toggle panel-wide" id="server-boost-toggle">
+        <div class="server-boost-toggle panel-wide" id="server-boost-toggle" hidden>
           <label class="switch-row app-switch-row">
             <span>
               <strong>Stronger server review</strong>
+              <small>Boost only. Use Stockfish 18 server review at depth 14.</small>
             </span>
-            <span style="display:inline-flex;align-items:center;gap:8px">
-              <span class="material-symbols-outlined boost-lock-icon" id="boost-lock-icon" style="display:none">lock</span>
-              <span class="app-switch">
-                <input id="server-strong-review" type="checkbox" role="switch" aria-label="Stronger server review">
-                <span class="app-switch-track" aria-hidden="true"></span>
-              </span>
+            <span class="app-switch">
+              <input id="server-strong-review" type="checkbox" role="switch" aria-label="Stronger server review">
+              <span class="app-switch-track" aria-hidden="true"></span>
             </span>
           </label>
         </div>
@@ -1095,5 +1089,6 @@
   <script src="./js/footer.js"></script>
 </body>
 </html>
+
 
 

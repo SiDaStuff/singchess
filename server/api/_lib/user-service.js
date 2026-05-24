@@ -87,8 +87,6 @@ function defaultProfile(user) {
     email: user.email || '',
     puzzleRating: 1500,
     puzzleStats: { solved: 0, attempted: 0, streak: 0 },
-    attemptedPuzzleIds: {},
-    solvedPuzzleIds: {},
     subscription: { plan: 'free' },
     usage: {},
     createdAt: Date.now(),
@@ -120,8 +118,8 @@ async function getProfile(uid, user = null) {
   const base = user ? defaultProfile(user) : {};
   const profile = { ...base, ...(snap.val() || {}) };
   profile.puzzleStats = { ...(base.puzzleStats || {}), ...(profile.puzzleStats || {}) };
-  profile.attemptedPuzzleIds = profile.attemptedPuzzleIds || {};
-  profile.solvedPuzzleIds = profile.solvedPuzzleIds || {};
+  delete profile.attemptedPuzzleIds;
+  delete profile.solvedPuzzleIds;
   profile.subscription = profile.subscription || { plan: 'free' };
   profile.uid = uid;
   if (user) {

@@ -5,11 +5,12 @@ class ChessReviewApp {
     this.engine = null;
     this.analyzer = new MoveAnalyzer();
     this.chess = new Chess();
+		const _savedEngineSettings = (() => { try { const r = window.localStorage?.getItem('sidastuff.engineSettings'); return r ? JSON.parse(r) : {}; } catch (_) { return {}; } })();
 		this.engineSettings = {
 				source: 'browser',
-				module: 'lite-single',
-						strength: 'depth14',
-						maxTimeMs: 12000,
+				module: _savedEngineSettings.module || 'lite-single',
+						strength: _savedEngineSettings.strength || 'depth14',
+						maxTimeMs: Number(_savedEngineSettings.maxTimeMs) || 12000,
 						analysisLocation: 'server',
 						serverStrongReview: false,
 			};
@@ -116,10 +117,10 @@ class ChessReviewApp {
 	    this.soundPreloadPromise = null;
 	    this._preloadSounds().catch(() => {});
 
-    this._bindElements();
-	    this._initEngineControls();
-	    this._applyLocalPuzzleProfile();
-	    this._bindEvents();
+	    this._bindElements();
+		    this._initEngineControls();
+		    this._applyLocalPuzzleProfile();
+		    this._bindEvents();
     this._syncPlayerNameplates();
 	    this._syncCoachVisibility();
 	    this._syncPuzzleVisibility();
@@ -129,9 +130,9 @@ class ChessReviewApp {
 		    this._updateLiveEvalPanel();
 		    this._resetInsightPanel();
 		    this._loadPublicStats();
-		    this._initRouting();
-		    window.addEventListener('resize', () => this._updateEvalBar(this.currentEvalScore), { passive: true });
-	  }
+			    this._initRouting();
+			    window.addEventListener('resize', () => this._updateEvalBar(this.currentEvalScore), { passive: true });
+		  }
 
 	  _bindElements() {
 		    this.elMainMenu = document.getElementById('main-menu');
@@ -153,9 +154,11 @@ class ChessReviewApp {
 	    this.elEngineChoiceModule = document.getElementById('engine-choice-module');
 	    this.elEngineChoiceRecommendation = document.getElementById('engine-choice-recommendation');
 	    this.elBtnEngineChoiceConfirm = document.getElementById('btn-engine-choice-confirm');
-	    this.elEngineLoadingOverlay = document.getElementById('engine-loading-overlay');
-	    this.elEngineLoadingText = document.getElementById('engine-loading-text');
-	    this.elEngineLoadingFill = document.getElementById('engine-loading-fill');
+		    this.elEngineLoadingOverlay = document.getElementById('engine-loading-overlay');
+		    this.elEngineLoadingText = document.getElementById('engine-loading-text');
+		    this.elEngineLoadingFill = document.getElementById('engine-loading-fill');
+		    this.elAppLoadingOverlay = document.getElementById('app-loading-overlay');
+		    this.elAppLoadingText = document.getElementById('app-loading-text');
 	    this.elPromotionModal = document.getElementById('promotion-modal');
 	    this.elPromotionOptions = document.getElementById('promotion-options');
     this.elBtnImport = document.getElementById('btn-import');
@@ -324,6 +327,27 @@ class ChessReviewApp {
 		    this.elGiftBoostDays = document.getElementById('gift-boost-days');
 		    this.elBtnGiftBoost = document.getElementById('btn-gift-boost');
 		    this.elGiftBoostStatus = document.getElementById('gift-boost-status');
+		    this.elMainContent = document.querySelector('main.main-content');
+		    this.elLoginPage = document.getElementById('page-login');
+		    this.elSignupPage = document.getElementById('page-signup');
+		    this.elAccountPage = document.getElementById('page-account');
+		    this.elSettingsPage = document.getElementById('page-settings');
+		    this.elLoginEmail = document.getElementById('login-email');
+		    this.elLoginPassword = document.getElementById('login-password');
+		    this.elLoginStatus = document.getElementById('login-status');
+		    this.elLoginSubmit = document.getElementById('btn-login-submit');
+		    this.elLoginGoogle = document.getElementById('btn-login-google');
+		    this.elSignupEmail = document.getElementById('signup-email');
+		    this.elSignupPassword = document.getElementById('signup-password');
+		    this.elSignupStatus = document.getElementById('signup-status');
+		    this.elSignupSubmit = document.getElementById('btn-signup-submit');
+		    this.elSignupGoogle = document.getElementById('btn-signup-google');
+		    this.elPageToSignup = document.getElementById('btn-page-to-signup');
+		    this.elPageToLogin = document.getElementById('btn-page-to-login');
+		    this.elPageAccountSignin = document.getElementById('btn-page-account-signin');
+		    this.elPageAccountSignout = document.getElementById('btn-page-account-signout');
+		    this.elSettingsSummary = document.getElementById('settings-summary');
+		    this.elPageClearCache = document.getElementById('btn-page-clear-cache');
 	  }
 
   _initEngineControls() {
@@ -376,22 +400,192 @@ class ChessReviewApp {
 		  }
 
 		  _initRouting() {
-		    this._applyRoute(window.location.pathname || '/index', { replace: true });
-		    window.addEventListener('popstate', () => this._applyRoute(window.location.pathname || '/index'));
+    const pageRoute = document.body.dataset.page ? `/${document.body.dataset.page}` : '';
+    const currentPath = pageRoute || this._normalizeRoute(window.location.pathname || '/index');
+    const restoreRoute = pageRoute ? null : this._restoreActiveRoute();
+    if (restoreRoute && (currentPath === '/' || currentPath === '/index')) {
+      this._applyRoute(restoreRoute, { replace: true });
+    } else {
+      this._applyRoute(currentPath, { replace: true });
+    }
+    window.addEventListener('popstate', () => this._applyRoute(window.location.pathname || '/index'));
+  }
+
+		  _normalizeRoute(path) {
+		    let route = String(path || '/index').split('?')[0].replace(/\/+$/, '') || '/index';
+		    route = route.replace(/\.html$/i, '');
+		    if (route === '/signin') return '/login';
+		    return route;
 		  }
 
+		  _routeUrl(path) {
+		    const route = this._normalizeRoute(path);
+		    const map = {
+		      '/index': '/',
+		      '/login': '/signin.html',
+		      '/signup': '/signup.html',
+		      '/account': '/account.html',
+		      '/settings': '/settings.html',
+		      '/auth': '/auth.html',
+		      '/boost': '/boost.html',
+		      '/review': '/review.html',
+		      '/coach': '/coach.html',
+		      '/puzzles': '/puzzles.html',
+		      '/anticheat': '/anticheat.html',
+		    };
+		    return map[route] || `${route}.html`;
+		  }
 		  _navigateTo(path) {
-		    const target = path || '/index';
-		    if (window.location.pathname !== target) {
-		      window.history.pushState({}, '', target);
+		    const route = this._normalizeRoute(path || '/index');
+		    const target = this._routeUrl(route);
+		    if (this._normalizeRoute(window.location.pathname) !== route) {
+		      window.location.assign(target);
+		      return;
 		    }
-		    this._applyRoute(target);
+		    this._applyRoute(route);
+		  }
+
+		  _hideRoutePages() {
+		    if (this.elLoginPage) this.elLoginPage.hidden = true;
+		    if (this.elSignupPage) this.elSignupPage.hidden = true;
+		    if (this.elAccountPage) this.elAccountPage.hidden = true;
+		    if (this.elSettingsPage) this.elSettingsPage.hidden = true;
+		  }
+
+		  _saveActiveRoute(route) {
+		    try {
+		      if (!window.localStorage) return;
+		      if (route && route !== '/index') {
+		        window.localStorage.setItem('sidastuff.activeRoute', route);
+		      } else {
+		        window.localStorage.removeItem('sidastuff.activeRoute');
+		      }
+		    } catch (_err) {
+		      // ignore local storage failures.
+		    }
+		  }
+
+		  _restoreActiveRoute() {
+		    try {
+		      const stored = window.localStorage?.getItem('sidastuff.activeRoute');
+		      return stored ? String(stored).replace(/\/+$/, '') || '/index' : null;
+		    } catch (_err) {
+		      return null;
+		    }
+		  }
+
+		  _showRoutePage(page) {
+		    document.body.classList.remove('menu-active');
+		    delete document.body.dataset.mode;
+		    if (this.elMainMenu) this.elMainMenu.hidden = false;
+		    this._hideSettingsModal();
+		    this._hideAccountModal();
+		    this._hideRoutePages();
+		    if (this.elMainContent) this.elMainContent.hidden = true;
+		    if (page === 'login' && this.elLoginPage) {
+		      this.elLoginPage.hidden = false;
+		      this._setAuthMode('signin');
+		    }
+		    if (page === 'signup' && this.elSignupPage) {
+		      this.elSignupPage.hidden = false;
+		      this._setAuthMode('signup');
+		    }
+		    if (page === 'account' && this.elAccountPage) {
+		      this.elAccountPage.hidden = false;
+		      this._syncAccountPage();
+		    }
+		    if (page === 'settings' && this.elSettingsPage) {
+		      this.elSettingsPage.hidden = false;
+		      this._syncSettingsPage();
+		    }
+		  }
+
+		  _syncAccountPage() {
+		    const signedIn = !!this.authState.user;
+		    const messageEl = document.getElementById('account-page-message');
+		    if (messageEl) {
+		      messageEl.textContent = signedIn
+		        ? 'Manage your account and sign out.'
+		        : 'Manage your account, sign in, or view your plan.';
+		    }
+		    if (this.elPageAccountSignin) this.elPageAccountSignin.hidden = signedIn;
+		    if (this.elPageAccountSignout) this.elPageAccountSignout.hidden = !signedIn;
+		  }
+
+		  _syncSettingsPage() {
+		    if (!this.elSettingsSummary) return;
+		    const profile = this._localPuzzleProfile();
+		    this.elSettingsSummary.textContent = [
+		      `Engine source: ${this.engineSettings.source}`,
+		      `Module: ${this.engineSettings.module}`,
+		      `Strength: ${this.engineSettings.strength}`,
+		      `Analysis location: ${this.engineSettings.analysisLocation}`,
+		      `Saved puzzle profile: ${profile ? 'Yes' : 'No'}`,
+		    ].join(' · ');
+		  }
+
+		  _clearLocalCache() {
+		    try {
+		      if (!window.localStorage) throw new Error('Local storage unavailable.');
+		      const keys = [];
+		      for (let i = 0; i < window.localStorage.length; i += 1) {
+		        const key = window.localStorage.key(i);
+		        if (typeof key === 'string' && key.startsWith('sidastuff.')) keys.push(key);
+		      }
+		      keys.forEach((key) => window.localStorage.removeItem(key));
+		      this._syncSettingsPage();
+		      this._showPopup({ icon: 'success', title: 'Cache cleared', text: 'Local settings and puzzle cache were cleared.' });
+		    } catch (err) {
+		      this._showPopup({ icon: 'error', title: 'Clear failed', text: err.message || 'Unable to clear local cache.' });
+		    }
+		  }
+
+		  async _handlePageEmailAuth(mode) {
+		    const isSignup = mode === 'signup';
+		    this._setAuthMode(isSignup ? 'signup' : 'signin');
+		    const statusEl = isSignup ? this.elSignupStatus : this.elLoginStatus;
+		    try {
+		      await this._handleEmailAuth({
+		        email: isSignup ? this.elSignupEmail?.value : this.elLoginEmail?.value,
+		        password: isSignup ? this.elSignupPassword?.value : this.elLoginPassword?.value,
+		        statusEl,
+		      });
+		      this._navigateTo('/account');
+		    } catch (_err) {
+		      // _handleEmailAuth has already rendered the form-level error.
+		    }
 		  }
 
 		  _applyRoute(path, options = {}) {
-		    const route = String(path || '/index').replace(/\/+$/, '') || '/index';
+		    const route = this._normalizeRoute(path || '/index');
 		    if (options.replace && window.location.pathname !== route) {
 		      window.history.replaceState({}, '', route);
+		    }
+		    this._saveActiveRoute(route);
+		    this._hideRoutePages();
+
+		    if (route === '/login') {
+		      this._showRoutePage('login');
+		      document.title = 'Sign In | SiDaStuff Chess';
+		      return;
+		    }
+
+		    if (route === '/signup') {
+		      this._showRoutePage('signup');
+		      document.title = 'Sign Up | SiDaStuff Chess';
+		      return;
+		    }
+
+		    if (route === '/account') {
+		      this._showRoutePage('account');
+		      document.title = 'Account | SiDaStuff Chess';
+		      return;
+		    }
+
+		    if (route === '/settings') {
+		      this._showRoutePage('settings');
+		      document.title = 'Settings | SiDaStuff Chess';
+		      return;
 		    }
 
 		    if (route === '/puzzles') {
@@ -413,7 +607,14 @@ class ChessReviewApp {
 		    if (route === '/coach') {
 		      this._hideSettingsModal();
 		      this._hideAccountModal();
-		      this._showEngineChoiceModal('coach');
+		      const savedCoach = this._loadSavedGameState('coach');
+		      if (savedCoach) {
+		        this._loadGame(savedCoach.moves, savedCoach.headers || {});
+		        if (savedCoach.coachMode) Object.assign(this.coachMode, savedCoach.coachMode, { active: false, thinking: false });
+		        this._enterCoachMode(savedCoach.coachMode || {});
+		      } else {
+		        this._showEngineChoiceModal('coach');
+		      }
 		      document.title = 'Coach | SiDaStuff Chess';
 		      return;
 		    }
@@ -421,7 +622,13 @@ class ChessReviewApp {
 		    if (route === '/review') {
 		      this._hideSettingsModal();
 		      this._hideAccountModal();
-		      this._showEngineChoiceModal('import');
+		      const savedReview = this._loadSavedGameState('review');
+		      if (savedReview) {
+		        this._loadGame(savedReview.moves, savedReview.headers || {});
+		        this._enterReviewMode();
+		      } else {
+		        this._showEngineChoiceModal('import');
+		      }
 		      document.title = 'Review | SiDaStuff Chess';
 		      return;
 		    }
@@ -431,21 +638,6 @@ class ChessReviewApp {
 		      this._hideAccountModal();
 		      this._enterBoostPage();
 		      document.title = 'Boost | SiDaStuff Chess';
-		      return;
-		    }
-
-		    if (route === '/account') {
-		      // Only show account modal if not already signed in
-		      if (!this.authState.user) {
-		        this._showAccountModal();
-		      }
-		      window.history.replaceState({}, '', '/index');
-		      return;
-		    }
-
-		    if (route === '/settings') {
-		      this._showSettingsModal();
-		      window.history.replaceState({}, '', '/index');
 		      return;
 		    }
 
@@ -530,8 +722,8 @@ class ChessReviewApp {
 	      projectId: 'singchess-sd',
 	      storageBucket: 'singchess-sd.firebasestorage.app',
 	      messagingSenderId: '784279280538',
-	      appId: '1:784279280538:web:4dcd70c24e90d8c30fb823',
-	      measurementId: 'G-2M387ZCKFE',
+	      appId: '1:784279280538:web:88a78b114e8f997b0fb823',
+	      measurementId: 'G-TFW7HFWKYP',
 	    };
 	  }
 
@@ -543,32 +735,49 @@ class ChessReviewApp {
 	    return window.firebase;
 	  }
 
-	  _initAuth() {
-	    const firebase = this._ensureFirebase();
-	    if (!firebase?.auth) {
+		  _initAuth() {
+		    const firebase = this._ensureFirebase();
+		    if (!firebase?.auth) {
 	      this._setAccountStatus('Firebase auth did not load. Account features are unavailable.', 'error');
 	      this._syncAccountUi();
 	      return;
 	    }
 
-	    this.authState.dbReady = !!firebase.database;
-	    firebase.auth().onAuthStateChanged(async (user) => {
-	      this.authState.user = user || null;
-	      this.authState.initialized = true;
-		      if (user) {
-		        this.authState.profile = await this._loadUserProfile(user);
-		        this._applyProfileToPuzzleMode(this.authState.profile);
-		      } else {
-		        this.authState.profile = null;
-		        this._applyLocalPuzzleProfile();
-		      }
-		      this._syncAccountUi();
-		      this._syncPuzzlePanel();
-		      this._refreshPuzzleForCurrentUser();
+		    this.authState.dbReady = !!firebase.database;
+		    this._showAppLoadingOverlay('Loading profile...');
+		    const authInitFallback = setTimeout(() => {
+		      if (!this.authState.initialized) this._hideAppLoadingOverlay();
+		    }, 12000);
+		    firebase.auth().onAuthStateChanged(async (user) => {
+		      clearTimeout(authInitFallback);
+		      this.authState.user = user || null;
+		      this.authState.initialized = false;
+			      if (user) {
+			        this.authState.profile = await this._loadUserProfile(user);
+			        this._applyProfileToPuzzleMode(this.authState.profile);
+			      } else {
+			        this.authState.profile = null;
+			        this._applyLocalPuzzleProfile();
+			      }
+		      this.authState.initialized = true;
+			      this._syncAccountUi();
+			      this._syncPuzzlePanel();
+			      this._refreshPuzzleForCurrentUser();
+		      this._hideAppLoadingOverlay();
 		    });
 		  }
 
-		  async _loadUserProfile(user) {
+		  _friendlyAuthError(err) {
+		    const code = String(err?.code || '');
+		    if (['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found'].includes(code)) {
+		      return 'Email or password is incorrect.';
+		    }
+		    if (code === 'auth/email-already-in-use') return 'An account already exists for that email.';
+		    if (code === 'auth/too-many-requests') return 'Too many attempts. Try again later.';
+		    return err?.message || 'Authentication failed.';
+		  }
+
+			  async _loadUserProfile(user) {
 		    const fallback = {
 		      uid: user.uid,
 		      username: user.displayName || (user.email ? user.email.split('@')[0] : 'Player'),
@@ -577,12 +786,17 @@ class ChessReviewApp {
 		      puzzleStats: { solved: 0, attempted: 0, streak: 0 },
 		    };
 	
-		    try {
-		      const response = await fetch('/api/users/me', {
-		        headers: await this._authHeaders(),
-		        cache: 'no-store',
-		      });
-		      if (!response.ok) throw new Error(`Account API responded with ${response.status}`);
+			    let timeout = null;
+			    try {
+		      const controller = new AbortController();
+		      timeout = setTimeout(() => controller.abort(), 10000);
+			      const response = await fetch('/api/users/me', {
+			        headers: await this._authHeaders(),
+			        cache: 'no-store',
+			        signal: controller.signal,
+			      });
+		      clearTimeout(timeout);
+			      if (!response.ok) throw new Error(`Account API responded with ${response.status}`);
 		      const me = await response.json();
 		      this.authState.me = me;
 		      this.authState.plan = me.plan || { plan: 'free', name: 'Free' };
@@ -613,7 +827,8 @@ class ChessReviewApp {
 	      };
 	      if (!profile.uid) await this._saveUserProfile(merged);
 	      return merged;
-		    } catch (_err) {
+			    } catch (_err) {
+			      if (timeout) clearTimeout(timeout);
 		      this.authState.me = null;
 		      this.authState.plan = { plan: 'free', name: 'Free' };
 		      this.authState.usage = {};
@@ -725,28 +940,13 @@ class ChessReviewApp {
 		  _applyProfileToPuzzleMode(profile) {
 		    if (!profile) return;
 		    const stats = profile.puzzleStats || {};
-		    this.puzzleMode.rating = Math.max(100, Math.round(Number(profile.puzzleRating) || 1500));
-		    this.puzzleMode.solvedCount = Math.max(0, Number(stats.solved) || 0);
-		    this.puzzleMode.attemptedCount = Math.max(0, Number(stats.attempted) || 0);
-		    this.puzzleMode.streak = Math.max(0, Number(stats.streak) || 0);
-		    const ids = {
-		      ...(profile.solvedPuzzleIds || {}),
-		      ...(profile.attemptedPuzzleIds || {}),
-		    };
-		    this.puzzleMode.attemptedPuzzleIds = new Set(Object.keys(ids).filter((id) => ids[id]));
-		  }
+			    this.puzzleMode.rating = Math.max(100, Math.round(Number(profile.puzzleRating) || 1500));
+			    this.puzzleMode.solvedCount = Math.max(0, Number(stats.solved) || 0);
+			    this.puzzleMode.attemptedCount = Math.max(0, Number(stats.attempted) || 0);
+			    this.puzzleMode.streak = Math.max(0, Number(stats.streak) || 0);
+			  }
 
-	  _localAttemptedPuzzleIds() {
-	    try {
-	      const raw = window.localStorage?.getItem('sidastuff.attemptedPuzzleIds');
-	      const parsed = raw ? JSON.parse(raw) : [];
-	      return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
-	    } catch (_err) {
-	      return [];
-	    }
-	  }
-
-	  _localPuzzleProfile() {
+		  _localPuzzleProfile() {
 	    try {
 	      const raw = window.localStorage?.getItem('sidastuff.puzzleProfile');
 	      const parsed = raw ? JSON.parse(raw) : null;
@@ -766,11 +966,10 @@ class ChessReviewApp {
 	    const profile = this._localPuzzleProfile();
 	    if (!profile || this.authState?.user) return;
 	    this.puzzleMode.rating = profile.rating;
-	    this.puzzleMode.solvedCount = profile.solved;
-	    this.puzzleMode.attemptedCount = profile.attempted;
-	    this.puzzleMode.streak = profile.streak;
-	    this.puzzleMode.attemptedPuzzleIds = new Set(this._localAttemptedPuzzleIds());
-	  }
+		    this.puzzleMode.solvedCount = profile.solved;
+		    this.puzzleMode.attemptedCount = profile.attempted;
+		    this.puzzleMode.streak = profile.streak;
+		  }
 
 		  _saveLocalPuzzleProfile() {
 		    if (this.authState?.user) return;
@@ -787,17 +986,7 @@ class ChessReviewApp {
 	    }
 	  }
 
-			  _rememberLocalPuzzleAttempt(puzzleId) {
-			    if (this.authState?.user) return;
-			    if (!puzzleId) return;
-		    const ids = new Set(this._localAttemptedPuzzleIds());
-		    ids.add(puzzleId);
-		    try {
-		      window.localStorage?.setItem('sidastuff.attemptedPuzzleIds', JSON.stringify([...ids].slice(-500)));
-		    } catch (_err) {
-		      // Local duplicate protection is best-effort; server protection handles signed-in users.
-		    }
-		  }
+			  _rememberLocalPuzzleAttempt(_puzzleId) {}
 
 	  _syncAccountUi() {
 	    const user = this.authState.user;
@@ -836,10 +1025,11 @@ class ChessReviewApp {
 		        const reviews = Math.max(0, Number(usage.serverReviews) || 0);
 		        this.elAccountUsage.textContent = `Today: ${anticheat}/${limits.anticheatRunsPerDay || 1} anticheat, ${reviews}/${limits.serverReviewsPerDay || 3} server reviews. Extra reviews run in the browser until reset.`;
 		      }
-		    }
-		    if (this.elAdminBoostPanel) this.elAdminBoostPanel.hidden = !this.authState.isAdmin;
-		    this._syncServerStrongToggle();
-		  }
+			    }
+			    if (this.elAdminBoostPanel) this.elAdminBoostPanel.hidden = !this.authState.isAdmin;
+			    this._syncServerStrongToggle();
+			    if (this.elAccountPage && !this.elAccountPage.hidden) this._syncAccountPage();
+			  }
 
 	  _setAuthMode(mode) {
 	    this.authMode = mode === 'signup' ? 'signup' : 'signin';
@@ -854,28 +1044,22 @@ class ChessReviewApp {
 		    this._syncAccountUi();
 		    const user = this.authState.user;
 		    if (!user) {
-		      const showUsername = this.authMode === 'signup';
-		      return `
-	        <div class="swal-form-grid">
-	          <div class="account-mode-switch" role="group">
-	            <button type="button" class="account-mode ${this.authMode === 'signin' ? 'active' : ''}" data-auth-mode="signin">Sign In</button>
-	            <button type="button" class="account-mode ${this.authMode === 'signup' ? 'active' : ''}" data-auth-mode="signup">Sign Up</button>
-	          </div>
-	          <label class="field" ${showUsername ? '' : 'hidden'} id="swal-auth-username-field">
-	            <span class="field-label">Username</span>
-	            <input id="swal-auth-username" class="input-select" type="text" autocomplete="username" placeholder="Your chess name">
-	          </label>
-	          <label class="field">
-	            <span class="field-label">Email</span>
-	            <input id="swal-auth-email" class="input-select" type="email" autocomplete="email" placeholder="you@example.com">
-	          </label>
-	          <label class="field">
-	            <span class="field-label">Password</span>
-	            <input id="swal-auth-password" class="input-select" type="password" autocomplete="current-password" placeholder="At least 6 characters">
-	          </label>
-	          <p class="account-status" id="swal-account-status"></p>
-	        </div>`;
-		    }
+        return `
+          <div class="swal-form-grid">
+            <div class="account-mode-switch" role="group">
+              <button type="button" class="account-mode ${this.authMode === 'signin' ? 'active' : ''}" data-auth-mode="signin">Sign In</button>
+              <button type="button" class="account-mode ${this.authMode === 'signup' ? 'active' : ''}" data-auth-mode="signup">Sign Up</button>
+            </div>
+            <label class="field">
+              <span class="field-label">Email</span>
+              <input id="swal-auth-email" class="input-select" type="email" autocomplete="email" placeholder="you@example.com">
+            </label>
+            <label class="field">
+              <span class="field-label">Password</span>
+              <input id="swal-auth-password" class="input-select" type="password" autocomplete="current-password" placeholder="At least 6 characters">
+            </label>
+            <p class="account-status" id="swal-account-status"></p>
+          </div>`;		    }
 
 		    const profile = this.authState.profile || {};
 		    const plan = this.authState.plan || { name: 'Free', plan: 'free' };
@@ -952,9 +1136,8 @@ class ChessReviewApp {
 		        const root = window.Swal.getHtmlContainer();
 		        const email = (root.querySelector('#swal-auth-email')?.value || '').trim();
 		        const password = root.querySelector('#swal-auth-password')?.value || '';
-		        const username = (root.querySelector('#swal-auth-username')?.value || '').trim();
 		        const statusEl = root.querySelector('#swal-account-status');
-		        if (!email || !password || (this.authMode === 'signup' && !username)) {
+		        if (!email || !password) {
 		          if (statusEl) {
 		            statusEl.textContent = 'Fill in the required account fields.';
 		            statusEl.className = 'account-status error';
@@ -962,7 +1145,7 @@ class ChessReviewApp {
 		          return false;
 		        }
 		        try {
-		          await this._handleEmailAuth({ email, password, username, statusEl });
+		          await this._handleEmailAuth({ email, password, statusEl });
 		          return true;
 		        } catch (err) {
 		          if (statusEl) {
@@ -1033,7 +1216,7 @@ class ChessReviewApp {
 	    const email = (fields?.email || this.elAuthEmail?.value || '').trim();
 	    const password = fields?.password || this.elAuthPassword?.value || '';
 	    const username = (fields?.username || this.elAuthUsername?.value || '').trim();
-	    if (!email || !password || (this.authMode === 'signup' && !username)) {
+	    if (!email || !password) {
 	      const message = 'Fill in the required account fields.';
 	      if (fields?.statusEl) {
 	        fields.statusEl.textContent = message;
@@ -1044,8 +1227,9 @@ class ChessReviewApp {
 	      throw new Error(message);
 	    }
 
-	    if (fields?.statusEl) {
-	      fields.statusEl.textContent = 'Working...';
+		    this._showAppLoadingOverlay(this.authMode === 'signup' ? 'Creating account...' : 'Signing in...');
+		    if (fields?.statusEl) {
+		      fields.statusEl.textContent = 'Working...';
 	      fields.statusEl.className = 'account-status';
 	    } else {
 	      this._setAccountStatus('Working...');
@@ -1055,10 +1239,11 @@ class ChessReviewApp {
 	      if (this.authMode === 'signup') {
 	        credential = await firebase.auth().createUserWithEmailAndPassword(email, password);
 	        this.authState.user = credential.user;
-	        await credential.user.updateProfile({ displayName: username });
+	        const displayName = username || (email.split('@')[0] || 'Player');
+	        await credential.user.updateProfile({ displayName });
 	        await this._saveUserProfile({
 	          uid: credential.user.uid,
-	          username,
+	          username: displayName,
 	          email,
 	          puzzleRating: this.puzzleMode.rating || 1500,
 	          puzzleStats: {
@@ -1078,15 +1263,18 @@ class ChessReviewApp {
 	      }
 	      setTimeout(() => this._hideAccountModal(), 450);
 	    } catch (err) {
-	      if (fields?.statusEl) {
-	        fields.statusEl.textContent = err.message || 'Authentication failed.';
-	        fields.statusEl.className = 'account-status error';
-	      } else {
-	        this._setAccountStatus(err.message || 'Authentication failed.', 'error');
-	      }
-	      throw err;
-	    }
-	  }
+		      const message = this._friendlyAuthError(err);
+		      if (fields?.statusEl) {
+		        fields.statusEl.textContent = message;
+		        fields.statusEl.className = 'account-status error';
+		      } else {
+		        this._setAccountStatus(message, 'error');
+		      }
+		      throw err;
+		    } finally {
+		      this._hideAppLoadingOverlay();
+		    }
+		  }
 
 	  async _handleGoogleAuth() {
 	    const firebase = this._ensureFirebase();
@@ -1187,18 +1375,28 @@ class ChessReviewApp {
 		  }
 
 		  _syncServerStrongToggle() {
-		    const isBoost = this.authState.plan?.plan === 'boost';
-		    const show = isBoost && this.engineSettings.analysisLocation === 'server' && document.body.dataset.mode === 'review';
-		    if (this.elServerBoostToggle) this.elServerBoostToggle.hidden = !show;
-		    if (!isBoost && this.elServerStrongReview) {
-		      this.elServerStrongReview.checked = false;
-		      this.engineSettings.serverStrongReview = false;
-		    }
-		  }
+    const isBoost = this.authState.plan?.plan === 'boost';
+    const showInReview = this.engineSettings.analysisLocation === 'server' && document.body.dataset.mode === 'review';
+    if (this.elServerBoostToggle) {
+      this.elServerBoostToggle.classList.toggle('boost-locked', !isBoost);
+      this.elServerBoostToggle.style.display = showInReview ? '' : 'none';
+    }
+    const lockIcon = document.getElementById('boost-lock-icon');
+    if (lockIcon) lockIcon.style.display = isBoost ? 'none' : '';
+    if (!isBoost && this.elServerStrongReview) {
+      this.elServerStrongReview.checked = false;
+      this.elServerStrongReview.disabled = true;
+      this.engineSettings.serverStrongReview = false;
+    } else if (isBoost && this.elServerStrongReview) {
+      this.elServerStrongReview.disabled = false;
+    }
+  }
 
-		  _enterBoostPage() {
-		    document.body.classList.remove('menu-active');
-		    document.body.dataset.mode = 'boost';
+			  _enterBoostPage() {
+			    document.body.classList.add('menu-active');
+			    document.body.dataset.mode = 'boost';
+			    if (this.elMainMenu) this.elMainMenu.hidden = true;
+			    if (this.elMainContent) this.elMainContent.hidden = true;
 		    this.puzzleMode.active = false;
 		    this.anticheatMode.active = false;
 		    if (this.coachMode.active) {
@@ -1211,8 +1409,17 @@ class ChessReviewApp {
 		    this._syncPuzzleVisibility();
 		    this._syncAnticheatVisibility();
 		    this._syncBoostPageVisibility();
-		    this._syncServerStrongToggle();
-		  }
+			    this._syncServerStrongToggle();
+			  }
+
+			  _closeBoostPage() {
+			    this._navigateTo('/index');
+			  }
+
+			  _handleBoostPurchase() {
+			    this._setAuthMode(this.authState.user ? 'signin' : 'signup');
+			    this._navigateTo(this.authState.user ? '/account' : '/signup');
+			  }
 
 		  _enterAnticheatMode() {
 	    document.body.classList.remove('menu-active');
@@ -1237,23 +1444,27 @@ class ChessReviewApp {
 	    this._syncActionButtons();
 	  }
 
-	  _syncPuzzlePanel() {
-	    if (!this.elPuzzleCard) return;
-	    const mode = this.puzzleMode;
-	    const needsLogin = !this.authState.user;
-	    const currentPuzzleId = mode.current?.puzzle?.id || '';
-	    const alreadyAttempted = !!(currentPuzzleId && mode.attemptedPuzzleIds?.has(currentPuzzleId));
-	    if (this.elPuzzleUserRating) this.elPuzzleUserRating.textContent = Math.round(mode.rating || 1500);
-	    if (this.elPuzzleTargetRating) this.elPuzzleTargetRating.textContent = mode.current?.puzzle?.rating || mode.rating || 1500;
-	    if (this.elPuzzleStreak) this.elPuzzleStreak.textContent = String(mode.streak || 0);
-	    if (this.elPuzzleScore) this.elPuzzleScore.textContent = `${mode.solvedCount || 0} / ${mode.attemptedCount || 0}`;
-	    if (this.elPuzzleSource) this.elPuzzleSource.textContent = mode.source || 'Lichess training';
-	    if (this.elBtnPuzzleNext) this.elBtnPuzzleNext.disabled = needsLogin || !!mode.loading;
-	    if (this.elBtnPuzzleDaily) this.elBtnPuzzleDaily.disabled = needsLogin || !!mode.loading;
-	    if (this.elBtnPuzzleRetry) this.elBtnPuzzleRetry.disabled = !mode.current || !!mode.loading || alreadyAttempted;
-	    if (this.elBtnPuzzleHint) this.elBtnPuzzleHint.disabled = needsLogin || !mode.current || mode.loading || mode.solved;
+		  _syncPuzzlePanel() {
+		    if (!this.elPuzzleCard) return;
+		    const mode = this.puzzleMode;
+		    const currentPuzzleId = mode.current?.puzzle?.id || '';
+		    const alreadyAttempted = !!(currentPuzzleId && mode.attemptedPuzzleIds?.has(currentPuzzleId));
+		    this.elPuzzleCard.classList.toggle('puzzle-loading', !!mode.loading);
+		    if (this.elPuzzleUserRating) this.elPuzzleUserRating.textContent = Math.round(mode.rating || 1500);
+	    if (this.elPuzzleTargetRating) this.elPuzzleTargetRating.textContent = mode.loading ? '--' : (mode.current?.puzzle?.rating || mode.rating || 1500);
+		    if (this.elPuzzleStreak) this.elPuzzleStreak.textContent = String(mode.streak || 0);
+		    if (this.elPuzzleScore) this.elPuzzleScore.textContent = `${mode.solvedCount || 0} / ${mode.attemptedCount || 0}`;
+		    if (this.elPuzzleSource) this.elPuzzleSource.textContent = mode.loading ? 'Finding puzzle' : (mode.source || 'Lichess training');
+		    if (this.elBtnPuzzleNext) this.elBtnPuzzleNext.disabled = !!mode.loading;
+		    if (this.elBtnPuzzleDaily) this.elBtnPuzzleDaily.disabled = !!mode.loading;
+		    if (this.elBtnPuzzleRetry) this.elBtnPuzzleRetry.disabled = !mode.current || !!mode.loading || alreadyAttempted;
+		    if (this.elBtnPuzzleHint) this.elBtnPuzzleHint.disabled = !mode.current || mode.loading || mode.solved;
 	    if (this.elBtnPuzzleReview) this.elBtnPuzzleReview.disabled = this.gameMoves.length === 0 || this.isAnalyzing || !mode.solved;
 	    if (this.elPuzzleTags) {
+	      if (mode.loading) {
+	        this.elPuzzleTags.innerHTML = this._renderSkeletonLines(4, 'puzzle-tag-skeleton');
+	        return;
+	      }
 	      const themes = mode.current?.puzzle?.themes || [];
 	      this.elPuzzleTags.innerHTML = themes.length
 	        ? themes.slice(0, 8).map((theme) => `<span class="puzzle-tag">${this._escapeHtml(this._formatPuzzleTheme(theme))}</span>`).join('')
@@ -1287,9 +1498,10 @@ class ChessReviewApp {
 	    this.elBtnMenuCoach?.addEventListener('click', () => this._navigateTo('/coach'));
 	    this.elBtnMenuPuzzles?.addEventListener('click', () => this._navigateTo('/puzzles'));
 	    this.elBtnMenuAnticheat?.addEventListener('click', () => this._navigateTo('/anticheat'));
-    this.elBtnMenuBoost?.addEventListener('click', () => this._showBoostPage());
+    this.elBtnMenuBoost?.addEventListener('click', () => this._navigateTo('/boost'));
     this.elBtnCloseBoost?.addEventListener('click', () => this._closeBoostPage());
-    this.elBtnBoostPurchase?.addEventListener('click', () => this._handleBoostPurchase());
+	    this.elBtnBoostPurchase?.addEventListener('click', () => this._handleBoostPurchase());
+		    this.elBtnBoostAccount?.addEventListener('click', () => this._navigateTo(this.authState.user ? '/account' : '/signup'));
     this.elBtnBackMenu?.addEventListener('click', () => this._navigateTo('/index'));
     this.elEngineChoiceClose?.addEventListener('click', () => this._hideEngineChoiceModal());
     this.elEngineChoiceModal?.addEventListener('click', (e) => {
@@ -1307,8 +1519,17 @@ class ChessReviewApp {
 	    this.elBtnImport.addEventListener('click', () => this._navigateTo('/review'));
 	    this.elBtnPuzzles?.addEventListener('click', () => this._navigateTo('/puzzles'));
 	    this.elBtnAnticheat?.addEventListener('click', () => this._navigateTo('/anticheat'));
-		    this.elBtnAccount?.addEventListener('click', () => this._showAccountModal());
-	    this.elBtnSettings.addEventListener('click', () => this._showSettingsModal());
+			    this.elBtnAccount?.addEventListener('click', () => this._navigateTo('/account'));
+		    this.elBtnSettings.addEventListener('click', () => this._navigateTo('/settings'));
+	    this.elPageToSignup?.addEventListener('click', () => this._navigateTo('/signup'));
+	    this.elPageToLogin?.addEventListener('click', () => this._navigateTo('/login'));
+	    this.elLoginSubmit?.addEventListener('click', () => this._handlePageEmailAuth('signin'));
+	    this.elSignupSubmit?.addEventListener('click', () => this._handlePageEmailAuth('signup'));
+	    this.elLoginGoogle?.addEventListener('click', () => this._handleGoogleAuth());
+	    this.elSignupGoogle?.addEventListener('click', () => this._handleGoogleAuth());
+	    this.elPageAccountSignin?.addEventListener('click', () => this._navigateTo('/signin'));
+	    this.elPageAccountSignout?.addEventListener('click', () => this._handleSignOut());
+	    this.elPageClearCache?.addEventListener('click', () => this._clearLocalCache());
 	    this.elAccountClose?.addEventListener('click', () => this._hideAccountModal());
 	    this.elAccountModal?.addEventListener('click', (e) => {
 	      if (e.target === this.elAccountModal) this._hideAccountModal();
@@ -1368,7 +1589,7 @@ class ChessReviewApp {
 	    this.elServerStrongReview?.addEventListener('change', () => {
 	      this.engineSettings.serverStrongReview = this.elServerStrongReview.checked;
 	    });
-	    this.elBtnBoostAccount?.addEventListener('click', () => this._showAccountModal());
+	    this.elBtnBoostAccount?.addEventListener('click', () => this._navigateTo(this.authState.user ? '/account' : '/signup'));
 
     this.elBtnFlip.addEventListener('click', () => this.board.flip());
     this.elBtnFirst.addEventListener('click', () => this._goToMove(-1));
@@ -1465,10 +1686,13 @@ class ChessReviewApp {
 		    delete document.body.dataset.mode;
 			    this._syncCoachVisibility();
 			    this._syncPuzzleVisibility();
-			    this._syncAnticheatVisibility();
-			    this._syncBoostPageVisibility();
-		    document.body.classList.add('menu-active');
-		  }
+	    this._syncAnticheatVisibility();
+	    this._syncBoostPageVisibility();
+		    if (this.elMainMenu) this.elMainMenu.hidden = false;
+	    this._hideRoutePages();
+	    if (this.elMainContent) this.elMainContent.hidden = false;
+	    document.body.classList.add('menu-active');
+	  }
 
   async _initEngine() {
     const initToken = ++this.engineInitToken;
@@ -1631,19 +1855,29 @@ class ChessReviewApp {
 	    if (this.elEngineLoadingText) this.elEngineLoadingText.textContent = message || `${pct}%`;
 	  }
 
-		  _showEngineLoadingOverlay(message = 'Preparing Stockfish...') {
-		    if (!this.elEngineLoadingOverlay) return;
-		    if (document.body.classList.contains('menu-active')) {
-		      if (this.elEngineLoadingText) this.elEngineLoadingText.textContent = message;
-		      return;
-		    }
+			  _showEngineLoadingOverlay(message = 'Preparing Stockfish...') {
+			    if (!this.elEngineLoadingOverlay) return;
+			    if (document.body.classList.contains('menu-active') && !document.body.dataset.page) {
+			      if (this.elEngineLoadingText) this.elEngineLoadingText.textContent = message;
+			      return;
+			    }
 		    this.elEngineLoadingOverlay.style.display = 'flex';
 		    if (this.elEngineLoadingText) this.elEngineLoadingText.textContent = message;
 		  }
 
-	  _hideEngineLoadingOverlay() {
-	    if (this.elEngineLoadingOverlay) this.elEngineLoadingOverlay.style.display = 'none';
-	  }
+		  _hideEngineLoadingOverlay() {
+		    if (this.elEngineLoadingOverlay) this.elEngineLoadingOverlay.style.display = 'none';
+		  }
+
+		  _showAppLoadingOverlay(message = 'Loading...') {
+		    if (!this.elAppLoadingOverlay) return;
+		    this.elAppLoadingOverlay.style.display = 'flex';
+		    if (this.elAppLoadingText) this.elAppLoadingText.textContent = message;
+		  }
+
+		  _hideAppLoadingOverlay() {
+		    if (this.elAppLoadingOverlay) this.elAppLoadingOverlay.style.display = 'none';
+		  }
 
   _preloadSounds(onProgress) {
 	    if (this.soundPreloadPromise) return this.soundPreloadPromise;
@@ -2081,12 +2315,14 @@ class ChessReviewApp {
     this._enterCoachMode(result.value);
   }
 
-	  _clearReviewExtras() {
-	    if (this.elReviewNarrative) this.elReviewNarrative.innerHTML = '';
-	    if (this.elTrainingList) this.elTrainingList.innerHTML = '';
-	    if (this.elOpeningDrift) this.elOpeningDrift.innerHTML = '';
-	    if (this.elPatternList) this.elPatternList.innerHTML = '';
-	  }
+		  _clearReviewExtras() {
+		    if (this.elReviewSummary) this.elReviewSummary.classList.remove('review-skeleton');
+		    if (this.elReviewNarrative) this.elReviewNarrative.innerHTML = '';
+		    if (this.elTrainingList) this.elTrainingList.innerHTML = '';
+		    if (this.elOpeningDrift) this.elOpeningDrift.innerHTML = '';
+		    if (this.elPatternList) this.elPatternList.innerHTML = '';
+		    if (this.elPhaseBreakdown) this.elPhaseBreakdown.innerHTML = '';
+		  }
 
   _hideCoachSetupModal() {
     if (window.Swal?.isVisible?.()) window.Swal.close();
@@ -2128,15 +2364,9 @@ class ChessReviewApp {
 			    this._syncAnticheatVisibility();
 			    this._syncBoostPageVisibility();
 			    this._syncPuzzlePanel();
-			    if (!this.authState.user) {
-			      this._setPuzzleStatus('Log in to solve puzzles. Your rating and completed puzzle list are kept on your account.', 'error');
-			      this._showAccountModal();
-			      this._syncActionButtons();
-			      return;
-			    }
 
-			    const rating = Math.round(Number(this.puzzleMode.rating) || 1500);
-		    this._setPuzzleStatus(this.puzzleMode.current ? 'Continue the current puzzle.' : `Loading a ${rating}-rated puzzle...`, this.puzzleMode.current ? '' : 'loading');
+				    const rating = Math.round(Number(this.puzzleMode.rating) || 1500);
+			    this._setPuzzleStatus(this.puzzleMode.current ? 'Continue the current puzzle.' : `Loading a ${rating}-rated puzzle...`, this.puzzleMode.current ? '' : 'loading');
 		    this._syncActionButtons();
 		    if (!this.puzzleMode.current) {
 		      await this._loadNextPuzzle({ target: rating });
@@ -2180,36 +2410,26 @@ class ChessReviewApp {
 	    return response.json();
 	  }
 
-		  async _loadDailyPuzzle() {
-		    if (!this.authState.user) {
-		      this._setPuzzleStatus('Log in to load puzzles.', 'error');
-		      this._showAccountModal();
-		      return;
-		    }
-		    await this._loadPuzzleFromSource(async () => {
-				const response = await fetch('/api/puzzle?type=daily', {
-		          headers: await this._authHeaders(),
+			  async _loadDailyPuzzle() {
+			    await this._loadPuzzleFromSource(async () => {
+					const response = await fetch('/api/puzzle?type=daily', {
+			          headers: await this._authHeaders(),
 		          cache: 'no-store',
 		        });
 		      const loaded = await response.json().catch(() => null);
 		      if (!response.ok) {
-	        const code = loaded?.code;
-	        if (response.status === 503 && code === 'puzzle_db_missing') {
-	          throw new Error('Puzzle database is not built on the server yet. Run npm run build there.');
-	        }
+		        const code = loaded?.code;
+		        if (response.status === 503 && code === 'puzzle_db_missing') {
+		          throw new Error('Puzzle chunks are not built on the server yet. Run npm run build:puzzles there.');
+		        }
 	        throw new Error(loaded?.error || `Puzzle API responded with ${response.status}`);
 	      }
 		      return loaded;
 		    });
 		  }
 
-			  async _loadNextPuzzle(options = {}) {
-			    if (!this.authState.user) {
-			      this._setPuzzleStatus('Log in to load puzzles.', 'error');
-			      this._showAccountModal();
-			      return;
-			    }
-			    const theme = this.elPuzzleTheme?.value || 'mix';
+				  async _loadNextPuzzle(options = {}) {
+				    const theme = this.elPuzzleTheme?.value || 'mix';
 		    const target = Number(options.target) || Number(this.puzzleMode.rating) || 1500;
 		    const difficulty = options.difficulty || this._puzzleDifficultyForRating();
 		    const excludeId = options.excludeId || this.puzzleMode.current?.puzzle?.id || '';
@@ -2228,10 +2448,10 @@ class ChessReviewApp {
 		        });
 		      const loaded = await response.json().catch(() => null);
 		      if (!response.ok) {
-	        const code = loaded?.code;
-	        if (response.status === 503 && code === 'puzzle_db_missing') {
-	          throw new Error('Puzzle database is not built on the server yet. Run npm run build there.');
-	        }
+		        const code = loaded?.code;
+		        if (response.status === 503 && code === 'puzzle_db_missing') {
+		          throw new Error('Puzzle chunks are not built on the server yet. Run npm run build:puzzles there.');
+		        }
 	        throw new Error(loaded?.error || `Puzzle API responded with ${response.status}`);
 	      }
 		      if (loaded?.data?.puzzle?.id === excludeId) throw new Error('That puzzle was already on the board. Try again.');
@@ -2280,9 +2500,10 @@ class ChessReviewApp {
 	      solution: Array.isArray(puzzle.solution) ? puzzle.solution.slice() : [],
 	      step: 0,
 		      solved: false,
-		      failed: false,
-		      hintLevel: 0,
-		      lastDelta: 0,
+      failed: false,
+      hintLevel: 0,
+      hintUsed: false,
+      lastDelta: 0,
 		    };
 
 	    this.originalGameMoves = [];
@@ -2507,6 +2728,8 @@ class ChessReviewApp {
 	    const from = expected.slice(0, 2);
 	    const to = expected.slice(2, 4);
 	    const hintLevel = Math.min((this.puzzleMode.hintLevel || 0) + 1, 3);
+    this.puzzleMode.hintUsed = true;
+    this.puzzleMode.rated = false;
 	    this.puzzleMode.hintLevel = hintLevel;
 	    this._setBoardOrientationForColor(this.chess.turn());
 	    this.board.clearBestMoveArrow();
@@ -2535,8 +2758,14 @@ class ChessReviewApp {
 	  }
 
 		  async _recordPuzzleAttempt(won) {
+    if (this.puzzleMode.hintUsed) {
+      this.puzzleMode.lastDelta = 0;
+      this._setPuzzleStatus(won ? 'Solved (unrated — hint used).' : 'Failed (unrated — hint used).', won ? 'success' : 'error');
+      this._syncPuzzlePanel();
+      return false;
+    }
 		    const puzzleId = this.puzzleMode.current?.puzzle?.id || '';
-		    if (!this.puzzleMode.attemptedPuzzleIds) this.puzzleMode.attemptedPuzzleIds = new Set(this._localAttemptedPuzzleIds());
+		    if (!this.puzzleMode.attemptedPuzzleIds) this.puzzleMode.attemptedPuzzleIds = new Set();
 		    if (puzzleId && this.puzzleMode.attemptedPuzzleIds.has(puzzleId)) {
 	      this.puzzleMode.lastDelta = 0;
 	      this._rememberLocalPuzzleAttempt(puzzleId);
@@ -2642,16 +2871,15 @@ class ChessReviewApp {
 		    if (!user) return null;
 	    
 	    try {
-			const response = await fetch('/api/record-puzzle-attempt', {
+				const response = await fetch('/api/puzzle/solve', {
 		        method: 'POST',
 		        headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
 	        cache: 'no-store',
-		        body: JSON.stringify({
-		          userId: user.uid,
-		          puzzleRating: Number(this.puzzleMode.current?.puzzle?.rating) || 1500,
-		          won: !!won,
-		          puzzleId: this.puzzleMode.current?.puzzle?.id,
-		        }),
+			        body: JSON.stringify({
+			          userId: user.uid,
+			          won: !!won,
+			          puzzleRating: Number(this.puzzleMode.current?.puzzle?.rating) || 1500,
+			        }),
 	      });
 	      
 	      if (!response.ok) {
@@ -3349,7 +3577,7 @@ class ChessReviewApp {
 		    if (this.anticheatMode.checking) return;
 		    if (!this.authState.user) {
 		      this._setAnticheatStatus('Log in to run anticheat. Free accounts get 1 server run per day; Boost removes that limit.', 'error');
-		      this._showAccountModal();
+			    this._navigateTo(this.authState.user ? '/account' : '/signup');
 		      return;
 		    }
 	    const source = this.elAnticheatSource?.value || 'pgn';
@@ -3959,6 +4187,7 @@ class ChessReviewApp {
 
     this._invalidateAnalysisResults({ skipBoardRefresh: true });
     this._renderMoveList();
+    this._saveGameState();
     this._showOpeningInfo(this.analyzer.detectOpening(this.gameMoves));
     this._updateGameStatus();
     this._playMoveSound(move, this.currentMoveIndex);
@@ -4376,7 +4605,45 @@ class ChessReviewApp {
     this._requestLiveEvaluation('Analyzing original position...');
     this._playNamedSound('start');
     this._syncCoachControls();
+    this._saveGameState();
   }
+
+  _loadSavedGameState(type) {
+    try {
+      const key = type === 'coach' ? 'sidastuff.coachGame' : 'sidastuff.reviewGame';
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const state = JSON.parse(raw);
+      const MAX_AGE = 12 * 60 * 60 * 1000;
+      if (!state?.moves?.length || (Date.now() - (state.savedAt || 0)) >= MAX_AGE) return null;
+      return state;
+    } catch (_) { return null; }
+  }
+
+  _saveGameState() {
+    try {
+      const isCoach = this.gameHeaders?.Event === 'Coach';
+      const key = isCoach ? 'sidastuff.coachGame' : 'sidastuff.reviewGame';
+      if (!this.gameMoves.length && !isCoach) { localStorage.removeItem(key); return; }
+      const state = {
+        moves: this.gameMoves.slice(),
+        headers: this.gameHeaders || {},
+        initialFen: this.initialFen,
+        savedAt: Date.now(),
+      };
+      if (isCoach) {
+        state.coachMode = {
+          elo: this.coachMode.elo,
+          humanColor: this.coachMode.humanColor,
+          aiAdjust: this.coachMode.aiAdjust,
+          adjustStyle: this.coachMode.adjustStyle,
+        };
+      }
+      localStorage.setItem(key, JSON.stringify(state));
+    } catch (_) {}
+  }
+
+  _restoreGameState() {}
 
   _goToMove(index) {
     if (index < -1) index = -1;
@@ -5004,10 +5271,10 @@ class ChessReviewApp {
     this._setEngineControlsDisabled(true);
 	    this.analyzer.setReviewProfile(this._getReviewProfile());
 	    this.elReviewBtnText.textContent = 'Analyzing...';
-			    this.elProgressBar.style.display = 'block';
-			    this.elProgressFill.style.width = '0%';
-			    this.elReviewSummary.style.display = 'block';
-			    this.board.setLoading(null, 'Reviewing game');
+				    this.elProgressBar.style.display = 'block';
+				    this.elProgressFill.style.width = '0%';
+				    this._showReviewLoadingSkeleton();
+				    this.board.setLoading(null, 'Reviewing game');
 		    const updateReviewProgress = (current, total, message) => {
 		      const pct = Math.round((current / Math.max(1, total - 1)) * 100);
 		      this.elProgressFill.style.width = clamp(pct, 0, 100) + '%';
@@ -5078,12 +5345,16 @@ class ChessReviewApp {
 				      this.isAnalyzing = false;
 				      this._stopReviewPlayback();
 			      this._setEngineControlsDisabled(false);
-		      this._syncActionButtons();
-		      this.elReviewBtnText.textContent = this.analysisResults ? 'Re-analyze Game' : 'Start Review';
-	      this.elProgressBar.style.display = 'none';
-	      this.board.clearLoading();
-	    }
-  }
+			      this._syncActionButtons();
+			      this.elReviewBtnText.textContent = this.analysisResults ? 'Re-analyze Game' : 'Start Review';
+		      this.elProgressBar.style.display = 'none';
+		      if (!this.analysisResults) {
+		        this._clearReviewExtras();
+		        this.elReviewSummary.style.display = 'none';
+		      }
+		      this.board.clearLoading();
+		    }
+	  }
 
 			  async _analyzeGameOnServer() {
 				    const reviewProfile = this._getReviewProfile();
@@ -5234,10 +5505,48 @@ class ChessReviewApp {
     this.elOpeningName.textContent = `${opening.name}${opening.eco ? ` (${opening.eco})` : ''}`;
   }
 
-  _showReviewSummary() {
-    if (!this.analysisResults) return;
+  _renderSkeletonLines(count = 3, className = '') {
+    return Array.from({ length: count }, (_, index) => {
+      const width = Math.max(36, 92 - (index % 3) * 16);
+      return `<span class="skeleton-line ${className}" style="--skeleton-width:${width}%"></span>`;
+    }).join('');
+  }
 
+  _showReviewLoadingSkeleton() {
+    if (!this.elReviewSummary) return;
     this.elReviewSummary.style.display = 'block';
+    this.elReviewSummary.classList.add('review-skeleton');
+
+    const headers = this.gameHeaders || {};
+    const summaryWhiteH4 = this.elReviewSummary.querySelector('.summary-col:first-child h4');
+    const summaryBlackH4 = this.elReviewSummary.querySelector('.summary-col:last-child h4');
+    if (summaryWhiteH4) summaryWhiteH4.textContent = headers.White || 'White';
+    if (summaryBlackH4) summaryBlackH4.textContent = headers.Black || 'Black';
+
+    document.getElementById('accuracy-white-val').textContent = '--';
+    document.getElementById('accuracy-black-val').textContent = '--';
+    document.getElementById('ring-white').style.strokeDashoffset = 283;
+    document.getElementById('ring-black').style.strokeDashoffset = 283;
+    document.getElementById('summary-white').innerHTML = this._renderSkeletonLines(5);
+    document.getElementById('summary-black').innerHTML = this._renderSkeletonLines(5);
+
+    this.elCapsWhite.textContent = '--';
+    this.elCapsBlack.textContent = '--';
+    this.elAcplWhite.textContent = '--';
+    this.elAcplBlack.textContent = '--';
+
+    if (this.elReviewNarrative) this.elReviewNarrative.innerHTML = `<p>${this._renderSkeletonLines(3)}</p>`;
+    if (this.elTrainingList) this.elTrainingList.innerHTML = this._renderSkeletonLines(4);
+    if (this.elOpeningDrift) this.elOpeningDrift.innerHTML = this._renderSkeletonLines(2);
+    if (this.elPatternList) this.elPatternList.innerHTML = this._renderSkeletonLines(3);
+    if (this.elPhaseBreakdown) this.elPhaseBreakdown.innerHTML = this._renderSkeletonLines(4);
+  }
+
+  _showReviewSummary() {
+	    if (!this.analysisResults) return;
+
+	    this.elReviewSummary.style.display = 'block';
+	    this.elReviewSummary.classList.remove('review-skeleton');
 
     const headers = this.gameHeaders || {};
     const whiteName = headers.White || 'White';
@@ -5625,6 +5934,29 @@ class ChessReviewApp {
   }
 }
 
+function browserMeetsChessRequirements() {
+  try {
+    const storageKey = '__chess_feature_test__';
+    window.localStorage.setItem(storageKey, '1');
+    window.localStorage.removeItem(storageKey);
+  } catch (_err) {
+    return false;
+  }
+  return !!(
+    window.WebAssembly
+    && window.Worker
+    && window.fetch
+    && window.Promise
+    && window.URL
+    && Array.from
+    && Object.assign
+  );
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  if (!browserMeetsChessRequirements() && !/incompatible-browser\.html$/i.test(window.location.pathname)) {
+    window.location.replace('/incompatible-browser.html');
+    return;
+  }
   window.app = new ChessReviewApp();
 });

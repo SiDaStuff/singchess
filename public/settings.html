@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings | SiDaStuff Chess</title>
+  <link rel="icon" type="image/png" href="./assets/logo.png">
+  <link rel="stylesheet" href="./css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
+</head>
+<body class="standalone-body" data-page="settings">
+  <div data-site-header></div>
+  <div class="standalone-shell">
+    <main class="standalone-main">
+      <section class="card standalone-card">
+        <h1>Settings</h1>
+
+        <h2 style="font-size:1rem;margin-top:4px">Browser Engine</h2>
+        <p>These settings apply when using browser review, coach, live eval, and local analysis.</p>
+
+        <label class="field">
+          <span class="field-label">Engine Type</span>
+          <select id="settings-engine-module" class="input-select">
+            <option value="lite-single">Stockfish 18 Lite (7 MB, recommended)</option>
+            <option value="full-single">Stockfish 18 Full (108 MB)</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Analysis Depth</span>
+          <select id="settings-engine-depth" class="input-select">
+            <option value="depth10">Depth 10 (fast)</option>
+            <option value="depth14" selected>Depth 14 (default)</option>
+            <option value="depth18">Depth 18</option>
+            <option value="depth22">Depth 22</option>
+            <option value="depth26">Depth 26 (slow)</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Move Timeout</span>
+          <select id="settings-engine-timeout" class="input-select">
+            <option value="4000">4 seconds</option>
+            <option value="8000">8 seconds</option>
+            <option value="12000" selected>12 seconds (default)</option>
+            <option value="20000">20 seconds</option>
+            <option value="30000">30 seconds</option>
+          </select>
+        </label>
+
+        <button id="btn-save-engine-settings" class="btn btn-primary" type="button">Save Engine Settings</button>
+        <p class="account-status" id="engine-settings-status"></p>
+
+        <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
+
+        <h2 style="font-size:1rem">Cache</h2>
+        <p>Clear local settings and puzzle progress stored in this browser.</p>
+        <button id="btn-clear-cache" class="btn btn-secondary" type="button">Clear Local Cache</button>
+        <p class="account-status" id="page-status"></p>
+      </section>
+    </main>
+  </div>
+  <div data-site-footer></div>
+  <div class="modal-overlay app-loading-overlay" id="app-loading-overlay" style="display:none">
+    <div class="modal modal-loading" role="status" aria-live="polite">
+      <div class="modal-body"><div class="modal-loading-spinner" aria-hidden="true"></div><h2>Loading</h2><p id="app-loading-text">Loading...</p></div>
+    </div>
+  </div>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js" crossorigin="anonymous"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js" crossorigin="anonymous"></script>
+  <script src="./js/header.js"></script>
+  <script src="./js/footer.js"></script>
+  <script src="./js/page-auth.js"></script>
+  <script>
+    (function () {
+      const STORAGE_KEY = 'sidastuff.engineSettings';
+
+      function loadSettings() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          return raw ? JSON.parse(raw) : {};
+        } catch (_) { return {}; }
+      }
+
+      function saveSettings(settings) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch (_) {}
+      }
+
+      document.addEventListener('DOMContentLoaded', function () {
+        const saved = loadSettings();
+        const moduleEl = document.getElementById('settings-engine-module');
+        const depthEl = document.getElementById('settings-engine-depth');
+        const timeoutEl = document.getElementById('settings-engine-timeout');
+        const statusEl = document.getElementById('engine-settings-status');
+
+        if (saved.module && moduleEl) moduleEl.value = saved.module;
+        if (saved.strength && depthEl) depthEl.value = saved.strength;
+        if (saved.maxTimeMs && timeoutEl) timeoutEl.value = String(saved.maxTimeMs);
+
+        document.getElementById('btn-save-engine-settings')?.addEventListener('click', function () {
+          const settings = {
+            module: moduleEl?.value || 'lite-single',
+            strength: depthEl?.value || 'depth14',
+            maxTimeMs: Number(timeoutEl?.value) || 12000,
+          };
+          saveSettings(settings);
+          if (statusEl) {
+            statusEl.textContent = 'Engine settings saved.';
+            statusEl.className = 'account-status success';
+            setTimeout(() => { statusEl.textContent = ''; statusEl.className = 'account-status'; }, 2500);
+          }
+        });
+      });
+    })();
+  </script>
+</body>
+</html>
