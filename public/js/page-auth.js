@@ -287,12 +287,6 @@
     const mode = params.get('mode');
     const oobCode = params.get('oobCode');
 
-    // If user visited auth page directly with no reset params, send them home.
-    if (!mode && !oobCode) {
-      window.location.replace('/');
-      return;
-    }
-
     if (!browserMeetsRequirements() && !/incompatible-browser\.html$/i.test(window.location.pathname)) {
       window.location.replace('/incompatible-browser.html');
       return;
