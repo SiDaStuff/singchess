@@ -20,16 +20,68 @@ const usersMeFn = require('./api/users-me.js');
 const giftBoostFn = require('./api/gift-boost.js');
 const adminBanUserFn = require('./api/admin-ban-user.js');
 const usersMeStreamFn = require('./api/users-me-stream.js');
+const banStatusFn = require('./api/ban-status.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const publicDir = path.resolve(__dirname, '../public');
 const serveStatic = process.env.SERVE_STATIC !== '0';
 const isDev = process.env.NODE_ENV === 'development' || process.env.CHESS_REVIEW_DEV_SERVER === '1';
+const allowedOrigins = new Set(['https://chess.sidastuff.com']);
+if (isDev) allowedOrigins.add('http://localhost:3000');
+const rateBuckets = new Map();
+
+function originAllowed(origin) {
+  if (!origin) return true;
+  return allowedOrigins.has(origin);
+}
+
+function applyCors(req, res) {
+  const origin = req.headers.origin;
+  if (originAllowed(origin) && origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+}
+
+function clientKey(req) {
+  return req.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || req.socket?.remoteAddress
+    || 'unknown';
+}
+
+function rateLimit({ windowMs, max, label }) {
+  return (req, res, next) => {
+    const now = Date.now();
+    const key = `${label}:${clientKey(req)}`;
+    const bucket = rateBuckets.get(key);
+    if (!bucket || bucket.resetAt <= now) {
+      rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+    bucket.count += 1;
+    if (bucket.count > max) {
+      res.setHeader('Retry-After', String(Math.ceil((bucket.resetAt - now) / 1000)));
+      return res.status(429).json({ error: 'Too many requests. Please slow down and try again shortly.' });
+    }
+    return next();
+  };
+}
 
 app.use(morgan('tiny'));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    applyCors(req, res);
+    if (!originAllowed(req.headers.origin)) {
+      return res.status(403).json({ error: 'Origin is not allowed.' });
+    }
+  }
+  return next();
+});
 
 function makeEvent(req) {
   return {
@@ -49,7 +101,10 @@ function forwardResult(res, result) {
   }
   if (result.headers) {
     try {
-      res.set(result.headers);
+      const headers = { ...result.headers };
+      if (headers['Access-Control-Allow-Origin'] === '*') delete headers['Access-Control-Allow-Origin'];
+      if (headers['access-control-allow-origin'] === '*') delete headers['access-control-allow-origin'];
+      res.set(headers);
     } catch (e) {}
   }
   const status = result.statusCode || 200;
@@ -81,28 +136,29 @@ function wrapHandler(fn) {
 
 // Allow CORS preflight for APIs
 app.options('/api/*', (req, res) => {
-  res.set({
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  });
   res.sendStatus(200);
 });
 
-app.post('/api/analyze', wrapHandler(analyzeFn));
-app.post('/api/analyze/stream', analyzeFn.streamHandler);
-app.post('/api/anticheat', wrapHandler(anticheatFn));
-app.post('/api/anticheat/stream', anticheatFn.streamHandler);
+const gentleApiLimit = rateLimit({ windowMs: 60 * 1000, max: 180, label: 'api' });
+const analysisLimit = rateLimit({ windowMs: 60 * 1000, max: 12, label: 'analysis' });
+const writeLimit = rateLimit({ windowMs: 60 * 1000, max: 45, label: 'write' });
+
+app.use('/api', gentleApiLimit);
+app.post('/api/analyze', analysisLimit, wrapHandler(analyzeFn));
+app.post('/api/analyze/stream', analysisLimit, analyzeFn.streamHandler);
+app.post('/api/anticheat', analysisLimit, wrapHandler(anticheatFn));
+app.post('/api/anticheat/stream', analysisLimit, anticheatFn.streamHandler);
 app.get('/api/puzzle', wrapHandler(getPuzzleFn));
 app.get('/api/recent-games', wrapHandler(recentGamesFn));
 app.get('/api/public-stats', wrapHandler(publicStatsFn));
-app.post('/api/public-stats', wrapHandler(publicStatsFn));
-app.post('/api/puzzle/solve', wrapHandler(puzzleSolveFn));
-app.post('/api/record-puzzle-attempt', wrapHandler(recordPuzzleAttemptFn));
+app.post('/api/public-stats', writeLimit, wrapHandler(publicStatsFn));
+app.post('/api/puzzle/solve', writeLimit, wrapHandler(puzzleSolveFn));
+app.post('/api/record-puzzle-attempt', writeLimit, wrapHandler(recordPuzzleAttemptFn));
+app.post('/api/auth/ban-status', writeLimit, wrapHandler(banStatusFn));
 app.get('/api/users/me', wrapHandler(usersMeFn));
 app.get('/api/users/me/stream', usersMeStreamFn.streamHandler);
-app.post('/api/admin/gift-boost', wrapHandler(giftBoostFn));
-app.post('/api/admin/ban-user', wrapHandler(adminBanUserFn));
+app.post('/api/admin/gift-boost', writeLimit, wrapHandler(giftBoostFn));
+app.post('/api/admin/ban-user', writeLimit, wrapHandler(adminBanUserFn));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 

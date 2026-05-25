@@ -46,6 +46,41 @@
   --board-size: min(620px, calc(100vw - 560px), calc(100vh - 210px));
 }
 
+body[data-board-theme="green"] {
+  --sq-light: #eeeed2;
+  --sq-dark: #769656;
+  --sq-highlight-light: #f6f682;
+  --sq-highlight-dark: #baca44;
+}
+
+body[data-board-theme="blue"] {
+  --sq-light: #eaf2fb;
+  --sq-dark: #5f83a7;
+  --sq-highlight-light: #d7ecff;
+  --sq-highlight-dark: #7aaad6;
+}
+
+body[data-board-theme="slate"] {
+  --sq-light: #dfe5ea;
+  --sq-dark: #6d7883;
+  --sq-highlight-light: #edf3f7;
+  --sq-highlight-dark: #9aa6b1;
+}
+
+body[data-board-theme="walnut"] {
+  --sq-light: #f1d8ae;
+  --sq-dark: #8a5a32;
+  --sq-highlight-light: #ffe7a5;
+  --sq-highlight-dark: #b77d42;
+}
+
+body[data-board-theme="rose"] {
+  --sq-light: #f7e2df;
+  --sq-dark: #b56a72;
+  --sq-highlight-light: #ffd9c7;
+  --sq-highlight-dark: #c88771;
+}
+
 body {
   font-family: 'Inter', Arial, sans-serif;
   background: var(--bg-page);
@@ -993,8 +1028,29 @@ body:not(.menu-active) .main-menu {
 
 .player-clock {
   font-family: 'IBM Plex Mono', monospace;
+  min-width: 72px;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
   font-size: 0.95rem;
-  color: var(--text-secondary);
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+}
+
+.player-clock.has-clock {
+  background: #111820;
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 5px 12px rgba(18, 31, 42, 0.12);
+  color: #f6f8fa;
+}
+
+.player-clock.active-clock {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  box-shadow: 0 0 0 3px var(--focus-ring), inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
 .board-wrapper {
@@ -1089,13 +1145,28 @@ body:not(.menu-active) .main-menu {
 }
 
 .square {
-	  position: relative;
+		  position: relative;
 	  display: flex;
 	  align-items: center;
 	  justify-content: center;
 	  cursor: pointer;
 	  touch-action: none;
-	  transition: background-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s cubic-bezier(.2,.9,.2,1);
+		  transition: background-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s cubic-bezier(.2,.9,.2,1);
+}
+
+.square.inverted::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: #ffffff;
+  mix-blend-mode: difference;
+  pointer-events: none;
+}
+
+.square > * {
+  position: relative;
+  z-index: 2;
 }
 
 .square.light {
@@ -2147,21 +2218,36 @@ body[data-mode="coach"] .analysis-overview {
   .board-section { gap: 12px; }
 }
 
-	.anticheat-card {
-	  display: grid;
-	  gap: 14px;
-	}
+		.anticheat-card {
+		  display: grid;
+		  gap: 14px;
+		  position: relative;
+		  overflow: hidden;
+		  border-color: rgba(29, 42, 53, 0.18);
+		  background:
+		    linear-gradient(135deg, rgba(13, 143, 139, 0.08), rgba(52, 110, 165, 0.08) 44%, rgba(255, 255, 255, 0) 70%),
+		    var(--bg-panel);
+		}
+
+		.anticheat-card::before {
+		  content: '';
+		  position: absolute;
+		  inset: 0 0 auto 0;
+		  height: 4px;
+		  background: linear-gradient(90deg, var(--clr-best), var(--clr-great), var(--clr-inaccuracy), var(--clr-blunder));
+		}
 	
 	.anticheat-card[hidden] {
 	  display: none;
 	}
 	
-	.anticheat-card-header {
-	  display: flex;
-	  align-items: center;
-	  justify-content: space-between;
-	  gap: 12px;
-	}
+		.anticheat-card-header {
+		  display: flex;
+		  align-items: center;
+		  justify-content: space-between;
+		  gap: 12px;
+		  padding-top: 4px;
+		}
 	
 	.anticheat-source {
 	  display: block;
@@ -2170,66 +2256,75 @@ body[data-mode="coach"] .analysis-overview {
 	  font-weight: 600;
 	}
 	
-	.anticheat-risk-pill {
-	  min-width: 84px;
-	  padding: 8px 10px;
-	  background: var(--bg-muted);
-	  border: 1px solid var(--border-color);
-	  border-radius: 8px;
-	  color: var(--text-primary);
-	  text-align: center;
-	  font-weight: 800;
-	}
+		.anticheat-risk-pill {
+		  min-width: 84px;
+		  padding: 8px 10px;
+		  background: #ffffff;
+		  border: 1px solid var(--border-color);
+		  border-radius: 8px;
+		  color: var(--text-primary);
+		  text-align: center;
+		  font-weight: 800;
+		  box-shadow: 0 6px 16px rgba(18, 31, 42, 0.08);
+		}
 	
-	.anticheat-risk-pill.low {
-	  color: var(--clr-best);
-	  border-color: rgba(79, 125, 60, 0.32);
-	}
+		.anticheat-risk-pill.low {
+		  color: var(--clr-best);
+		  border-color: rgba(79, 125, 60, 0.32);
+		  background: #eff8ec;
+		}
 	
-	.anticheat-risk-pill.watch {
-	  color: var(--clr-inaccuracy);
-	  border-color: rgba(200, 139, 22, 0.32);
-	}
+		.anticheat-risk-pill.watch {
+		  color: var(--clr-inaccuracy);
+		  border-color: rgba(200, 139, 22, 0.32);
+		  background: #fff8e8;
+		}
 	
-	.anticheat-risk-pill.high {
-	  color: var(--clr-blunder);
-	  border-color: rgba(177, 47, 41, 0.32);
-	}
+		.anticheat-risk-pill.high {
+		  color: var(--clr-blunder);
+		  border-color: rgba(177, 47, 41, 0.32);
+		  background: #fff0ee;
+		}
 	
-	.anticheat-warning {
-	  padding: 12px;
-	  background: #fff8e8;
-	  border: 1px solid rgba(200, 139, 22, 0.28);
-	  border-radius: 8px;
+		.anticheat-warning {
+		  padding: 12px;
+		  background: linear-gradient(135deg, #fff8e8, #fffdf5);
+		  border: 1px solid rgba(200, 139, 22, 0.28);
+		  border-radius: 8px;
 	  color: #7a4f08;
 	  font-size: 0.84rem;
 	  font-weight: 700;
 	}
 	
-	.anticheat-form {
-	  display: grid;
-	  grid-template-columns: 1fr 1fr 0.7fr auto;
-	  gap: 10px;
-	  align-items: end;
-	}
+		.anticheat-form {
+		  display: grid;
+		  grid-template-columns: 1fr 1fr 0.7fr auto;
+		  gap: 10px;
+		  align-items: end;
+		  padding: 12px;
+		  background: rgba(255, 255, 255, 0.72);
+		  border: 1px solid var(--border-soft);
+		  border-radius: 8px;
+		}
 	
 	.anticheat-action {
 	  min-height: 42px;
 	}
 	
-	.anticheat-pgn {
+		.anticheat-pgn {
 	  width: 100%;
 	  min-height: 180px;
 	  padding: 12px;
 	  border: 1px solid var(--border-color);
 	  border-radius: 8px;
 	  resize: vertical;
-	  background: #ffffff;
+		  background: #fbfdff;
 	  color: var(--text-primary);
 	  font-family: 'IBM Plex Mono', monospace;
 	  font-size: 0.84rem;
-	  line-height: 1.5;
-	}
+		  line-height: 1.5;
+		  box-shadow: inset 0 1px 0 rgba(18, 31, 42, 0.04);
+		}
 	
 	.anticheat-status {
 	  min-height: 24px;
@@ -2267,27 +2362,28 @@ body[data-mode="coach"] .analysis-overview {
 	  gap: 10px;
 	}
 	
-	.anticheat-score-card {
+		.anticheat-score-card {
 	  display: grid;
 	  grid-template-columns: minmax(90px, 0.35fr) 1fr;
 	  gap: 12px;
 	  padding: 12px;
-	  background: #f8fafc;
+		  background: linear-gradient(135deg, #f8fafc, #eef5f7);
 	  border: 1px solid var(--border-soft);
 	  border-radius: 8px;
 	}
 	
-	.anticheat-score {
+		.anticheat-score {
 	  display: grid;
 	  place-items: center;
 	  min-height: 88px;
-	  background: var(--bg-panel);
+		  background: #111820;
 	  border: 1px solid var(--border-color);
 	  border-radius: 8px;
 	  font-family: 'IBM Plex Mono', monospace;
-	  font-size: 2rem;
-	  font-weight: 800;
-	}
+		  color: #ffffff;
+		  font-size: 2rem;
+		  font-weight: 800;
+		}
 	
 	.anticheat-score-details {
 	  display: grid;
@@ -2300,12 +2396,13 @@ body[data-mode="coach"] .analysis-overview {
 	  gap: 8px;
 	}
 	
-	.anticheat-metric {
-	  padding: 8px;
-	  background: #ffffff;
-	  border: 1px solid var(--border-soft);
-	  border-radius: 8px;
-	}
+		.anticheat-metric {
+		  padding: 8px;
+		  background: #ffffff;
+		  border: 1px solid var(--border-soft);
+		  border-radius: 8px;
+		  box-shadow: 0 5px 12px rgba(18, 31, 42, 0.05);
+		}
 	
 	.anticheat-metric span {
 	  display: block;
@@ -2325,15 +2422,16 @@ body[data-mode="coach"] .analysis-overview {
 	  gap: 8px;
 	}
 	
-	.anticheat-game {
+		.anticheat-game {
 	  display: grid;
 	  grid-template-columns: 1fr auto;
 	  gap: 10px;
 	  padding: 10px;
 	  background: #ffffff;
-	  border: 1px solid var(--border-soft);
-	  border-radius: 8px;
-	}
+		  border: 1px solid var(--border-soft);
+		  border-radius: 8px;
+		  box-shadow: 0 5px 12px rgba(18, 31, 42, 0.04);
+		}
 	
 	.anticheat-game small {
 	  color: var(--text-muted);
@@ -2644,8 +2742,10 @@ body[data-mode="puzzle"] .eval-graph-card {
 }
 
 .anticheat-card {
-  border: 1px solid rgba(200, 182, 255, 0.35);
-  background: linear-gradient(180deg, rgba(200,182,255,0.06) 0%, #ffffff 42%);
+  border: 1px solid rgba(29, 42, 53, 0.18);
+  background:
+    linear-gradient(135deg, rgba(13, 143, 139, 0.08), rgba(52, 110, 165, 0.08) 44%, rgba(255, 255, 255, 0) 70%),
+    var(--bg-panel);
   box-shadow: 0 10px 28px rgba(32, 39, 33, 0.06);
 }
 

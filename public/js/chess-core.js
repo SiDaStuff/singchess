@@ -1975,7 +1975,7 @@ class MoveAnalyzer {
     return evals;
   }
 
-  async analyzeGame(moves, engine, onProgress, options = {}) {
+	  async analyzeGame(moves, engine, onProgress, options = {}) {
     const positions = this._positionsForMoves(moves, options.initialFen);
     const evals = await this.evaluatePositions(positions, engine, onProgress, {
       ...options,
@@ -2165,10 +2165,26 @@ class MoveAnalyzer {
       black: this.summarizeByPhase(results, 'black'),
     };
 
-    return results;
-  }
+	    return results;
+	  }
 
-	  calculateAccuracy(moveResults, color) {
+	  async resultsFromEvals(moves, positions, evals, opening = null, options = {}) {
+	    const originalEvaluatePositions = this.evaluatePositions;
+	    const originalDetectOpening = this.detectOpening;
+	    this.evaluatePositions = async () => evals;
+	    if (opening) this.detectOpening = () => opening;
+	    try {
+	      return await this.analyzeGame(moves, null, null, {
+	        ...options,
+	        initialFen: options.initialFen,
+	      });
+	    } finally {
+	      this.evaluatePositions = originalEvaluatePositions;
+	      this.detectOpening = originalDetectOpening;
+	    }
+	  }
+
+		  calculateAccuracy(moveResults, color) {
 	    const expectedLoss = this.calculateExpectedLoss(moveResults, color);
 	    if (expectedLoss !== null) {
 	      const evalScore = clamp(100 - (expectedLoss * 220), 0, 100);

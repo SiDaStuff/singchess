@@ -29,7 +29,11 @@ exports.streamHandler = async (req, res) => {
   try {
     user = await requireUser(event);
   } catch (err) {
-    sseWrite(res, 'error', { error: err.message || 'Unauthorized.', code: err.statusCode || 401 });
+    sseWrite(res, err.statusCode === 403 ? 'disabled' : 'error', {
+      error: err.message || 'Unauthorized.',
+      code: err.code || err.statusCode || 401,
+      reason: err.reason || '',
+    });
     res.end();
     return;
   }
@@ -53,7 +57,11 @@ exports.streamHandler = async (req, res) => {
       await requireUser(event);
       sseWrite(res, 'status', { message: 'active' });
     } catch (err) {
-      sseWrite(res, 'disabled', { error: err.message || 'Account disabled.', code: err.statusCode || 403 });
+      sseWrite(res, 'disabled', {
+        error: err.message || 'Account disabled.',
+        code: err.code || err.statusCode || 403,
+        reason: err.reason || '',
+      });
       stopStream();
     }
   };

@@ -4,10 +4,19 @@ function safePuzzleId(id) {
   return String(id || '').replace(/[.#$\[\]/]/g, '_');
 }
 
-function corsHeaders() {
+function allowedOrigin(origin) {
+  if (!origin) return '';
+  const isDev = process.env.NODE_ENV === 'development' || process.env.CHESS_REVIEW_DEV_SERVER === '1';
+  if (origin === 'https://chess.sidastuff.com') return origin;
+  if (isDev && origin === 'http://localhost:3000') return origin;
+  return '';
+}
+
+function corsHeaders(event) {
+  const origin = allowedOrigin(event?.headers?.origin || event?.headers?.Origin);
   return {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
+    ...(origin ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}),
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   };
@@ -25,10 +34,21 @@ function dbUnavailableResponse(headers) {
 }
 
 exports.handler = async (event) => {
-  const headers = corsHeaders();
+  const headers = corsHeaders(event);
 
   if (event.httpMethod === 'OPTIONS') {
+    if ((event.headers?.origin || event.headers?.Origin) && !headers['Access-Control-Allow-Origin']) {
+      return { statusCode: 403, headers, body: '' };
+    }
     return { statusCode: 200, headers, body: '' };
+  }
+
+  if ((event.headers?.origin || event.headers?.Origin) && !headers['Access-Control-Allow-Origin']) {
+    return {
+      statusCode: 403,
+      headers,
+      body: JSON.stringify({ error: 'Origin is not allowed.' }),
+    };
   }
 
   try {

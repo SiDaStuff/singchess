@@ -77,6 +77,21 @@ async function getUserRecord(uid) {
   return firebaseAdmin.auth().getUser(uid);
 }
 
+function banError(reason = '') {
+  const suffix = reason ? ` Reason: ${reason}` : '';
+  const error = new Error(`Account banned.${suffix}`);
+  error.statusCode = 403;
+  error.code = 'account_banned';
+  error.reason = reason || '';
+  return error;
+}
+
+async function getBanForUid(uid) {
+  const { db: database } = initAdmin();
+  const snap = await database.ref(`users/${uid}/profile/ban`).once('value');
+  return snap.val() || {};
+}
+
 async function requireUser(event) {
   const token = authToken(event);
   if (!token) {
@@ -87,16 +102,34 @@ async function requireUser(event) {
   const { admin: firebaseAdmin } = initAdmin();
   const decoded = await firebaseAdmin.auth().verifyIdToken(token);
   const userRecord = await firebaseAdmin.auth().getUser(decoded.uid);
-  if (userRecord.disabled) {
-    const error = new Error('Account disabled.');
-    error.statusCode = 403;
-    throw error;
+  const ban = await getBanForUid(decoded.uid).catch(() => ({}));
+  if (userRecord.disabled || ban.disabled) {
+    throw banError(String(ban.reason || '').trim());
   }
   return {
     uid: decoded.uid,
     email: String(decoded.email || '').toLowerCase(),
     name: decoded.name || decoded.email || 'Player',
     disabled: false,
+  };
+}
+
+async function getBanStatus(event) {
+  const body = JSON.parse(event.body || '{}');
+  const email = String(body.email || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { banned: false };
+  const { admin: firebaseAdmin } = initAdmin();
+  let target;
+  try {
+    target = await firebaseAdmin.auth().getUserByEmail(email);
+  } catch (_err) {
+    return { banned: false };
+  }
+  const ban = await getBanForUid(target.uid).catch(() => ({}));
+  if (!target.disabled && !ban.disabled) return { banned: false };
+  return {
+    banned: true,
+    reason: String(ban.reason || '').trim(),
   };
 }
 
@@ -307,6 +340,7 @@ module.exports = {
   getMe,
   getProfile,
   giftBoost,
+  getBanStatus,
   banUser,
   unbanUser,
   initAdmin,

@@ -55,6 +55,35 @@
 
         <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
 
+        <h2 style="font-size:1rem">Board Appearance</h2>
+        <label class="field">
+          <span class="field-label">Board Colors</span>
+          <select id="settings-board-theme" class="input-select">
+            <option value="classic">Classic</option>
+            <option value="green">Tournament Green</option>
+            <option value="blue">Coastal Blue</option>
+            <option value="slate">Slate</option>
+            <option value="walnut">Walnut</option>
+            <option value="rose">Rosewood</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Piece Icons</span>
+          <select id="settings-piece-theme" class="input-select">
+            <option value="classic">Classic</option>
+            <option value="glass">Glass</option>
+            <option value="wood">Wood</option>
+            <option value="neon">Neon</option>
+            <option value="mono">Mono</option>
+          </select>
+        </label>
+
+        <button id="btn-save-appearance-settings" class="btn btn-primary" type="button">Save Appearance</button>
+        <p class="account-status" id="appearance-settings-status"></p>
+
+        <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
+
         <h2 style="font-size:1rem">Cache</h2>
         <p>Clear local settings and puzzle progress stored in this browser.</p>
         <button id="btn-clear-cache" class="btn btn-secondary" type="button">Clear Local Cache</button>
@@ -93,14 +122,22 @@
         const moduleEl = document.getElementById('settings-engine-module');
         const depthEl = document.getElementById('settings-engine-depth');
         const timeoutEl = document.getElementById('settings-engine-timeout');
+        const boardThemeEl = document.getElementById('settings-board-theme');
+        const pieceThemeEl = document.getElementById('settings-piece-theme');
         const statusEl = document.getElementById('engine-settings-status');
+        const appearanceStatusEl = document.getElementById('appearance-settings-status');
 
         if (saved.module && moduleEl) moduleEl.value = saved.module;
         if (saved.strength && depthEl) depthEl.value = saved.strength;
         if (saved.maxTimeMs && timeoutEl) timeoutEl.value = String(saved.maxTimeMs);
+        if (saved.boardTheme && boardThemeEl) boardThemeEl.value = saved.boardTheme;
+        if (saved.pieceTheme && pieceThemeEl) pieceThemeEl.value = saved.pieceTheme;
+        document.body.dataset.boardTheme = boardThemeEl?.value || 'classic';
+        document.body.dataset.pieceTheme = pieceThemeEl?.value || 'classic';
 
         document.getElementById('btn-save-engine-settings')?.addEventListener('click', function () {
           const settings = {
+            ...loadSettings(),
             module: moduleEl?.value || 'lite-single',
             strength: depthEl?.value || 'depth14',
             maxTimeMs: Number(timeoutEl?.value) || 12000,
@@ -110,6 +147,22 @@
             statusEl.textContent = 'Engine settings saved.';
             statusEl.className = 'account-status success';
             setTimeout(() => { statusEl.textContent = ''; statusEl.className = 'account-status'; }, 2500);
+          }
+        });
+
+        document.getElementById('btn-save-appearance-settings')?.addEventListener('click', function () {
+          const settings = {
+            ...loadSettings(),
+            boardTheme: boardThemeEl?.value || 'classic',
+            pieceTheme: pieceThemeEl?.value || 'classic',
+          };
+          saveSettings(settings);
+          document.body.dataset.boardTheme = settings.boardTheme;
+          document.body.dataset.pieceTheme = settings.pieceTheme;
+          if (appearanceStatusEl) {
+            appearanceStatusEl.textContent = 'Appearance saved.';
+            appearanceStatusEl.className = 'account-status success';
+            setTimeout(() => { appearanceStatusEl.textContent = ''; appearanceStatusEl.className = 'account-status'; }, 2500);
           }
         });
       });

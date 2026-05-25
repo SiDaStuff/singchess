@@ -728,15 +728,35 @@ _navigateTo(path, options = {}) {
 		    });
 		  }
 
-		  _friendlyAuthError(err) {
+			  _friendlyAuthError(err) {
 		    const code = String(err?.code || '');
 		    if (['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found'].includes(code)) {
 		      return 'Email or password is incorrect.';
 		    }
 		    if (code === 'auth/email-already-in-use') return 'An account already exists for that email.';
 		    if (code === 'auth/too-many-requests') return 'Too many attempts. Try again later.';
-		    return err?.message || 'Authentication failed.';
-		  }
+			    return err?.message || 'Authentication failed.';
+			  }
+
+			  _banMessage(reason = '') {
+			    return reason ? `Account banned. Reason: ${reason}` : 'Account banned.';
+			  }
+
+			  async _lookupBanReason(email) {
+			    if (!email) return '';
+			    try {
+			      const response = await fetch('/api/auth/ban-status', {
+			        method: 'POST',
+			        headers: { 'Content-Type': 'application/json' },
+			        cache: 'no-store',
+			        body: JSON.stringify({ email }),
+			      });
+			      const result = await response.json().catch(() => null);
+			      return result?.banned ? String(result.reason || '').trim() : '';
+			    } catch (_err) {
+			      return '';
+			    }
+			  }
 
 			  async _loadUserProfile(user) {
 		    const fallback = {
@@ -757,7 +777,13 @@ _navigateTo(path, options = {}) {
 			        signal: controller.signal,
 			      });
 		      clearTimeout(timeout);
-			      if (!response.ok) throw new Error(`Account API responded with ${response.status}`);
+				      if (!response.ok) {
+				        const result = await response.json().catch(() => null);
+				        const error = new Error(result?.reason ? this._banMessage(result.reason) : (result?.error || `Account API responded with ${response.status}`));
+				        error.statusCode = response.status;
+				        error.reason = result?.reason || '';
+				        throw error;
+				      }
 		      const me = await response.json();
 		      this.authState.me = me;
 		      this.authState.plan = me.plan || { plan: 'free', name: 'Free' };
@@ -788,25 +814,34 @@ _navigateTo(path, options = {}) {
 	      };
 	      if (!profile.uid) await this._saveUserProfile(merged);
 	      return merged;
-			    } catch (_err) {
-			      if (timeout) clearTimeout(timeout);
-		      this.authState.me = null;
-		      this.authState.plan = { plan: 'free', name: 'Free' };
-		      this.authState.usage = {};
-		      this.authState.limits = {};
-		      this.authState.isAdmin = false;
-		      return fallback;
-		    }
-		  }
+				    } catch (err) {
+				      if (timeout) clearTimeout(timeout);
+			      this.authState.me = null;
+			      this.authState.plan = { plan: 'free', name: 'Free' };
+			      this.authState.usage = {};
+			      this.authState.limits = {};
+			      this.authState.isAdmin = false;
+			      if (err?.statusCode === 403) {
+			        await this._handleBannedSession(err.reason || '', err.message);
+			      }
+			      return fallback;
+			    }
+			  }
 
-		  async _refreshMe() {
-		    const user = this.authState.user;
-		    if (!user) return null;
-		    const response = await fetch('/api/users/me', {
-		      headers: await this._authHeaders(),
-		      cache: 'no-store',
-		    });
-		    if (!response.ok) throw new Error(`Account API responded with ${response.status}`);
+			  async _refreshMe() {
+			    const user = this.authState.user;
+			    if (!user) return null;
+			    const response = await fetch('/api/users/me', {
+			      headers: await this._authHeaders(),
+			      cache: 'no-store',
+			    });
+			    if (!response.ok) {
+			      const result = await response.json().catch(() => null);
+			      if (response.status === 403) {
+			        await this._handleBannedSession(result?.reason || '', result?.error);
+			      }
+			      throw new Error(result?.reason ? this._banMessage(result.reason) : (result?.error || `Account API responded with ${response.status}`));
+			    }
 		    const me = await response.json();
 		    this.authState.me = me;
 		    this.authState.profile = me.profile || this.authState.profile;
@@ -839,21 +874,30 @@ _navigateTo(path, options = {}) {
 		      const token = await user.getIdToken();
 		      const source = new EventSource(`/api/users/me/stream?token=${encodeURIComponent(token)}`);
 		      this.authState.statusSource = source;
-		      source.addEventListener('disabled', async (event) => {
-		        const payload = event.data ? JSON.parse(event.data) : {};
-		        this._setAccountStatus(payload.error || 'Account disabled. Signing out.', 'error');
-		        this._stopStatusStream();
-		        await this._handleSignOut();
-		      });
+			      source.addEventListener('disabled', async (event) => {
+			        const payload = event.data ? JSON.parse(event.data) : {};
+			        this._handleBannedSession(payload.reason || '', payload.error);
+			      });
 		      source.addEventListener('error', () => {
 		        if (source.readyState === EventSource.CLOSED) this._stopStatusStream();
 		      });
-		    } catch (_err) {
-		      this._stopStatusStream();
-		    }
-		  }
+			    } catch (_err) {
+			      this._stopStatusStream();
+			    }
+			  }
 
-		  _normalizePlayerName(value) {
+			  async _handleBannedSession(reason = '', fallbackMessage = '') {
+			    const message = reason ? this._banMessage(reason) : (fallbackMessage || 'Account banned.');
+			    this._setAccountStatus(message, 'error');
+			    this._stopStatusStream();
+			    const firebase = this._ensureFirebase();
+			    try {
+			      await firebase?.auth?.().signOut();
+			    } catch (_err) {}
+			    window.location.replace(`/signin.html?banned=1${reason ? `&reason=${encodeURIComponent(reason)}` : ''}`);
+			  }
+
+			  _normalizePlayerName(value) {
 		    return String(value || '').trim().toLowerCase();
 		  }
 
@@ -1251,10 +1295,12 @@ _navigateTo(path, options = {}) {
 	        this._setAccountStatus('Signed in.', 'success');
 	      }
 	      setTimeout(() => this._hideAccountModal(), 450);
-	    } catch (err) {
-		      const message = this._friendlyAuthError(err);
-		      if (fields?.statusEl) {
-		        fields.statusEl.textContent = message;
+		    } catch (err) {
+			      const message = String(err?.code || '') === 'auth/user-disabled'
+			        ? this._banMessage(await this._lookupBanReason(email))
+			        : this._friendlyAuthError(err);
+			      if (fields?.statusEl) {
+			        fields.statusEl.textContent = message;
 		        fields.statusEl.className = 'account-status error';
 		      } else {
 		        this._setAccountStatus(message, 'error');
@@ -1314,10 +1360,14 @@ _navigateTo(path, options = {}) {
 	      });
 	      this._setAccountStatus('Signed in with Google.', 'success');
 	      setTimeout(() => this._hideAccountModal(), 450);
-	    } catch (err) {
-	      this._setAccountStatus(err.message || 'Google sign-in failed.', 'error');
-	    }
-	  }
+		    } catch (err) {
+		      if (String(err?.code || '') === 'auth/user-disabled') {
+		        this._setAccountStatus(this._banMessage(await this._lookupBanReason(err?.email || '')), 'error');
+		      } else {
+		        this._setAccountStatus(err.message || 'Google sign-in failed.', 'error');
+		      }
+		    }
+		  }
 
 		  async _handleSignOut() {
 		    const firebase = this._ensureFirebase();
@@ -1451,9 +1501,9 @@ _navigateTo(path, options = {}) {
 				else this.elBtnPuzzleNext.classList.add('pulse');
 			}
 		    if (this.elBtnPuzzleDaily) this.elBtnPuzzleDaily.disabled = !!mode.loading;
-			    if (this.elBtnPuzzleRetry) this.elBtnPuzzleRetry.disabled = !mode.current || !!mode.loading || alreadyAttempted || mode.solved || mode.failed;
-			    if (this.elBtnPuzzleHint) this.elBtnPuzzleHint.disabled = !mode.current || mode.loading || mode.solved || mode.failed;
-		    if (this.elBtnPuzzleReview) this.elBtnPuzzleReview.disabled = this.gameMoves.length === 0 || this.isAnalyzing;
+				    if (this.elBtnPuzzleRetry) this.elBtnPuzzleRetry.disabled = !mode.current || !!mode.loading || alreadyAttempted || mode.solved;
+				    if (this.elBtnPuzzleHint) this.elBtnPuzzleHint.disabled = !mode.current || mode.loading || mode.solved || mode.failed;
+			    if (this.elBtnPuzzleReview) this.elBtnPuzzleReview.disabled = this.gameMoves.length === 0 || this.isAnalyzing || (!mode.solved && !mode.failed);
 	    if (this.elPuzzleTags) {
 	      if (mode.loading) {
 	        this.elPuzzleTags.innerHTML = this._renderSkeletonLines(4, 'puzzle-tag-skeleton');
@@ -1971,8 +2021,10 @@ _navigateTo(path, options = {}) {
 	    if (this.elBtnReset) {
 	      this.elBtnReset.disabled = this.isAnalyzing || (this.gameMoves.length === 0 && this.currentMoveIndex === -1);
 	    }
-	    if (this.elBtnPuzzleReview) {
-	      this.elBtnPuzzleReview.disabled = this.isAnalyzing || this.gameMoves.length === 0;
+		    if (this.elBtnPuzzleReview) {
+		      this.elBtnPuzzleReview.disabled = this.isAnalyzing
+		        || this.gameMoves.length === 0
+		        || (!this.puzzleMode.solved && !this.puzzleMode.failed);
 	    }
 		    if (this.elBtnPuzzleRetry) {
 		      const puzzleId = this.puzzleMode.current?.puzzle?.id || '';
@@ -2701,11 +2753,16 @@ _navigateTo(path, options = {}) {
 		        ringColor: '#CA3431',
 		      }));
 		      await this._recordPuzzleAttempt(false);
-		      this._setPuzzleStatus('Puzzle failed. Free analysis is now unlocked for this position.', 'error');
-		      this._syncPuzzlePanel();
-		      this._syncActionButtons();
-		      this._updateGameStatus();
-		      return;
+			      this._setPuzzleStatus('Incorrect. Resetting this puzzle for another try...', 'error');
+			      this._syncPuzzlePanel();
+			      this._syncActionButtons();
+			      this._updateGameStatus();
+			      window.setTimeout(() => {
+			        if (this.puzzleMode.active && this.puzzleMode.failed && this.puzzleMode.current) {
+			          this._retryCurrentPuzzle({ automatic: true });
+			        }
+			      }, 900);
+			      return;
 		    }
 	
 		    this.puzzleMode.step += 1;
@@ -2720,13 +2777,13 @@ _navigateTo(path, options = {}) {
 				      if (this.elLiveEval) this.elLiveEval.hidden = false;
 				      const rated = !this.puzzleMode.failed ? await this._recordPuzzleAttempt(true) : false;
 				      this._celebrate();
-				      this._setPuzzleStatus(checkmateSolved && !isExpected
-				        ? 'Solved by checkmate. Free analysis is now unlocked.'
-				        : !rated && !this.puzzleMode.failed
-			        ? 'Solved again. Rating is unchanged. Free analysis is now unlocked.'
-			        : this.puzzleMode.failed
-			        ? 'Solved in practice. Free analysis is now unlocked.'
-			        : `Solved. Rating ${this.puzzleMode.lastDelta >= 0 ? '+' : ''}${this.puzzleMode.lastDelta}. Free analysis is now unlocked.`, 'success');
+					      this._setPuzzleStatus(checkmateSolved && !isExpected
+					        ? 'Solved by checkmate.'
+					        : !rated && !this.puzzleMode.failed
+				        ? 'Solved again. Rating is unchanged.'
+				        : this.puzzleMode.failed
+				        ? 'Solved in practice.'
+				        : `Solved. Rating ${this.puzzleMode.lastDelta >= 0 ? '+' : ''}${this.puzzleMode.lastDelta}.`, 'success');
 			      this._syncPuzzlePanel();
 			      this._syncActionButtons();
 			      this._updateGameStatus();
@@ -2955,10 +3012,24 @@ _navigateTo(path, options = {}) {
 		    }
 	  }
 
-	  _retryCurrentPuzzle() {
-	    const puzzleId = this.puzzleMode.current?.puzzle?.id || '';
-    if (!this.puzzleMode.current) {
-      this._setPuzzleStatus('No puzzle loaded to retry.', 'error');
+		  _reviewCurrentPuzzleLine() {
+		    if (!this.puzzleMode.current || this.gameMoves.length === 0) {
+		      this._setPuzzleStatus('Solve a puzzle line before reviewing it.', 'error');
+		      return;
+		    }
+		    if (!this.puzzleMode.solved && !this.puzzleMode.failed) {
+		      this._setPuzzleStatus('Finish the puzzle before opening analysis.', 'error');
+		      return;
+		    }
+		    if (this.elLiveEval) this.elLiveEval.hidden = false;
+		    this._setPuzzleStatus('Puzzle analysis unlocked.', 'success');
+		    this._startReview();
+		  }
+
+		  _retryCurrentPuzzle(options = {}) {
+		    const puzzleId = this.puzzleMode.current?.puzzle?.id || '';
+	    if (!this.puzzleMode.current) {
+	      this._setPuzzleStatus('No puzzle loaded to retry.', 'error');
       return;
     }
     if (this.puzzleMode.solved) {
@@ -2969,8 +3040,9 @@ _navigateTo(path, options = {}) {
       this._setPuzzleStatus('This puzzle was already attempted. Load a new puzzle instead.', 'error');
       return;
     }
-    this._setupPuzzle(this.puzzleMode.current, this.puzzleMode.source || 'Puzzle');
-  }
+	    this._setupPuzzle(this.puzzleMode.current, this.puzzleMode.source || 'Puzzle');
+	    if (options.automatic) this._setPuzzleStatus(`${this.chess.turn() === 'w' ? 'White' : 'Black'} to move. Try again.`);
+	  }
 
 	  _playerLabel(color) {
 	    const headers = this.gameHeaders || {};
@@ -3035,8 +3107,16 @@ _navigateTo(path, options = {}) {
 		const topTime = this._clockValueForDisplay(topSide, index);
 		const bottomTime = this._clockValueForDisplay(bottomSide, index);
 
-		if (this.elPlayerTopClock) this.elPlayerTopClock.textContent = topTime;
-		if (this.elPlayerBottomClock) this.elPlayerBottomClock.textContent = bottomTime;
+			if (this.elPlayerTopClock) {
+				this.elPlayerTopClock.textContent = topTime;
+				this.elPlayerTopClock.classList.toggle('has-clock', !!topTime);
+				this.elPlayerTopClock.classList.toggle('active-clock', this.clockState.active && this.clockState.currentSide === topSide);
+			}
+			if (this.elPlayerBottomClock) {
+				this.elPlayerBottomClock.textContent = bottomTime;
+				this.elPlayerBottomClock.classList.toggle('has-clock', !!bottomTime);
+				this.elPlayerBottomClock.classList.toggle('active-clock', this.clockState.active && this.clockState.currentSide === bottomSide);
+			}
 	}
 
 	_clockValueForDisplay(side, index) {
@@ -4001,21 +4081,36 @@ _navigateTo(path, options = {}) {
       throw new Error('Could not parse PGN. Please check the format.');
     }
 
-		const gameClocks = typeof moveTimesFromPgn === 'function'
-			? moveTimesFromPgn(normalized, chess.history().length, parsedHeaders)
-			: [];
-		const baseClock = typeof parseBaseClock === 'function'
-			? parseBaseClock(parsedHeaders)
-			: null;
+			const gameClocks = typeof moveTimesFromPgn === 'function'
+				? moveTimesFromPgn(normalized, chess.history().length, parsedHeaders)
+				: [];
+			const pgnClockValues = typeof parseClock === 'function'
+				? [...normalized.matchAll(/\[%clk\s+([0-9:.]+)\]/g)]
+					.map((match) => parseClock(match[1]))
+					.filter((value) => Number.isFinite(value))
+				: [];
+			const remainingClockHistory = [];
+			if (pgnClockValues.length >= chess.history().length) {
+				const lastClock = { white: null, black: null };
+				for (let i = 0; i < chess.history().length; i += 1) {
+					const side = i % 2 === 0 ? 'white' : 'black';
+					lastClock[side] = pgnClockValues[i];
+					remainingClockHistory[i] = { white: lastClock.white, black: lastClock.black };
+				}
+			}
+			const baseClock = typeof parseBaseClock === 'function'
+				? parseBaseClock(parsedHeaders)
+				: null;
 		const initialClocks = {
 			white: Number.isFinite(baseClock) ? baseClock : null,
 			black: Number.isFinite(baseClock) ? baseClock : null,
 		};
 
-		this._loadGame(chess.history(), { ...parsedHeaders, ...chess.header(), ...headers,
-			_gameClockHistory: gameClocks,
-			_initialClocks: initialClocks,
-		});
+			this._loadGame(chess.history(), { ...parsedHeaders, ...chess.header(), ...headers,
+				_gameClockHistory: gameClocks,
+				_gameClockRemainingHistory: remainingClockHistory,
+				_initialClocks: initialClocks,
+			});
   }
 
   _normalizePgnText(text) {
@@ -4711,13 +4806,19 @@ _navigateTo(path, options = {}) {
 
 	    this.originalGameMoves = moves.slice();
 		    this.gameMoves = moves.slice();
-		// Convert raw per-ply spent times into per-move remaining clock objects
-		const rawTimes = Array.isArray(headers._gameClockHistory) ? headers._gameClockHistory : [];
-		const baseClock = headers._initialClocks && Number.isFinite(headers._initialClocks.white) ? headers._initialClocks.white : null;
-		this.initialClocks = headers._initialClocks || { white: null, black: null };
-		this.gameClockHistory = [];
-		if (Number.isFinite(baseClock) && rawTimes.length) {
-			const lastClock = { white: baseClock, black: baseClock };
+			// Convert raw per-ply spent times into per-move remaining clock objects
+			const rawTimes = Array.isArray(headers._gameClockHistory) ? headers._gameClockHistory : [];
+			const remainingClockHistory = Array.isArray(headers._gameClockRemainingHistory) ? headers._gameClockRemainingHistory : [];
+			const baseClock = headers._initialClocks && Number.isFinite(headers._initialClocks.white) ? headers._initialClocks.white : null;
+			this.initialClocks = headers._initialClocks || { white: null, black: null };
+			this.gameClockHistory = [];
+			if (remainingClockHistory.length) {
+				this.gameClockHistory = remainingClockHistory.map((entry) => ({
+					white: Number.isFinite(entry?.white) ? entry.white : null,
+					black: Number.isFinite(entry?.black) ? entry.black : null,
+				}));
+			} else if (Number.isFinite(baseClock) && rawTimes.length) {
+				const lastClock = { white: baseClock, black: baseClock };
 			for (let i = 0; i < rawTimes.length; i += 1) {
 				const side = i % 2 === 0 ? 'white' : 'black';
 				const spent = Number.isFinite(rawTimes[i]) ? rawTimes[i] : null;

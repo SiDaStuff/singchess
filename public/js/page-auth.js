@@ -37,6 +37,26 @@
     return err?.message || 'Authentication failed.';
   }
 
+  function banMessage(reason = '') {
+    return reason ? `Account banned. Reason: ${reason}` : 'Account banned.';
+  }
+
+  async function lookupBanReason(email) {
+    if (!email) return '';
+    try {
+      const response = await fetch('/api/auth/ban-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ email }),
+      });
+      const result = await response.json().catch(() => null);
+      return result?.banned ? String(result.reason || '').trim() : '';
+    } catch (_err) {
+      return '';
+    }
+  }
+
   function setStatus(message, kind = '') {
     const el = document.getElementById('page-status');
     if (!el) return;
@@ -79,11 +99,11 @@
       accountStatusSource = source;
       source.addEventListener('disabled', async (event) => {
         const payload = event.data ? JSON.parse(event.data) : {};
-        setStatus(payload.error || 'Account disabled. Signing out.', 'error');
+        setStatus(payload.reason ? banMessage(payload.reason) : (payload.error || 'Account disabled. Signing out.'), 'error');
         stopAccountStatusStream();
         const firebase = ensureFirebase();
         if (firebase?.auth) await firebase.auth().signOut();
-        window.location.assign('/signin.html');
+        window.location.replace(`/signin.html?banned=1${payload.reason ? `&reason=${encodeURIComponent(payload.reason)}` : ''}`);
       });
       source.addEventListener('error', () => {
         if (source.readyState === EventSource.CLOSED) stopAccountStatusStream();
@@ -105,11 +125,11 @@
       if (!response.ok) {
         const result = await response.json().catch(() => null);
         if (response.status === 403) {
-          const message = result?.error || 'Account disabled. Signing out.';
+          const message = result?.reason ? banMessage(result.reason) : (result?.error || 'Account disabled. Signing out.');
           setStatus(message, 'error');
           const firebase = ensureFirebase();
           if (firebase?.auth) await firebase.auth().signOut();
-          window.location.assign('/signin.html');
+          window.location.replace(`/signin.html?banned=1${result?.reason ? `&reason=${encodeURIComponent(result.reason)}` : ''}`);
         }
         throw new Error(result?.error || `Account API responded with ${response.status}`);
       }
@@ -174,7 +194,11 @@
       setStatus('Signed in.', 'success');
       window.location.assign('/account.html');
     } catch (err) {
-      setStatus(friendlyAuthError(err), 'error');
+      if (String(err?.code || '') === 'auth/user-disabled') {
+        setStatus(banMessage(await lookupBanReason(email)), 'error');
+      } else {
+        setStatus(friendlyAuthError(err), 'error');
+      }
     } finally {
       hideLoading();
     }
@@ -208,7 +232,11 @@
       await firebase.auth().signInWithPopup(provider);
       window.location.assign('/account.html');
     } catch (err) {
-      setStatus(friendlyAuthError(err), 'error');
+      if (String(err?.code || '') === 'auth/user-disabled') {
+        setStatus(banMessage(await lookupBanReason(err?.email || '')), 'error');
+      } else {
+        setStatus(friendlyAuthError(err), 'error');
+      }
     } finally {
       hideLoading();
     }
@@ -286,6 +314,9 @@
     const params = new URLSearchParams(window.location.search);
     const mode = params.get('mode');
     const oobCode = params.get('oobCode');
+    if (params.get('banned') === '1') {
+      setStatus(banMessage(params.get('reason') || ''), 'error');
+    }
 
     if (!browserMeetsRequirements() && !/incompatible-browser\.html$/i.test(window.location.pathname)) {
       window.location.replace('/incompatible-browser.html');

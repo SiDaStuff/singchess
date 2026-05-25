@@ -398,7 +398,7 @@ async function analyzeParsedGame(game, analyzer, engine) {
   if (!game.moves.length) throw new Error('A PGN had no moves.');
   const positions = analyzer._positionsForMoves(game.moves, game.headers.FEN || game.headers.Fen || game.headers.fen);
   const evals = await analyzer.evaluatePositions(positions, engine, null, { newGame: false });
-  const results = analyzer.resultsFromEvals(
+  const results = await analyzer.resultsFromEvals(
     game.moves,
     positions,
     evals,
@@ -658,7 +658,7 @@ exports.streamHandler = async (req, res) => {
             { newGame: false },
           );
 
-          const results = analyzer.resultsFromEvals(
+          const results = await analyzer.resultsFromEvals(
             parsed.moves,
             positions,
             evals,

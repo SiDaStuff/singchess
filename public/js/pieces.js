@@ -117,7 +117,36 @@ PIECE_SVG['bP'] = makeSvg(`
 
 // Get SVG data URI for a piece
 function getPieceSvgUri(piece) {
-  const svg = PIECE_SVG[piece];
+  let svg = PIECE_SVG[piece];
   if (!svg) return '';
+  const theme = document.body?.dataset?.pieceTheme || (() => {
+    try {
+      const raw = window.localStorage?.getItem('sidastuff.engineSettings');
+      return raw ? JSON.parse(raw).pieceTheme : 'classic';
+    } catch (_) {
+      return 'classic';
+    }
+  })();
+  const palettes = {
+    glass: { light: '#f8fbff', dark: '#31506f', stroke: '#102438', accent: '#d8edf8' },
+    wood: { light: '#f3d9a4', dark: '#6f3f1f', stroke: '#2b1a10', accent: '#fff1cf' },
+    neon: { light: '#d9fff8', dark: '#172033', stroke: '#00d4ff', accent: '#9cff6e' },
+    mono: { light: '#f2f2f2', dark: '#202020', stroke: '#050505', accent: '#ffffff' },
+  };
+  const palette = palettes[theme];
+  if (palette) {
+    const isWhite = piece[0] === 'w';
+    const fill = isWhite ? palette.light : palette.dark;
+    const contrast = isWhite ? palette.dark : palette.light;
+    svg = svg
+      .replaceAll('#fff', fill)
+      .replaceAll('#ffffff', fill)
+      .replaceAll('#000', isWhite ? palette.stroke : palette.dark)
+      .replaceAll('stroke="#fff"', `stroke="${contrast}"`)
+      .replaceAll('stroke="#000"', `stroke="${palette.stroke}"`);
+    if (theme === 'neon') {
+      svg = svg.replace('<svg ', `<svg filter="drop-shadow(0 0 1.5px ${palette.accent})" `);
+    }
+  }
   return 'data:image/svg+xml,' + encodeURIComponent(svg);
 }

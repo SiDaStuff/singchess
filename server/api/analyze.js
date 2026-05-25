@@ -402,7 +402,7 @@ exports.streamHandler = async (req, res) => {
         },
       ));
 
-      const results = analyzer.resultsFromEvals(
+      const results = await analyzer.resultsFromEvals(
         moves,
         positions,
         evals,

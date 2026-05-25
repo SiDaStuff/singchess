@@ -1,13 +1,15 @@
 // Chess Board UI Module
 class ChessBoard {
-  constructor(containerId) {
-    this.container = document.getElementById(containerId);
-    this.wrapper = this.container?.parentElement || null;
+	  constructor(containerId) {
+	    this.container = document.getElementById(containerId);
+	    this._applySavedVisualSettings();
+	    this.wrapper = this.container?.parentElement || null;
     this.flipped = false;
     this.position = {};  // { 'e1': 'wK', ... }
     this.highlights = []; // [{ square, type }]
     this.bestMoveArrow = null;
     this.userArrows = [];
+    this.invertedSquares = new Set();
     this.annotationPointer = null;
     this.selectedSquare = null;
     this.legalMoves = [];
@@ -29,8 +31,20 @@ class ChessBoard {
     this._render();
     this._setupAnnotations();
     this._setupDrag();
-    window.addEventListener('resize', this._onResize, { passive: true });
-  }
+	    window.addEventListener('resize', this._onResize, { passive: true });
+	  }
+
+	  _applySavedVisualSettings() {
+	    try {
+	      const raw = window.localStorage?.getItem('sidastuff.engineSettings');
+	      const settings = raw ? JSON.parse(raw) : {};
+	      document.body.dataset.boardTheme = settings.boardTheme || 'classic';
+	      document.body.dataset.pieceTheme = settings.pieceTheme || 'classic';
+	    } catch (_) {
+	      document.body.dataset.boardTheme = 'classic';
+	      document.body.dataset.pieceTheme = 'classic';
+	    }
+	  }
 
   // Set position from FEN
 	  setPositionFromFen(fen) {
@@ -131,7 +145,7 @@ class ChessBoard {
 	  _updateHighlights() {
 	    const squares = this.container.querySelectorAll('.square');
 	    squares.forEach(sqEl => {
-	      sqEl.classList.remove('highlight', 'selected', 'best-from', 'best-to', 'has-piece');
+		      sqEl.classList.remove('highlight', 'selected', 'best-from', 'best-to', 'has-piece', 'inverted');
 	      sqEl.style.removeProperty('--move-highlight-color');
 	      sqEl.style.removeProperty('--move-highlight-ring');
 	      // Remove legal dots
@@ -139,8 +153,13 @@ class ChessBoard {
 	      if (dot) dot.remove();
     });
 
-    // Apply highlights
-	    this.highlights.forEach(h => {
+	    // Apply highlights
+		    this.invertedSquares.forEach((square) => {
+		      const sqEl = this.container.querySelector(`[data-square="${square}"]`);
+		      if (sqEl) sqEl.classList.add('inverted');
+		    });
+
+		    this.highlights.forEach(h => {
 	      const sqEl = this.container.querySelector(`[data-square="${h.square}"]`);
 	      if (sqEl) {
 	        sqEl.classList.add(h.type);
@@ -228,16 +247,20 @@ class ChessBoard {
     if (this.onFlip) this.onFlip(this.flipped);
   }
 
-  _onSquareClick(sq) {
-    if (!this.interactive) return;
-    if (this._suppressNextClick) {
-      this._suppressNextClick = false;
-      return;
-    }
+	  _onSquareClick(sq) {
+	    if (!this.interactive) return;
+	    if (this._suppressNextClick) {
+	      this._suppressNextClick = false;
+	      return;
+	    }
+	    this.clearInvertedSquares();
+	    this._selectSquare(sq);
+	  }
 
-    if (this.selectedSquare) {
-      if (this.legalMoves.includes(sq)) {
-        // Make the move
+	  _selectSquare(sq) {
+	    if (this.selectedSquare) {
+	      if (this.legalMoves.includes(sq)) {
+	        // Make the move
         if (this.onMove) this.onMove(this.selectedSquare, sq);
         this.selectedSquare = null;
         this.legalMoves = [];
@@ -253,10 +276,23 @@ class ChessBoard {
       if (this.position[sq]) {
         this.selectedSquare = sq;
         this.legalMoves = this._getLegalMovesFrom(sq);
-      }
-    }
-    this._updateHighlights();
-  }
+	      }
+	    }
+	    this._updateHighlights();
+	  }
+
+	  toggleInvertedSquare(sq) {
+	    if (!sq) return;
+	    if (this.invertedSquares.has(sq)) this.invertedSquares.delete(sq);
+	    else this.invertedSquares.add(sq);
+	    this._updateHighlights();
+	  }
+
+	  clearInvertedSquares() {
+	    if (!this.invertedSquares.size) return;
+	    this.invertedSquares.clear();
+	    this._updateHighlights();
+	  }
 
   _getLegalMovesFrom(sq) {
     if (!this._chessInstance) return [];
@@ -459,18 +495,24 @@ class ChessBoard {
         if (fromEl) fromEl.classList.remove('dragging');
       }
 
-      if (wasDragging && event) {
-        this._suppressNextClick = true;
-        setTimeout(() => {
-          this._suppressNextClick = false;
-        }, 0);
+	      if (wasDragging && event) {
+	        this._suppressNextClick = true;
+	        setTimeout(() => {
+	          this._suppressNextClick = false;
+	        }, 0);
         const toSq = getSquareFromPoint(event.clientX, event.clientY);
         if (toSq && dragFromSq && this.legalMoves.includes(toSq)) {
           if (this.onMove) this.onMove(dragFromSq, toSq);
-          this.selectedSquare = null;
-          this.legalMoves = [];
-        }
-      }
+	          this.selectedSquare = null;
+	          this.legalMoves = [];
+	        }
+	      } else if (event && this.pendingDrag?.sq) {
+	        this._suppressNextClick = true;
+	        setTimeout(() => {
+	          this._suppressNextClick = false;
+	        }, 0);
+	        this._selectSquare(this.pendingDrag.sq);
+	      }
 
       this.pendingDrag = null;
       this.dragPointerId = null;
@@ -543,20 +585,20 @@ class ChessBoard {
       const sq = squareFromEvent(event);
       if (!sq) return;
 
-      if (event.pointerType === 'mouse' && event.button === 2) {
-        this.annotationPointer = {
-          id: event.pointerId,
-          from: sq,
-          moved: false,
-        };
+	      if (event.pointerType === 'mouse' && event.button === 2) {
+	        this.annotationPointer = {
+	          id: event.pointerId,
+	          from: sq,
+	        };
         this.container.setPointerCapture?.(event.pointerId);
         event.preventDefault();
         return;
       }
 
-      if (event.button === 0) {
-        this.clearUserArrows();
-      }
+	      if (event.button === 0) {
+	        this.clearUserArrows();
+	        this.clearInvertedSquares();
+	      }
     });
 
     this.container.addEventListener('pointermove', (event) => {
@@ -567,9 +609,10 @@ class ChessBoard {
 
     this.container.addEventListener('pointerup', (event) => {
       if (!this.annotationPointer || this.annotationPointer.id !== event.pointerId) return;
-      const from = this.annotationPointer.from;
-      const to = squareFromEvent(event);
-      if (to && from !== to) this.addUserArrow(from, to);
+	      const from = this.annotationPointer.from;
+	      const to = squareFromEvent(event);
+	      if (to && from !== to) this.addUserArrow(from, to);
+	      else if (to && from === to) this.toggleInvertedSquare(to);
       this.annotationPointer = null;
       try {
         this.container.releasePointerCapture?.(event.pointerId);
