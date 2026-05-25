@@ -64,19 +64,39 @@ function authHeader(headers = {}) {
   return headers.authorization || headers.Authorization || '';
 }
 
+function authToken(event) {
+  const headerAuth = String(authHeader(event.headers || ''));
+  const headerMatch = headerAuth.match(/^Bearer\s+(.+)$/i);
+  if (headerMatch) return headerMatch[1];
+  const query = event.queryStringParameters || {};
+  return String(query.token || query.idToken || '').trim();
+}
+
+async function getUserRecord(uid) {
+  const { admin: firebaseAdmin } = initAdmin();
+  return firebaseAdmin.auth().getUser(uid);
+}
+
 async function requireUser(event) {
-  const match = String(authHeader(event.headers || '')).match(/^Bearer\s+(.+)$/i);
-  if (!match) {
+  const token = authToken(event);
+  if (!token) {
     const error = new Error('Login required.');
     error.statusCode = 401;
     throw error;
   }
   const { admin: firebaseAdmin } = initAdmin();
-  const decoded = await firebaseAdmin.auth().verifyIdToken(match[1]);
+  const decoded = await firebaseAdmin.auth().verifyIdToken(token);
+  const userRecord = await firebaseAdmin.auth().getUser(decoded.uid);
+  if (userRecord.disabled) {
+    const error = new Error('Account disabled.');
+    error.statusCode = 403;
+    throw error;
+  }
   return {
     uid: decoded.uid,
     email: String(decoded.email || '').toLowerCase(),
     name: decoded.name || decoded.email || 'Player',
+    disabled: false,
   };
 }
 
@@ -233,6 +253,53 @@ async function giftBoost(event) {
   return json(200, { success: true, email, plan: 'Boost', theme: 'purple', expiresAt });
 }
 
+async function banUser(event) {
+  const actor = await requireUser(event);
+  if (actor.email !== ADMIN_EMAIL) return json(403, { error: 'Admin only.' });
+  const body = JSON.parse(event.body || '{}');
+  const email = String(body.email || '').trim().toLowerCase();
+  const reason = String(body.reason || '').trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(400, { error: 'Valid recipient email is required.' });
+  if (!reason) return json(400, { error: 'Ban reason is required.' });
+  const { admin: firebaseAdmin, db: database } = initAdmin();
+  let target;
+  try {
+    target = await firebaseAdmin.auth().getUserByEmail(email);
+  } catch (_err) {
+    return json(404, { error: 'No account exists for that email.' });
+  }
+  await firebaseAdmin.auth().updateUser(target.uid, { disabled: true });
+  await database.ref(`users/${target.uid}/profile/ban`).set({
+    disabled: true,
+    reason,
+    bannedBy: actor.email,
+    bannedAt: admin.database.ServerValue.TIMESTAMP,
+  });
+  return json(200, { success: true, email, disabled: true, reason });
+}
+
+async function unbanUser(event) {
+  const actor = await requireUser(event);
+  if (actor.email !== ADMIN_EMAIL) return json(403, { error: 'Admin only.' });
+  const body = JSON.parse(event.body || '{}');
+  const email = String(body.email || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(400, { error: 'Valid recipient email is required.' });
+  const { admin: firebaseAdmin, db: database } = initAdmin();
+  let target;
+  try {
+    target = await firebaseAdmin.auth().getUserByEmail(email);
+  } catch (_err) {
+    return json(404, { error: 'No account exists for that email.' });
+  }
+  await firebaseAdmin.auth().updateUser(target.uid, { disabled: false });
+  await database.ref(`users/${target.uid}/profile/ban`).set({
+    disabled: false,
+    unbannedBy: actor.email,
+    unbannedAt: admin.database.ServerValue.TIMESTAMP,
+  });
+  return json(200, { success: true, email, disabled: false });
+}
+
 module.exports = {
   ADMIN_EMAIL,
   FREE_LIMITS,
@@ -240,6 +307,8 @@ module.exports = {
   getMe,
   getProfile,
   giftBoost,
+  banUser,
+  unbanUser,
   initAdmin,
   json,
   patchProfile,

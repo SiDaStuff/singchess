@@ -61,6 +61,38 @@
     return token ? { ...extra, Authorization: `Bearer ${token}` } : { ...extra };
   }
 
+  let accountStatusSource = null;
+
+  function stopAccountStatusStream() {
+    if (accountStatusSource) {
+      accountStatusSource.close();
+      accountStatusSource = null;
+    }
+  }
+
+  async function startAccountStatusStream(user) {
+    stopAccountStatusStream();
+    if (!user || !window.EventSource) return;
+    try {
+      const token = await user.getIdToken();
+      const source = new EventSource(`/api/users/me/stream?token=${encodeURIComponent(token)}`);
+      accountStatusSource = source;
+      source.addEventListener('disabled', async (event) => {
+        const payload = event.data ? JSON.parse(event.data) : {};
+        setStatus(payload.error || 'Account disabled. Signing out.', 'error');
+        stopAccountStatusStream();
+        const firebase = ensureFirebase();
+        if (firebase?.auth) await firebase.auth().signOut();
+        window.location.assign('/signin.html');
+      });
+      source.addEventListener('error', () => {
+        if (source.readyState === EventSource.CLOSED) stopAccountStatusStream();
+      });
+    } catch (_err) {
+      stopAccountStatusStream();
+    }
+  }
+
   async function loadMe(user) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
@@ -70,7 +102,17 @@
         cache: 'no-store',
         signal: controller.signal,
       });
-      if (!response.ok) throw new Error(`Account API responded with ${response.status}`);
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        if (response.status === 403) {
+          const message = result?.error || 'Account disabled. Signing out.';
+          setStatus(message, 'error');
+          const firebase = ensureFirebase();
+          if (firebase?.auth) await firebase.auth().signOut();
+          window.location.assign('/signin.html');
+        }
+        throw new Error(result?.error || `Account API responded with ${response.status}`);
+      }
       return response.json();
     } finally {
       clearTimeout(timeout);
@@ -104,6 +146,8 @@
       : `Today: ${Math.max(0, Number(usage.anticheat) || 0)}/${limits.anticheatRunsPerDay || 1} anticheat, ${Math.max(0, Number(usage.serverReviews) || 0)}/${limits.serverReviewsPerDay || 3} server reviews.`);
     const adminPanel = document.getElementById('admin-boost-panel');
     if (adminPanel) adminPanel.hidden = !me.isAdmin;
+    const banPanel = document.getElementById('admin-ban-panel');
+    if (banPanel) banPanel.hidden = !me.isAdmin;
   }
 
   async function emailAuth(mode) {
@@ -213,6 +257,31 @@
     }
   }
 
+  async function manageBanUser(action) {
+    const firebase = ensureFirebase();
+    const user = firebase?.auth?.().currentUser;
+    if (!user) return setStatus('Sign in as admin first.', 'error');
+    const email = (document.getElementById('ban-user-email')?.value || '').trim();
+    const reason = (document.getElementById('ban-user-reason')?.value || '').trim();
+    if (!email) return setStatus('Enter the user email.', 'error');
+    if (action === 'ban' && !reason) return setStatus('Enter a reason for the ban.', 'error');
+    showLoading(action === 'ban' ? 'Banning user...' : 'Unbanning user...');
+    try {
+      const response = await fetch('/api/admin/ban-user', {
+        method: 'POST',
+        headers: await authHeaders(user, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ action, email, reason }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error || `Request failed with ${response.status}`);
+      setStatus(`${action === 'ban' ? 'Banned' : 'Unbanned'} ${result.email}.`, 'success');
+    } catch (err) {
+      setStatus(err.message || 'Ban action failed.', 'error');
+    } finally {
+      hideLoading();
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     if (!browserMeetsRequirements() && !/incompatible-browser\.html$/i.test(window.location.pathname)) {
       window.location.replace('/incompatible-browser.html');
@@ -227,6 +296,8 @@
     document.getElementById('btn-signout')?.addEventListener('click', signOut);
     document.getElementById('btn-clear-cache')?.addEventListener('click', clearCache);
     document.getElementById('btn-gift-boost')?.addEventListener('click', giftBoost);
+    document.getElementById('btn-ban-user')?.addEventListener('click', () => manageBanUser('ban'));
+    document.getElementById('btn-unban-user')?.addEventListener('click', () => manageBanUser('unban'));
 
     let accountLoadingFallback = null;
     if (page === 'account') {
@@ -240,16 +311,20 @@
     }
     firebase.auth().onAuthStateChanged(async (user) => {
       if (accountLoadingFallback) clearTimeout(accountLoadingFallback);
+      if (!user) {
+        stopAccountStatusStream();
+        if (page === 'account') renderAccount(null, null);
+        hideLoading();
+        if (typeof window.updateHeaderAuth === 'function') window.updateHeaderAuth(user);
+        return;
+      }
+      startAccountStatusStream(user);
       if (page !== 'account') {
         hideLoading();
         if (typeof window.updateHeaderAuth === 'function') window.updateHeaderAuth(user);
         return;
       }
       try {
-        if (!user) {
-          renderAccount(null, null);
-          return;
-        }
         renderAccount(user, await loadMe(user));
       } catch (err) {
         setStatus(err.message || 'Could not load account.', 'error');

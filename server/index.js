@@ -18,6 +18,8 @@ const recordPuzzleAttemptFn = require('./api/record-puzzle-attempt.js');
 const puzzleSolveFn = require('./api/puzzle-solve.js');
 const usersMeFn = require('./api/users-me.js');
 const giftBoostFn = require('./api/gift-boost.js');
+const adminBanUserFn = require('./api/admin-ban-user.js');
+const usersMeStreamFn = require('./api/users-me-stream.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -98,7 +100,9 @@ app.post('/api/public-stats', wrapHandler(publicStatsFn));
 app.post('/api/puzzle/solve', wrapHandler(puzzleSolveFn));
 app.post('/api/record-puzzle-attempt', wrapHandler(recordPuzzleAttemptFn));
 app.get('/api/users/me', wrapHandler(usersMeFn));
+app.get('/api/users/me/stream', usersMeStreamFn.streamHandler);
 app.post('/api/admin/gift-boost', wrapHandler(giftBoostFn));
+app.post('/api/admin/ban-user', wrapHandler(adminBanUserFn));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 

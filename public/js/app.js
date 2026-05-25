@@ -502,28 +502,6 @@ _navigateTo(path, options = {}) {
     }
   }
 
-		    this._hideSettingsModal();
-		    this._hideAccountModal();
-		    this._hideRoutePages();
-		    if (this.elMainContent) this.elMainContent.hidden = true;
-		    if (page === 'login' && this.elLoginPage) {
-		      this.elLoginPage.hidden = false;
-		      this._setAuthMode('signin');
-		    }
-		    if (page === 'signup' && this.elSignupPage) {
-		      this.elSignupPage.hidden = false;
-		      this._setAuthMode('signup');
-		    }
-		    if (page === 'account' && this.elAccountPage) {
-		      this.elAccountPage.hidden = false;
-		      this._syncAccountPage();
-		    }
-		    if (page === 'settings' && this.elSettingsPage) {
-		      this.elSettingsPage.hidden = false;
-		      this._syncSettingsPage();
-		    }
-		  }
-
 		  _syncAccountPage() {
 		    const signedIn = !!this.authState.user;
 		    const messageEl = document.getElementById('account-page-message');
@@ -773,14 +751,16 @@ _navigateTo(path, options = {}) {
 		      clearTimeout(authInitFallback);
 		      this.authState.user = user || null;
 		      this.authState.initialized = false;
-			      if (user) {
-			        this.authState.profile = await this._loadUserProfile(user);
-			        this._applyProfileToPuzzleMode(this.authState.profile);
-			      } else {
-			        this.authState.profile = null;
-			        this._applyLocalPuzzleProfile();
-			      }
-		      this.authState.initialized = true;
+              if (!user) {
+                this._stopStatusStream();
+                this.authState.profile = null;
+                this._applyLocalPuzzleProfile();
+              } else {
+                this._startStatusStream(user);
+                this.authState.profile = await this._loadUserProfile(user);
+                this._applyProfileToPuzzleMode(this.authState.profile);
+              }
+              this.authState.initialized = true;
 			      this._syncAccountUi();
 			      this._syncPuzzlePanel();
 			      this._refreshPuzzleForCurrentUser();
@@ -883,6 +863,34 @@ _navigateTo(path, options = {}) {
 		  async _authHeaders(extra = {}) {
 		    const token = await this.authState.user?.getIdToken?.();
 		    return token ? { ...extra, Authorization: `Bearer ${token}` } : { ...extra };
+		  }
+
+		  _stopStatusStream() {
+		    if (this.authState.statusSource) {
+		      this.authState.statusSource.close();
+		      this.authState.statusSource = null;
+		    }
+		  }
+
+		  async _startStatusStream(user) {
+		    this._stopStatusStream();
+		    if (!user || !window.EventSource) return;
+		    try {
+		      const token = await user.getIdToken();
+		      const source = new EventSource(`/api/users/me/stream?token=${encodeURIComponent(token)}`);
+		      this.authState.statusSource = source;
+		      source.addEventListener('disabled', async (event) => {
+		        const payload = event.data ? JSON.parse(event.data) : {};
+		        this._setAccountStatus(payload.error || 'Account disabled. Signing out.', 'error');
+		        this._stopStatusStream();
+		        await this._handleSignOut();
+		      });
+		      source.addEventListener('error', () => {
+		        if (source.readyState === EventSource.CLOSED) this._stopStatusStream();
+		      });
+		    } catch (_err) {
+		      this._stopStatusStream();
+		    }
 		  }
 
 		  _normalizePlayerName(value) {

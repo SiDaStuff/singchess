@@ -45,6 +45,15 @@
             <label class="field"><span class="field-label">Days</span><input id="gift-boost-days" class="input-select" type="number" min="1" max="366" value="30"></label>
             <button id="btn-gift-boost" class="btn btn-primary" type="button">Gift Boost</button>
           </div>
+          <div class="admin-ban-panel" id="admin-ban-panel" hidden>
+            <h3>Ban / Unban Player</h3>
+            <label class="field"><span class="field-label">Email</span><input id="ban-user-email" class="input-select" type="email" placeholder="player@example.com"></label>
+            <label class="field"><span class="field-label">Reason</span><input id="ban-user-reason" class="input-select" type="text" placeholder="Policy violation or abuse"></label>
+            <div class="standalone-actions">
+              <button id="btn-ban-user" class="btn btn-primary" type="button">Ban User</button>
+              <button id="btn-unban-user" class="btn btn-secondary" type="button">Unban User</button>
+            </div>
+          </div>
           <div class="standalone-actions">
             <button id="btn-reset-password" class="btn btn-secondary" type="button">Reset Password</button>
             <button id="btn-signout" class="btn btn-secondary" type="button">Sign Out</button>
