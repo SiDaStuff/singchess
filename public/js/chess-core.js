@@ -1971,6 +1971,26 @@ class MoveAnalyzer {
       cache.set(cacheKey, result);
       evals.push(result);
     }
+
+    return evals;
+  }
+
+  async analyzeGame(moves, engine, onProgress, options = {}) {
+    const positions = this._positionsForMoves(moves, options.initialFen);
+    const evals = await this.evaluatePositions(positions, engine, onProgress, {
+      ...options,
+      totalPositions: positions.length,
+    });
+    const results = [];
+    const opening = this.detectOpening(moves);
+    const positionChess = options.initialFen ? new Chess(options.initialFen) : new Chess();
+
+    for (let i = 0; i < moves.length; i++) {
+      const fen = positions[i];
+      const fenAfter = positions[i + 1];
+      const movePly = i + 1;
+      const moveNumber = Math.floor(i / 2) + 1;
+      const isWhitePlaying = positionChess.turn() === 'w';
       const legalMoves = positionChess.moves({ verbose: true });
       const numLegalMoves = legalMoves.length;
 

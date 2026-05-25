@@ -282,7 +282,7 @@
     }
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', async () => {
     const params = new URLSearchParams(window.location.search);
     const mode = params.get('mode');
     const oobCode = params.get('oobCode');
@@ -326,21 +326,23 @@
 
     // If this is a reset link, verify the code and show the new-password UI
     if (mode === 'resetPassword' && params.get('oobCode')) {
-      const code = params.get('oobCode');
-      showLoading('Verifying reset link...');
-      try {
-        const email = await firebase.auth().verifyPasswordResetCode(code);
-        hideLoading();
-        document.getElementById('reset-email').value = email;
-        document.getElementById('reset-email').disabled = true;
-        const newArea = document.getElementById('reset-new-password-area');
-        if (newArea) newArea.style.display = 'block';
-        const btn = document.getElementById('btn-reset-password');
-        if (btn) btn.textContent = 'Set New Password';
-      } catch (err) {
-        hideLoading();
-        setStatus('Reset link is invalid or expired. Request a new password reset.', 'error');
-      }
+      (async () => {
+        const code = params.get('oobCode');
+        showLoading('Verifying reset link...');
+        try {
+          const email = await firebase.auth().verifyPasswordResetCode(code);
+          hideLoading();
+          document.getElementById('reset-email').value = email;
+          document.getElementById('reset-email').disabled = true;
+          const newArea = document.getElementById('reset-new-password-area');
+          if (newArea) newArea.style.display = 'block';
+          const btn = document.getElementById('btn-reset-password');
+          if (btn) btn.textContent = 'Set New Password';
+        } catch (err) {
+          hideLoading();
+          setStatus('Reset link is invalid or expired. Request a new password reset.', 'error');
+        }
+      })();
     }
     firebase.auth().onAuthStateChanged(async (user) => {
       if (accountLoadingFallback) clearTimeout(accountLoadingFallback);

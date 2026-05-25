@@ -6324,5 +6324,17 @@ document.addEventListener('DOMContentLoaded', () => {
     window.location.replace('/incompatible-browser.html');
     return;
   }
-  window.app = new ChessReviewApp();
+  // Wait for MoveAnalyzer to be defined before instantiating
+  if (typeof MoveAnalyzer === 'undefined') {
+    // Retry initialization after a brief delay
+    setTimeout(() => {
+      if (typeof MoveAnalyzer !== 'undefined') {
+        window.app = new ChessReviewApp();
+      } else {
+        console.error('MoveAnalyzer failed to load. Please refresh the page.');
+      }
+    }, 100);
+  } else {
+    window.app = new ChessReviewApp();
+  }
 });
