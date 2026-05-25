@@ -416,20 +416,7 @@ class ChessReviewApp {
 		  _initRouting() {
     const pageRoute = document.body.dataset.page ? `/${document.body.dataset.page}` : '';
     const currentPath = pageRoute || this._normalizeRoute(window.location.pathname || '/index');
-    const restoreRoute = pageRoute ? null : this._restoreActiveRoute();
-    const restoreDisabled = this._routeRestoreDisabled();
-    if (restoreDisabled) {
-      try {
-        if (window.localStorage) window.localStorage.removeItem('sidastuff.disableRouteRestore');
-      } catch (_err) {
-        // ignore local storage failures.
-      }
-    }
-    if (restoreRoute && !restoreDisabled && (currentPath === '/' || currentPath === '/index')) {
-      this._applyRoute(restoreRoute, { replace: true });
-    } else {
-      this._applyRoute(currentPath, { replace: true });
-    }
+    this._applyRoute(currentPath, { replace: true });
     window.addEventListener('popstate', () => this._applyRoute(window.location.pathname || '/index'));
   }
 
@@ -459,7 +446,6 @@ class ChessReviewApp {
 		  }
 _navigateTo(path, options = {}) {
     const route = this._normalizeRoute(path || '/index');
-    if (options.disableRestore) this._disableRouteRestore();
 		    const target = this._routeUrl(route);
 		    if (this._normalizeRoute(window.location.pathname) !== route) {
 		      window.location.assign(target);
@@ -475,44 +461,7 @@ _navigateTo(path, options = {}) {
 		    if (this.elSettingsPage) this.elSettingsPage.hidden = true;
 		  }
 
-		  _saveActiveRoute(route) {
-		    try {
-		      if (!window.localStorage) return;
-		      if (route && route !== '/index') {
-		        window.localStorage.setItem('sidastuff.activeRoute', route);
-		      } else {
-		        window.localStorage.removeItem('sidastuff.activeRoute');
-		      }
-		    } catch (_err) {
-		      // ignore local storage failures.
-		    }
-		  }
-
-  _disableRouteRestore() {
-    try {
-      if (!window.localStorage) return;
-      window.localStorage.setItem('sidastuff.disableRouteRestore', '1');
-    } catch (_err) {
-      // ignore local storage failures.
-    }
-  }
-
-  _routeRestoreDisabled() {
-    try {
-      return !!window.localStorage?.getItem('sidastuff.disableRouteRestore');
-    } catch (_err) {
-      return false;
-    }
-  }
-
-  _restoreActiveRoute() {
-    try {
-      const stored = window.localStorage?.getItem('sidastuff.activeRoute');
-      return stored ? String(stored).replace(/\/+$/, '') || '/index' : null;
-    } catch (_err) {
-      return null;
-    }
-  }
+	
 
 		  _syncAccountPage() {
 		    const signedIn = !!this.authState.user;
@@ -575,7 +524,6 @@ _navigateTo(path, options = {}) {
 		    if (options.replace && window.location.pathname !== route) {
 		      window.history.replaceState({}, '', route);
 		    }
-		    this._saveActiveRoute(route);
 		    this._hideRoutePages();
 
 		    if (route === '/login') {
