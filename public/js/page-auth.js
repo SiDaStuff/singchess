@@ -283,6 +283,16 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode');
+    const oobCode = params.get('oobCode');
+
+    // If user visited auth page directly with no reset params, send them home.
+    if (!mode && !oobCode) {
+      window.location.replace('/');
+      return;
+    }
+
     if (!browserMeetsRequirements() && !/incompatible-browser\.html$/i.test(window.location.pathname)) {
       window.location.replace('/incompatible-browser.html');
       return;
@@ -291,7 +301,11 @@
     const page = document.body.dataset.page || '';
     const firebase = ensureFirebase();
     document.getElementById('btn-email-auth')?.addEventListener('click', () => emailAuth(page));
-    document.getElementById('btn-reset-password')?.addEventListener('click', resetPassword);
+    document.getElementById('btn-reset-password')?.addEventListener('click', async () => {
+      // If a reset code is present, confirm new password flow; otherwise send reset email
+      if (mode === 'resetPassword' && oobCode) return confirmPasswordResetFlow(oobCode);
+      return resetPassword();
+    });
     document.getElementById('btn-google-auth')?.addEventListener('click', googleAuth);
     document.getElementById('btn-signout')?.addEventListener('click', signOut);
     document.getElementById('btn-clear-cache')?.addEventListener('click', clearCache);
@@ -308,6 +322,25 @@
       hideLoading();
       setStatus('Firebase auth did not load. Account features are unavailable.', 'error');
       return;
+    }
+
+    // If this is a reset link, verify the code and show the new-password UI
+    if (mode === 'resetPassword' && params.get('oobCode')) {
+      const code = params.get('oobCode');
+      showLoading('Verifying reset link...');
+      try {
+        const email = await firebase.auth().verifyPasswordResetCode(code);
+        hideLoading();
+        document.getElementById('reset-email').value = email;
+        document.getElementById('reset-email').disabled = true;
+        const newArea = document.getElementById('reset-new-password-area');
+        if (newArea) newArea.style.display = 'block';
+        const btn = document.getElementById('btn-reset-password');
+        if (btn) btn.textContent = 'Set New Password';
+      } catch (err) {
+        hideLoading();
+        setStatus('Reset link is invalid or expired. Request a new password reset.', 'error');
+      }
     }
     firebase.auth().onAuthStateChanged(async (user) => {
       if (accountLoadingFallback) clearTimeout(accountLoadingFallback);
@@ -334,4 +367,23 @@
       }
     });
   });
+
+  async function confirmPasswordResetFlow(code) {
+    const firebase = ensureFirebase();
+    if (!firebase?.auth) return setStatus('Firebase auth is unavailable.', 'error');
+    const newPassword = (document.getElementById('reset-new-password')?.value || '').trim();
+    const confirm = (document.getElementById('reset-confirm-password')?.value || '').trim();
+    if (!newPassword || newPassword.length < 6) return setStatus('Password must be at least 6 characters.', 'error');
+    if (newPassword !== confirm) return setStatus('Passwords do not match.', 'error');
+    showLoading('Updating password...');
+    try {
+      await firebase.auth().confirmPasswordReset(code, newPassword);
+      setStatus('Password updated. You may now sign in.', 'success');
+      setTimeout(() => window.location.assign('/signin.html'), 1500);
+    } catch (err) {
+      setStatus(friendlyAuthError(err), 'error');
+    } finally {
+      hideLoading();
+    }
+  }
 })();
