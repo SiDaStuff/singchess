@@ -137,12 +137,39 @@ async function patchProfile(uid, update) {
 
 async function getMe(event) {
   const user = await requireUser(event);
-  const profile = await getProfile(user.uid, user);
-  const plan = activePlan(profile);
-  const day = usageDay();
   const { db: database } = initAdmin();
-  const usageSnap = await database.ref(`users/${user.uid}/usage/${day}`).once('value');
-  return { user, profile, plan, usage: usageSnap.val() || {}, limits: FREE_LIMITS, day, isAdmin: user.email === ADMIN_EMAIL };
+  const day = usageDay();
+  const profileRef = database.ref(`users/${user.uid}/profile`);
+  const usageRef = database.ref(`users/${user.uid}/usage/${day}`);
+  const [profileSnap, usageSnap] = await Promise.all([
+    profileRef.once('value'),
+    usageRef.once('value'),
+  ]);
+
+  const profile = {
+    ...defaultProfile(user),
+    ...(profileSnap.val() || {}),
+  };
+  profile.puzzleStats = { ...defaultProfile(user).puzzleStats, ...(profile.puzzleStats || {}) };
+  delete profile.attemptedPuzzleIds;
+  delete profile.solvedPuzzleIds;
+  profile.subscription = profile.subscription || { plan: 'free' };
+  profile.uid = user.uid;
+
+  if (!profileSnap.exists()) {
+    await profileRef.set(profile);
+  }
+
+  const plan = activePlan(profile);
+  return {
+    user,
+    profile,
+    plan,
+    usage: usageSnap.val() || {},
+    limits: FREE_LIMITS,
+    day,
+    isAdmin: user.email === ADMIN_EMAIL,
+  };
 }
 
 async function claimUsage(uid, kind, limit) {

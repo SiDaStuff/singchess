@@ -405,7 +405,15 @@ class ChessReviewApp {
     const pageRoute = document.body.dataset.page ? `/${document.body.dataset.page}` : '';
     const currentPath = pageRoute || this._normalizeRoute(window.location.pathname || '/index');
     const restoreRoute = pageRoute ? null : this._restoreActiveRoute();
-    if (restoreRoute && (currentPath === '/' || currentPath === '/index')) {
+    const restoreDisabled = this._routeRestoreDisabled();
+    if (restoreDisabled) {
+      try {
+        if (window.localStorage) window.localStorage.removeItem('sidastuff.disableRouteRestore');
+      } catch (_err) {
+        // ignore local storage failures.
+      }
+    }
+    if (restoreRoute && !restoreDisabled && (currentPath === '/' || currentPath === '/index')) {
       this._applyRoute(restoreRoute, { replace: true });
     } else {
       this._applyRoute(currentPath, { replace: true });
@@ -437,8 +445,9 @@ class ChessReviewApp {
 		    };
 		    return map[route] || `${route}.html`;
 		  }
-		  _navigateTo(path) {
-		    const route = this._normalizeRoute(path || '/index');
+_navigateTo(path, options = {}) {
+    const route = this._normalizeRoute(path || '/index');
+    if (options.disableRestore) this._disableRouteRestore();
 		    const target = this._routeUrl(route);
 		    if (this._normalizeRoute(window.location.pathname) !== route) {
 		      window.location.assign(target);
@@ -467,19 +476,32 @@ class ChessReviewApp {
 		    }
 		  }
 
-		  _restoreActiveRoute() {
-		    try {
-		      const stored = window.localStorage?.getItem('sidastuff.activeRoute');
-		      return stored ? String(stored).replace(/\/+$/, '') || '/index' : null;
-		    } catch (_err) {
-		      return null;
-		    }
-		  }
+  _disableRouteRestore() {
+    try {
+      if (!window.localStorage) return;
+      window.localStorage.setItem('sidastuff.disableRouteRestore', '1');
+    } catch (_err) {
+      // ignore local storage failures.
+    }
+  }
 
-		  _showRoutePage(page) {
-		    document.body.classList.remove('menu-active');
-		    delete document.body.dataset.mode;
-		    if (this.elMainMenu) this.elMainMenu.hidden = false;
+  _routeRestoreDisabled() {
+    try {
+      return !!window.localStorage?.getItem('sidastuff.disableRouteRestore');
+    } catch (_err) {
+      return false;
+    }
+  }
+
+  _restoreActiveRoute() {
+    try {
+      const stored = window.localStorage?.getItem('sidastuff.activeRoute');
+      return stored ? String(stored).replace(/\/+$/, '') || '/index' : null;
+    } catch (_err) {
+      return null;
+    }
+  }
+
 		    this._hideSettingsModal();
 		    this._hideAccountModal();
 		    this._hideRoutePages();
@@ -1455,7 +1477,11 @@ class ChessReviewApp {
 		    if (this.elPuzzleStreak) this.elPuzzleStreak.textContent = String(mode.streak || 0);
 		    if (this.elPuzzleScore) this.elPuzzleScore.textContent = `${mode.solvedCount || 0} / ${mode.attemptedCount || 0}`;
 		    if (this.elPuzzleSource) this.elPuzzleSource.textContent = mode.loading ? 'Finding puzzle' : (mode.source || 'Lichess training');
-		    if (this.elBtnPuzzleNext) this.elBtnPuzzleNext.disabled = !!mode.loading;
+			if (this.elBtnPuzzleNext) {
+				this.elBtnPuzzleNext.disabled = !!mode.loading;
+				if (this.elBtnPuzzleNext.disabled) this.elBtnPuzzleNext.classList.remove('pulse');
+				else this.elBtnPuzzleNext.classList.add('pulse');
+			}
 		    if (this.elBtnPuzzleDaily) this.elBtnPuzzleDaily.disabled = !!mode.loading;
 			    if (this.elBtnPuzzleRetry) this.elBtnPuzzleRetry.disabled = !mode.current || !!mode.loading || alreadyAttempted || mode.solved || mode.failed;
 			    if (this.elBtnPuzzleHint) this.elBtnPuzzleHint.disabled = !mode.current || mode.loading || mode.solved || mode.failed;
@@ -1476,6 +1502,29 @@ class ChessReviewApp {
 	    if (!this.elPuzzleStatus) return;
 	    this.elPuzzleStatus.textContent = message || '';
 	    this.elPuzzleStatus.className = `puzzle-status ${kind}`.trim();
+	    // Visual celebration and rating chip on success
+	    try {
+	      if (this.elPuzzleCard) {
+	        if (kind === 'success') {
+	          this.elPuzzleCard.classList.add('success-celebrate');
+	          setTimeout(() => this.elPuzzleCard.classList.remove('success-celebrate'), 1400);
+	        }
+	      }
+			if (kind === 'success' && this.elPuzzleUserRating) {
+				// briefly show a rating chip if rating changed element exists
+				const delta = Number(this.puzzleMode?.lastDelta || 0);
+				if (delta !== 0) {
+					const chip = document.createElement('span');
+					chip.className = 'rating-chip';
+					chip.textContent = (delta >= 0 ? '+' : '') + String(delta);
+					this.elPuzzleUserRating.appendChild(chip);
+					setTimeout(() => chip.remove(), 1600);
+				}
+			}
+	    } catch (e) {
+	      // non-fatal UI enhancement
+	      console.debug('Puzzle status UI enhancement failed', e);
+	    }
 	  }
 
 	  _escapeHtml(value) {
@@ -1494,15 +1543,15 @@ class ChessReviewApp {
 	  }
 
 				  _bindEvents() {
-    this.elBtnMenuImport?.addEventListener('click', () => this._navigateTo('/review'));
-	    this.elBtnMenuCoach?.addEventListener('click', () => this._navigateTo('/coach'));
-	    this.elBtnMenuPuzzles?.addEventListener('click', () => this._navigateTo('/puzzles'));
-	    this.elBtnMenuAnticheat?.addEventListener('click', () => this._navigateTo('/anticheat'));
-    this.elBtnMenuBoost?.addEventListener('click', () => this._navigateTo('/boost'));
+    this.elBtnMenuImport?.addEventListener('click', () => this._navigateTo('/review', { disableRestore: true }));
+	    this.elBtnMenuCoach?.addEventListener('click', () => this._navigateTo('/coach', { disableRestore: true }));
+	    this.elBtnMenuPuzzles?.addEventListener('click', () => this._navigateTo('/puzzles', { disableRestore: true }));
+	    this.elBtnMenuAnticheat?.addEventListener('click', () => this._navigateTo('/anticheat', { disableRestore: true }));
+    this.elBtnMenuBoost?.addEventListener('click', () => this._navigateTo('/boost', { disableRestore: true }));
     this.elBtnCloseBoost?.addEventListener('click', () => this._closeBoostPage());
 	    this.elBtnBoostPurchase?.addEventListener('click', () => this._handleBoostPurchase());
 		    this.elBtnBoostAccount?.addEventListener('click', () => this._navigateTo(this.authState.user ? '/account' : '/signup'));
-    this.elBtnBackMenu?.addEventListener('click', () => this._navigateTo('/index'));
+    this.elBtnBackMenu?.addEventListener('click', () => this._navigateTo('/index', { disableRestore: true }));
     this.elEngineChoiceClose?.addEventListener('click', () => this._hideEngineChoiceModal());
     this.elEngineChoiceModal?.addEventListener('click', (e) => {
       if (e.target === this.elEngineChoiceModal) this._hideEngineChoiceModal();
@@ -1516,11 +1565,11 @@ class ChessReviewApp {
 	      const button = e.target.closest?.('[data-piece]');
 	      if (button) this._finishPromotionChoice(button.dataset.piece);
 	    });
-	    this.elBtnImport.addEventListener('click', () => this._navigateTo('/review'));
-	    this.elBtnPuzzles?.addEventListener('click', () => this._navigateTo('/puzzles'));
-	    this.elBtnAnticheat?.addEventListener('click', () => this._navigateTo('/anticheat'));
-			    this.elBtnAccount?.addEventListener('click', () => this._navigateTo('/account'));
-		    this.elBtnSettings.addEventListener('click', () => this._navigateTo('/settings'));
+	    this.elBtnImport.addEventListener('click', () => this._navigateTo('/review', { disableRestore: true }));
+	    this.elBtnPuzzles?.addEventListener('click', () => this._navigateTo('/puzzles', { disableRestore: true }));
+	    this.elBtnAnticheat?.addEventListener('click', () => this._navigateTo('/anticheat', { disableRestore: true }));
+			    this.elBtnAccount?.addEventListener('click', () => this._navigateTo('/account', { disableRestore: true }));
+		    this.elBtnSettings.addEventListener('click', () => this._navigateTo('/settings', { disableRestore: true }));
 	    this.elPageToSignup?.addEventListener('click', () => this._navigateTo('/signup'));
 	    this.elPageToLogin?.addEventListener('click', () => this._navigateTo('/login'));
 	    this.elLoginSubmit?.addEventListener('click', () => this._handlePageEmailAuth('signin'));
@@ -1960,7 +2009,8 @@ class ChessReviewApp {
 		    if (this.elBtnPuzzleRetry) {
 		      const puzzleId = this.puzzleMode.current?.puzzle?.id || '';
 		      const alreadyAttempted = !!(puzzleId && this.puzzleMode.attemptedPuzzleIds?.has(puzzleId));
-			      this.elBtnPuzzleRetry.disabled = this.isAnalyzing || this.puzzleMode.loading || !this.puzzleMode.current || alreadyAttempted || this.puzzleMode.solved || this.puzzleMode.failed;
+		      const canRetry = !this.isAnalyzing && !this.puzzleMode.loading && !!this.puzzleMode.current && !this.puzzleMode.solved && (this.puzzleMode.failed || !alreadyAttempted);
+      this.elBtnPuzzleRetry.disabled = !canRetry;
 		    }
 	    if (this.elBtnPuzzleHint) {
 	      this.elBtnPuzzleHint.disabled = this.isAnalyzing
@@ -2939,26 +2989,20 @@ class ChessReviewApp {
 
 	  _retryCurrentPuzzle() {
 	    const puzzleId = this.puzzleMode.current?.puzzle?.id || '';
-	    if (!this.puzzleMode.current || (puzzleId && this.puzzleMode.attemptedPuzzleIds?.has(puzzleId))) {
-	      this._setPuzzleStatus('This puzzle was already attempted. Load a new puzzle instead.', 'error');
-	      return;
-	    }
-	    this._setupPuzzle(this.puzzleMode.current, this.puzzleMode.source || 'Lichess puzzle');
-	  }
-
-	  _reviewCurrentPuzzleLine() {
-	    if (this.gameMoves.length === 0) return;
-	    this._startReview();
-	  }
-
-  _syncSettingsModal() {
-	    if (this.elEngineSource) this.elEngineSource.value = this.engineSettings.source;
-	    if (this.elEngineModule) this._populateEngineModules();
-	    if (this.elEngineStrength) this.elEngineStrength.value = this.engineSettings.strength;
-	    if (this.elEngineMaxTime) this.elEngineMaxTime.value = String(this.engineSettings.maxTimeMs);
-	    if (this.elAnalysisLocation) this.elAnalysisLocation.value = this.engineSettings.analysisLocation;
-	    if (this.elServerStrongReview) this.elServerStrongReview.checked = !!this.engineSettings.serverStrongReview;
-	  }
+    if (!this.puzzleMode.current) {
+      this._setPuzzleStatus('No puzzle loaded to retry.', 'error');
+      return;
+    }
+    if (this.puzzleMode.solved) {
+      this._setPuzzleStatus('This puzzle is already solved. Load a new puzzle instead.', 'error');
+      return;
+    }
+    if (!this.puzzleMode.failed && puzzleId && this.puzzleMode.attemptedPuzzleIds?.has(puzzleId)) {
+      this._setPuzzleStatus('This puzzle was already attempted. Load a new puzzle instead.', 'error');
+      return;
+    }
+    this._setupPuzzle(this.puzzleMode.current, this.puzzleMode.source || 'Puzzle');
+  }
 
 	  _playerLabel(color) {
 	    const headers = this.gameHeaders || {};

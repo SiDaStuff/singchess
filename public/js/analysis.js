@@ -1908,38 +1908,44 @@ class MoveAnalyzer {
 	    return positions;
 	  }
 
-	  async evaluatePositions(positions, engine, onProgress, options = {}) {
-	    const evals = [];
-	    const total = options.totalPositions || positions.length;
-	    const offset = options.offset || 0;
-	    if (options.newGame !== false) {
-	      await engine.newGame();
-	    }
+  async evaluatePositions(positions, engine, onProgress, options = {}) {
+    const evals = [];
+    const cache = new Map();
+    const total = options.totalPositions || positions.length;
+    const offset = options.offset || 0;
+    if (options.newGame !== false) {
+      await engine.newGame();
+    }
 
-	    for (let i = 0; i < positions.length; i++) {
-	      const absoluteIndex = offset + i;
-	      if (onProgress) {
-	        onProgress(absoluteIndex, total, `Analyzing ${absoluteIndex + 1}/${total}`);
-	      }
+    for (let i = 0; i < positions.length; i++) {
+      const absoluteIndex = offset + i;
+      if (onProgress) {
+        onProgress(absoluteIndex, total, `Analyzing ${absoluteIndex + 1}/${total}`);
+      }
 
-	      const fen = positions[i];
-	      const isWhiteToMove = fen.split(' ')[1] === 'w';
-	      const multi = await engine.evaluateMultiPV(fen, this.analysisDepth, this.multiPvCount, this.fallbackTimeoutMs);
+      const fen = positions[i];
+      const cacheKey = `${fen}|${this.analysisDepth}|${this.multiPvCount}|${this.fallbackTimeoutMs}`;
+      if (cache.has(cacheKey)) {
+        evals.push(cache.get(cacheKey));
+        continue;
+      }
 
-	      let lines = (multi.lines || []).map((line) => {
-	        const pvTokens = (line.pv || '').split(/\s+/).filter(Boolean);
-	        const move = pvTokens.length > 0 ? pvTokens[0] : '';
-	        const cp = this.normalizeScore(line.score || 0, line.scoreType || 'cp', isWhiteToMove);
-	        return {
-	          cp,
-	          move,
-	          pvUci: line.pv || '',
-	          pvSan: this._lineToSan(fen, line.pv || '', 8),
-	          depth: line.depth || 0,
-	        };
-	      }).filter((line) => !!line.move);
+      const isWhiteToMove = fen.split(' ')[1] === 'w';
+      const multi = await engine.evaluateMultiPV(fen, this.analysisDepth, this.multiPvCount, this.fallbackTimeoutMs);
+      let lines = (multi.lines || []).map((line) => {
+        const pvTokens = (line.pv || '').split(/\s+/).filter(Boolean);
+        const move = pvTokens.length > 0 ? pvTokens[0] : '';
+        const cp = this.normalizeScore(line.score || 0, line.scoreType || 'cp', isWhiteToMove);
+        return {
+          cp,
+          move,
+          pvUci: line.pv || '',
+          pvSan: this._lineToSan(fen, line.pv || '', 8),
+          depth: line.depth || 0,
+        };
+      }).filter((line) => !!line.move);
 
-	      lines = this._orderLinesForSide(lines, isWhiteToMove);
+      lines = this._orderLinesForSide(lines, isWhiteToMove);
 
 	      if (lines.length === 0) {
 	        const fallback = await engine.evaluate(fen, this.analysisDepth, this.fallbackTimeoutMs);
@@ -1954,38 +1960,17 @@ class MoveAnalyzer {
 	      }
 
 	      const best = lines[0];
-	      evals.push({
-	        cp: best ? best.cp : 0,
-	        bestMove: best ? best.move : '',
-	        pv: best ? best.pvUci : '',
-	        pvSan: best ? best.pvSan : '',
-	        depth: best ? best.depth : 0,
-	        lines,
-	      });
-	    }
-
-	    return evals;
-	  }
-
-	  async analyzeGame(moves, engine, onProgress, options = {}) {
-	    const positions = this._positionsForMoves(moves, options.initialFen);
-	    const opening = this.detectOpening(moves);
-	    const evals = await this.evaluatePositions(positions, engine, onProgress);
-
-	    return this.resultsFromEvals(moves, positions, evals, opening, options);
-	  }
-	
-	  resultsFromEvals(moves, positions, evals, opening = this.detectOpening(moves), options = {}) {
-	    const results = [];
-
-    for (let i = 0; i < moves.length; i++) {
-      const fen = positions[i];
-      const fenAfter = positions[i + 1];
-      const isWhitePlaying = fen.split(' ')[1] === 'w';
-      const moveNumber = Math.floor(i / 2) + 1;
-      const movePly = i + 1;
-
-      const positionChess = new Chess(fen);
+      const result = {
+        cp: best ? best.cp : 0,
+        bestMove: best ? best.move : '',
+        pv: best ? best.pvUci : '',
+        pvSan: best ? best.pvSan : '',
+        depth: best ? best.depth : 0,
+        lines,
+      };
+      cache.set(cacheKey, result);
+      evals.push(result);
+    }
       const legalMoves = positionChess.moves({ verbose: true });
       const numLegalMoves = legalMoves.length;
 
