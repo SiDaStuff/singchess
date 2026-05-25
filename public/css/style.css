@@ -991,6 +991,12 @@ body:not(.menu-active) .main-menu {
   letter-spacing: 0.04em;
 }
 
+.player-clock {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+}
+
 .board-wrapper {
   position: relative;
   width: var(--board-size);

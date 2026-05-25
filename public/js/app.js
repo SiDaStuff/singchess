@@ -22,6 +22,16 @@ class ChessReviewApp {
     this.gameMoves = [];
     this.gameHeaders = {};
     this.originalGameMoves = [];
+		this.gameClockHistory = [];
+		this.initialClocks = { white: null, black: null };
+		this.clockState = {
+			white: null,
+			black: null,
+			active: false,
+			timerId: null,
+			lastTick: 0,
+			currentSide: null,
+		};
     this.initialFen = this.chess.fen();
 	    this.currentMoveIndex = -1;
 	    this.analysisResults = null;
@@ -209,6 +219,8 @@ class ChessReviewApp {
     this.elBadgeText = document.getElementById('badge-text');
     this.elPlayerTop = document.getElementById('player-top');
     this.elPlayerBottom = document.getElementById('player-bottom');
+	this.elPlayerTopClock = document.getElementById('player-top-clock');
+	this.elPlayerBottomClock = document.getElementById('player-bottom-clock');
     this.elOpeningInfo = document.getElementById('opening-info');
     this.elOpeningName = document.getElementById('opening-name');
     this.elGameStatus = document.getElementById('game-status');
@@ -3050,6 +3062,85 @@ _navigateTo(path, options = {}) {
 	    this.elCurrentMoveIndicator.title = this._currentMoveLabel(index);
 	  }
 
+	_formatClock(seconds) {
+		if (!Number.isFinite(seconds)) return '';
+		const totalSeconds = Math.max(0, Math.round(seconds));
+		const hours = Math.floor(totalSeconds / 3600);
+		const minutes = Math.floor((totalSeconds % 3600) / 60);
+		const secs = totalSeconds % 60;
+		const padded = (value) => String(value).padStart(2, '0');
+		return hours > 0
+			? `${hours}:${padded(minutes)}:${padded(secs)}`
+			: `${minutes}:${padded(secs)}`;
+	}
+
+	_clockSideLabel(side) {
+		return side === 'w' ? 'white' : 'black';
+	}
+
+	_updateClockDisplays(index = this.currentMoveIndex) {
+		const topColor = this.board.flipped ? 'w' : 'b';
+		const bottomColor = this.board.flipped ? 'b' : 'w';
+		const topSide = this._clockSideLabel(topColor);
+		const bottomSide = this._clockSideLabel(bottomColor);
+
+		const topTime = this._clockValueForDisplay(topSide, index);
+		const bottomTime = this._clockValueForDisplay(bottomSide, index);
+
+		if (this.elPlayerTopClock) this.elPlayerTopClock.textContent = topTime;
+		if (this.elPlayerBottomClock) this.elPlayerBottomClock.textContent = bottomTime;
+	}
+
+	_clockValueForDisplay(side, index) {
+		if (this.clockState.active) {
+			const value = this.clockState[side];
+			return this._formatClock(value);
+		}
+		if (index >= 0 && this.gameClockHistory[index] && Number.isFinite(this.gameClockHistory[index][side])) {
+			return this._formatClock(this.gameClockHistory[index][side]);
+		}
+		if (index < 0 && Number.isFinite(this.initialClocks[side])) {
+			return this._formatClock(this.initialClocks[side]);
+		}
+		return '';
+	}
+
+	_resetClockState() {
+		if (this.clockState.timerId) {
+			clearInterval(this.clockState.timerId);
+			this.clockState.timerId = null;
+		}
+		this.clockState.active = false;
+		this.clockState.white = null;
+		this.clockState.black = null;
+		this.clockState.lastTick = 0;
+		this.clockState.currentSide = null;
+	}
+
+	_startClockTimer() {
+		if (!this.clockState.active) return;
+		if (this.clockState.timerId) return;
+		this.clockState.lastTick = Date.now();
+		this.clockState.timerId = setInterval(() => {
+			const now = Date.now();
+			const elapsed = (now - this.clockState.lastTick) / 1000;
+			this.clockState.lastTick = now;
+			const currentSide = this.clockState.currentSide;
+			if (currentSide && Number.isFinite(this.clockState[currentSide])) {
+				this.clockState[currentSide] = Math.max(0, this.clockState[currentSide] - elapsed);
+			}
+			this._updateClockDisplays();
+		}, 250);
+	}
+
+	_setClockSide(side) {
+		if (!this.clockState.active || this.clockState.currentSide === side) return;
+		this.clockState.currentSide = side;
+		this.clockState.lastTick = Date.now();
+		this._updateClockDisplays();
+		this._startClockTimer();
+	}
+
   _focusCoach() {
     if (!this.coachMode.active) {
       this._startCoachGame();
@@ -3461,6 +3552,11 @@ _navigateTo(path, options = {}) {
 	        moveIndex: this.currentMoveIndex,
 	        isCoachMove: true,
 	      });
+	      // After coach move, switch clock to human if clocks are active
+	      if (this.clockState.active) {
+	        const nextSide = this.chess.turn() === 'w' ? 'white' : 'black';
+	        this._setClockSide(nextSide);
+	      }
 	      if (!this._checkCoachGameOver()) {
 	        this._setCoachDialog(`I played ${move.san}. Your move.`, 'Coaching');
 	      }
@@ -3957,7 +4053,21 @@ _navigateTo(path, options = {}) {
       throw new Error('Could not parse PGN. Please check the format.');
     }
 
-    this._loadGame(chess.history(), { ...parsedHeaders, ...chess.header(), ...headers });
+		const gameClocks = typeof moveTimesFromPgn === 'function'
+			? moveTimesFromPgn(normalized, chess.history().length, parsedHeaders)
+			: [];
+		const baseClock = typeof parseBaseClock === 'function'
+			? parseBaseClock(parsedHeaders)
+			: null;
+		const initialClocks = {
+			white: Number.isFinite(baseClock) ? baseClock : null,
+			black: Number.isFinite(baseClock) ? baseClock : null,
+		};
+
+		this._loadGame(chess.history(), { ...parsedHeaders, ...chess.header(), ...headers,
+			_gameClockHistory: gameClocks,
+			_initialClocks: initialClocks,
+		});
   }
 
   _normalizePgnText(text) {
@@ -4288,6 +4398,11 @@ _navigateTo(path, options = {}) {
       moveObj: move,
       moveIndex: this.currentMoveIndex,
     });
+		// Switch active clock side after a human move (if clocks running)
+		if (this.clockState.active) {
+			const nextSide = this.chess.turn() === 'w' ? 'white' : 'black';
+			this._setClockSide(nextSide);
+		}
     if (this.coachMode.active) {
       this._handleCoachHumanMove(move, liveResultPromise);
     }
@@ -4648,6 +4763,34 @@ _navigateTo(path, options = {}) {
 
 	    this.originalGameMoves = moves.slice();
 		    this.gameMoves = moves.slice();
+		// Convert raw per-ply spent times into per-move remaining clock objects
+		const rawTimes = Array.isArray(headers._gameClockHistory) ? headers._gameClockHistory : [];
+		const baseClock = headers._initialClocks && Number.isFinite(headers._initialClocks.white) ? headers._initialClocks.white : null;
+		this.initialClocks = headers._initialClocks || { white: null, black: null };
+		this.gameClockHistory = [];
+		if (Number.isFinite(baseClock) && rawTimes.length) {
+			const lastClock = { white: baseClock, black: baseClock };
+			for (let i = 0; i < rawTimes.length; i += 1) {
+				const side = i % 2 === 0 ? 'white' : 'black';
+				const spent = Number.isFinite(rawTimes[i]) ? rawTimes[i] : null;
+				if (Number.isFinite(spent) && Number.isFinite(lastClock[side])) {
+					lastClock[side] = Math.max(0, lastClock[side] - spent);
+				}
+				this.gameClockHistory[i] = { white: lastClock.white, black: lastClock.black };
+			}
+		}
+	    if (loadingCoachGame && this.coachMode.active) {
+	      this.initialClocks = { white: 1200, black: 1200 };
+	      this.gameClockHistory = [];
+	      this._resetClockState();
+	      this.clockState.active = true;
+	      this.clockState.white = 1200;
+	      this.clockState.black = 1200;
+	      this.clockState.currentSide = this.chess.turn() === 'w' ? 'white' : 'black';
+	      this._startClockTimer();
+	    } else {
+	      this._resetClockState();
+	    }
 		    this.currentMoveIndex = -1;
 		    this.explorerReturnState = null;
 	    this._resetCoachHint();
@@ -4690,6 +4833,7 @@ _navigateTo(path, options = {}) {
 	    this._updateBoard();
 	    this._updateCurrentMoveIndicator();
     this._renderMoveList();
+	    this._updateClockDisplays();
     this._updateEvalBar(0);
     this._drawEvalGraph();
     this._requestLiveEvaluation('Analyzing original position...');
@@ -4966,6 +5110,7 @@ _navigateTo(path, options = {}) {
 		    this._updateGameStatus();
 		    this._updateActiveMoveInList();
 		    this._updateCurrentMoveIndicator();
+		    this._updateClockDisplays();
 		    if (!this.isAnalyzing) this._saveGameState();
 		  }
 
