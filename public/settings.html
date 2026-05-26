@@ -158,21 +158,21 @@
 	      function renderBoardPreview(root) {
 	        if (!root) return;
 	        root.innerHTML = '';
-	        const pieces = { e1: 'wK', d1: 'wQ', e8: 'bK', d8: 'bQ', c4: 'wN', f5: 'bB' };
-	        for (let row = 0; row < 8; row += 1) {
-	          for (let col = 0; col < 8; col += 1) {
-	            const file = String.fromCharCode(97 + col);
-	            const rank = 8 - row;
-	            const square = file + rank;
+	        const pieces = [
+	          ['bB', 'bQ', 'bP'],
+	          [null, null, null],
+	          ['wN', 'wK', 'wR'],
+	        ];
+	        for (let row = 0; row < 3; row += 1) {
+	          for (let col = 0; col < 3; col += 1) {
 	            const cell = document.createElement('div');
-	            cell.className = `preview-square ${(col + rank) % 2 === 0 ? 'dark' : 'light'}`;
-	            if (square === 'c4') cell.classList.add('preview-highlight');
-	            if (square === 'f5') cell.classList.add('preview-annotation');
-	            if (pieces[square] && typeof getPieceSvgUri === 'function') {
+	            cell.className = `preview-square ${(col + row) % 2 === 0 ? 'light' : 'dark'}`;
+	            const piece = pieces[row][col];
+	            if (piece && typeof getPieceSvgUri === 'function') {
 	              const img = document.createElement('img');
-	              img.src = getPieceSvgUri(pieces[square]);
+	              img.src = getPieceSvgUri(piece);
 	              img.onerror = function () {
-	                const fallback = typeof getPieceFallbackSvgUri === 'function' ? getPieceFallbackSvgUri(pieces[square]) : '';
+	                const fallback = typeof getPieceFallbackSvgUri === 'function' ? getPieceFallbackSvgUri(piece) : '';
 	                if (fallback && img.src !== fallback) img.src = fallback;
 	              };
 	              img.alt = '';
