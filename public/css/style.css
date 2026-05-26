@@ -1207,19 +1207,11 @@ body:not(.menu-active) .main-menu {
 }
 
 .square.selected {
-  box-shadow:
-    inset 0 0 0 2px rgba(255, 255, 255, 0.72),
-    inset 0 0 0 5px var(--accent);
+  box-shadow: none;
 }
 
 .square.selected::after {
-  content: '';
-  position: absolute;
-  inset: 8%;
-  z-index: 1;
-  border: 1px solid rgba(255, 255, 255, 0.56);
-  border-radius: 6px;
-  pointer-events: none;
+  content: none;
 }
 
 .square.dragging .piece {
@@ -1238,6 +1230,10 @@ body:not(.menu-active) .main-menu {
 
 .square .piece-arrive {
   animation: none;
+}
+
+body[data-piece-animations="on"] .square .piece-arrive {
+  animation: piece-arrive 160ms ease-out;
 }
 
 .square .coord-label {
@@ -3875,6 +3871,15 @@ body[data-mode="puzzle"] .eval-graph-card {
 .input-select:focus {
   outline: none;
   background: #ffffff;
+}
+
+@keyframes piece-arrive {
+  from {
+    opacity: 0.62;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* ===== Responsive ===== */

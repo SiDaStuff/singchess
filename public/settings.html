@@ -82,6 +82,17 @@
 	          <div class="appearance-preview-board" id="appearance-board-preview" aria-label="Board preview"></div>
 	        </div>
 
+	        <label class="switch-row app-switch-row">
+	          <span>
+	            <strong>Piece Animations</strong>
+	            <small>Fade pieces into place after moves.</small>
+	          </span>
+	          <span class="app-switch">
+	            <input id="settings-piece-animations" type="checkbox">
+	            <span class="app-switch-track"></span>
+	          </span>
+	        </label>
+
 	        <div class="settings-color-grid">
 	          <label class="field">
 	            <span class="field-label">Arrow Color</span>
@@ -191,6 +202,7 @@
 	        const pieceThemeEl = document.getElementById('settings-piece-theme');
 	        const arrowColorEl = document.getElementById('settings-arrow-color');
 	        const highlightColorEl = document.getElementById('settings-highlight-color');
+	        const pieceAnimationsEl = document.getElementById('settings-piece-animations');
 	        const boardPreviewEl = document.getElementById('appearance-board-preview');
 	        const statusEl = document.getElementById('engine-settings-status');
 	        const appearanceStatusEl = document.getElementById('appearance-settings-status');
@@ -202,8 +214,10 @@
 	        if (saved.pieceTheme && pieceThemeEl) pieceThemeEl.value = ['classic', 'glass', 'wood', 'neo'].includes(saved.pieceTheme) ? saved.pieceTheme : 'classic';
 	        if (arrowColorEl) arrowColorEl.value = toColorInputValue(saved.annotationArrowColor, DEFAULT_ARROW_COLOR);
 	        if (highlightColorEl) highlightColorEl.value = toColorInputValue(saved.annotationHighlightColor, DEFAULT_HIGHLIGHT_COLOR);
+	        if (pieceAnimationsEl) pieceAnimationsEl.checked = !!saved.pieceAnimations;
 	        document.body.dataset.boardTheme = boardThemeEl?.value || 'classic';
 	        document.body.dataset.pieceTheme = pieceThemeEl?.value || 'classic';
+	        document.body.dataset.pieceAnimations = pieceAnimationsEl?.checked ? 'on' : 'off';
 	        document.body.style.setProperty('--annotation-arrow-color', arrowColorEl?.value || DEFAULT_ARROW_COLOR);
 	        document.body.style.setProperty('--annotation-highlight-color', hexToRgba(highlightColorEl?.value || DEFAULT_HIGHLIGHT_COLOR, 0.38));
 	        renderBoardPreview(boardPreviewEl);
@@ -222,6 +236,9 @@
 	        highlightColorEl?.addEventListener('input', function () {
 	          document.body.style.setProperty('--annotation-highlight-color', hexToRgba(highlightColorEl.value || DEFAULT_HIGHLIGHT_COLOR, 0.38));
 	          renderBoardPreview(boardPreviewEl);
+	        });
+	        pieceAnimationsEl?.addEventListener('change', function () {
+	          document.body.dataset.pieceAnimations = pieceAnimationsEl.checked ? 'on' : 'off';
 	        });
 
         document.getElementById('btn-save-engine-settings')?.addEventListener('click', function () {
@@ -243,14 +260,16 @@
 	          const settings = {
 	            ...loadSettings(),
 	            boardTheme: boardThemeEl?.value || 'classic',
-	            pieceTheme: pieceThemeEl?.value || 'classic',
-	            annotationArrowColor: arrowColorEl?.value || DEFAULT_ARROW_COLOR,
-	            annotationHighlightColor: highlightColorEl?.value || DEFAULT_HIGHLIGHT_COLOR,
-	          };
-	          saveSettings(settings);
-	          document.body.dataset.boardTheme = settings.boardTheme;
-	          document.body.dataset.pieceTheme = settings.pieceTheme;
-	          document.body.style.setProperty('--annotation-arrow-color', settings.annotationArrowColor);
+		            pieceTheme: pieceThemeEl?.value || 'classic',
+		            annotationArrowColor: arrowColorEl?.value || DEFAULT_ARROW_COLOR,
+		            annotationHighlightColor: highlightColorEl?.value || DEFAULT_HIGHLIGHT_COLOR,
+		            pieceAnimations: !!pieceAnimationsEl?.checked,
+		          };
+		          saveSettings(settings);
+		          document.body.dataset.boardTheme = settings.boardTheme;
+		          document.body.dataset.pieceTheme = settings.pieceTheme;
+		          document.body.dataset.pieceAnimations = settings.pieceAnimations ? 'on' : 'off';
+		          document.body.style.setProperty('--annotation-arrow-color', settings.annotationArrowColor);
 	          document.body.style.setProperty('--annotation-highlight-color', hexToRgba(settings.annotationHighlightColor, 0.38));
           if (appearanceStatusEl) {
             appearanceStatusEl.textContent = 'Appearance saved.';

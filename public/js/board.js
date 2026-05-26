@@ -38,16 +38,18 @@ class ChessBoard {
 		    try {
 		      const raw = window.localStorage?.getItem('sidastuff.engineSettings');
 		      const settings = raw ? JSON.parse(raw) : {};
-		      document.body.dataset.boardTheme = settings.boardTheme || 'classic';
-		      document.body.dataset.pieceTheme = settings.pieceTheme || 'classic';
-		      document.body.style.setProperty('--annotation-arrow-color', settings.annotationArrowColor || '#d88a1d');
-		      document.body.style.setProperty('--annotation-highlight-color', this._annotationHighlightColor(settings.annotationHighlightColor));
-		    } catch (_) {
-		      document.body.dataset.boardTheme = 'classic';
-		      document.body.dataset.pieceTheme = 'classic';
-		      document.body.style.setProperty('--annotation-arrow-color', '#d88a1d');
-		      document.body.style.setProperty('--annotation-highlight-color', 'rgba(210, 38, 38, 0.38)');
-		    }
+			      document.body.dataset.boardTheme = settings.boardTheme || 'classic';
+			      document.body.dataset.pieceTheme = settings.pieceTheme || 'classic';
+			      document.body.dataset.pieceAnimations = settings.pieceAnimations ? 'on' : 'off';
+			      document.body.style.setProperty('--annotation-arrow-color', settings.annotationArrowColor || '#d88a1d');
+			      document.body.style.setProperty('--annotation-highlight-color', this._annotationHighlightColor(settings.annotationHighlightColor));
+			    } catch (_) {
+			      document.body.dataset.boardTheme = 'classic';
+			      document.body.dataset.pieceTheme = 'classic';
+			      document.body.dataset.pieceAnimations = 'off';
+			      document.body.style.setProperty('--annotation-arrow-color', '#d88a1d');
+			      document.body.style.setProperty('--annotation-highlight-color', 'rgba(210, 38, 38, 0.38)');
+			    }
 		  }
 
 		  _annotationHighlightColor(value) {
