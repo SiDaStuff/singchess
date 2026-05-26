@@ -68,19 +68,35 @@
           </select>
         </label>
 
-        <label class="field">
-          <span class="field-label">Piece Icons</span>
-          <select id="settings-piece-theme" class="input-select">
-            <option value="classic">Classic</option>
-            <option value="glass">Glass</option>
+	        <label class="field">
+	          <span class="field-label">Piece Icons</span>
+	          <select id="settings-piece-theme" class="input-select">
+	            <option value="classic">Classic</option>
+	            <option value="glass">Glass</option>
             <option value="wood">Wood</option>
             <option value="neon">Neon</option>
-            <option value="mono">Mono</option>
-          </select>
-        </label>
+	            <option value="mono">Mono</option>
+	          </select>
+	        </label>
 
-        <button id="btn-save-appearance-settings" class="btn btn-primary" type="button">Save Appearance</button>
-        <p class="account-status" id="appearance-settings-status"></p>
+	        <div class="settings-preview-grid">
+	          <div class="appearance-preview-board" id="appearance-board-preview" aria-label="Board preview"></div>
+	          <div class="appearance-preview-pieces" id="appearance-piece-preview" aria-label="Piece preview"></div>
+	        </div>
+
+	        <div class="settings-color-grid">
+	          <label class="field">
+	            <span class="field-label">Arrow Color</span>
+	            <input id="settings-arrow-color" class="input-select input-color" type="color" value="#d88a1d">
+	          </label>
+	          <label class="field">
+	            <span class="field-label">Highlight Color</span>
+	            <input id="settings-highlight-color" class="input-select input-color" type="color" value="#d22626">
+	          </label>
+	        </div>
+
+	        <button id="btn-save-appearance-settings" class="btn btn-primary" type="button">Save Appearance</button>
+	        <p class="account-status" id="appearance-settings-status"></p>
 
         <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
 
@@ -99,12 +115,15 @@
   </div>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js" crossorigin="anonymous"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js" crossorigin="anonymous"></script>
-  <script src="./js/header.js"></script>
-  <script src="./js/footer.js"></script>
-  <script src="./js/page-auth.js"></script>
-  <script>
-    (function () {
-      const STORAGE_KEY = 'sidastuff.engineSettings';
+	  <script src="./js/header.js"></script>
+	  <script src="./js/footer.js"></script>
+	  <script src="./js/page-auth.js"></script>
+	  <script src="./js/pieces.js"></script>
+	  <script>
+	    (function () {
+	      const STORAGE_KEY = 'sidastuff.engineSettings';
+	      const DEFAULT_ARROW_COLOR = '#d88a1d';
+	      const DEFAULT_HIGHLIGHT_COLOR = '#d22626';
 
       function loadSettings() {
         try {
@@ -113,27 +132,109 @@
         } catch (_) { return {}; }
       }
 
-      function saveSettings(settings) {
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch (_) {}
-      }
+	      function saveSettings(settings) {
+	        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch (_) {}
+	      }
+
+	      function hexToRgba(hex, alpha) {
+	        const match = String(hex || '').trim().match(/^#?([0-9a-f]{6})$/i);
+	        if (!match) return hex || `rgba(210, 38, 38, ${alpha})`;
+	        const value = match[1];
+	        const red = parseInt(value.slice(0, 2), 16);
+	        const green = parseInt(value.slice(2, 4), 16);
+	        const blue = parseInt(value.slice(4, 6), 16);
+	        return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+	      }
+
+	      function toColorInputValue(value, fallback) {
+	        const raw = String(value || '').trim();
+	        if (/^#[0-9a-f]{6}$/i.test(raw)) return raw;
+	        const match = raw.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+	        if (!match) return fallback;
+	        return '#' + [match[1], match[2], match[3]]
+	          .map((part) => Math.max(0, Math.min(255, Number(part) || 0)).toString(16).padStart(2, '0'))
+	          .join('');
+	      }
+
+	      function renderBoardPreview(root) {
+	        if (!root) return;
+	        root.innerHTML = '';
+	        const pieces = { e1: 'wK', d1: 'wQ', e8: 'bK', d8: 'bQ', c4: 'wN', f5: 'bB' };
+	        for (let row = 0; row < 8; row += 1) {
+	          for (let col = 0; col < 8; col += 1) {
+	            const file = String.fromCharCode(97 + col);
+	            const rank = 8 - row;
+	            const square = file + rank;
+	            const cell = document.createElement('div');
+	            cell.className = `preview-square ${(col + rank) % 2 === 0 ? 'dark' : 'light'}`;
+	            if (square === 'c4') cell.classList.add('preview-highlight');
+	            if (square === 'f5') cell.classList.add('preview-annotation');
+	            if (pieces[square] && typeof getPieceSvgUri === 'function') {
+	              const img = document.createElement('img');
+	              img.src = getPieceSvgUri(pieces[square]);
+	              img.alt = '';
+	              cell.appendChild(img);
+	            }
+	            root.appendChild(cell);
+	          }
+	        }
+	      }
+
+	      function renderPiecePreview(root) {
+	        if (!root || typeof getPieceSvgUri !== 'function') return;
+	        root.innerHTML = '';
+	        ['wK', 'wQ', 'wN', 'bK', 'bQ', 'bN'].forEach((piece) => {
+	          const img = document.createElement('img');
+	          img.src = getPieceSvgUri(piece);
+	          img.alt = '';
+	          root.appendChild(img);
+	        });
+	      }
 
       document.addEventListener('DOMContentLoaded', function () {
         const saved = loadSettings();
         const moduleEl = document.getElementById('settings-engine-module');
         const depthEl = document.getElementById('settings-engine-depth');
         const timeoutEl = document.getElementById('settings-engine-timeout');
-        const boardThemeEl = document.getElementById('settings-board-theme');
-        const pieceThemeEl = document.getElementById('settings-piece-theme');
-        const statusEl = document.getElementById('engine-settings-status');
-        const appearanceStatusEl = document.getElementById('appearance-settings-status');
+	        const boardThemeEl = document.getElementById('settings-board-theme');
+	        const pieceThemeEl = document.getElementById('settings-piece-theme');
+	        const arrowColorEl = document.getElementById('settings-arrow-color');
+	        const highlightColorEl = document.getElementById('settings-highlight-color');
+	        const boardPreviewEl = document.getElementById('appearance-board-preview');
+	        const piecePreviewEl = document.getElementById('appearance-piece-preview');
+	        const statusEl = document.getElementById('engine-settings-status');
+	        const appearanceStatusEl = document.getElementById('appearance-settings-status');
 
         if (saved.module && moduleEl) moduleEl.value = saved.module;
         if (saved.strength && depthEl) depthEl.value = saved.strength;
-        if (saved.maxTimeMs && timeoutEl) timeoutEl.value = String(saved.maxTimeMs);
-        if (saved.boardTheme && boardThemeEl) boardThemeEl.value = saved.boardTheme;
-        if (saved.pieceTheme && pieceThemeEl) pieceThemeEl.value = saved.pieceTheme;
-        document.body.dataset.boardTheme = boardThemeEl?.value || 'classic';
-        document.body.dataset.pieceTheme = pieceThemeEl?.value || 'classic';
+	        if (saved.maxTimeMs && timeoutEl) timeoutEl.value = String(saved.maxTimeMs);
+	        if (saved.boardTheme && boardThemeEl) boardThemeEl.value = saved.boardTheme;
+	        if (saved.pieceTheme && pieceThemeEl) pieceThemeEl.value = saved.pieceTheme;
+	        if (arrowColorEl) arrowColorEl.value = toColorInputValue(saved.annotationArrowColor, DEFAULT_ARROW_COLOR);
+	        if (highlightColorEl) highlightColorEl.value = toColorInputValue(saved.annotationHighlightColor, DEFAULT_HIGHLIGHT_COLOR);
+	        document.body.dataset.boardTheme = boardThemeEl?.value || 'classic';
+	        document.body.dataset.pieceTheme = pieceThemeEl?.value || 'classic';
+	        document.body.style.setProperty('--annotation-arrow-color', arrowColorEl?.value || DEFAULT_ARROW_COLOR);
+	        document.body.style.setProperty('--annotation-highlight-color', hexToRgba(highlightColorEl?.value || DEFAULT_HIGHLIGHT_COLOR, 0.38));
+	        renderBoardPreview(boardPreviewEl);
+	        renderPiecePreview(piecePreviewEl);
+
+	        boardThemeEl?.addEventListener('input', function () {
+	          document.body.dataset.boardTheme = boardThemeEl.value || 'classic';
+	          renderBoardPreview(boardPreviewEl);
+	        });
+	        pieceThemeEl?.addEventListener('input', function () {
+	          document.body.dataset.pieceTheme = pieceThemeEl.value || 'classic';
+	          renderBoardPreview(boardPreviewEl);
+	          renderPiecePreview(piecePreviewEl);
+	        });
+	        arrowColorEl?.addEventListener('input', function () {
+	          document.body.style.setProperty('--annotation-arrow-color', arrowColorEl.value || DEFAULT_ARROW_COLOR);
+	        });
+	        highlightColorEl?.addEventListener('input', function () {
+	          document.body.style.setProperty('--annotation-highlight-color', hexToRgba(highlightColorEl.value || DEFAULT_HIGHLIGHT_COLOR, 0.38));
+	          renderBoardPreview(boardPreviewEl);
+	        });
 
         document.getElementById('btn-save-engine-settings')?.addEventListener('click', function () {
           const settings = {
@@ -151,14 +252,18 @@
         });
 
         document.getElementById('btn-save-appearance-settings')?.addEventListener('click', function () {
-          const settings = {
-            ...loadSettings(),
-            boardTheme: boardThemeEl?.value || 'classic',
-            pieceTheme: pieceThemeEl?.value || 'classic',
-          };
-          saveSettings(settings);
-          document.body.dataset.boardTheme = settings.boardTheme;
-          document.body.dataset.pieceTheme = settings.pieceTheme;
+	          const settings = {
+	            ...loadSettings(),
+	            boardTheme: boardThemeEl?.value || 'classic',
+	            pieceTheme: pieceThemeEl?.value || 'classic',
+	            annotationArrowColor: arrowColorEl?.value || DEFAULT_ARROW_COLOR,
+	            annotationHighlightColor: highlightColorEl?.value || DEFAULT_HIGHLIGHT_COLOR,
+	          };
+	          saveSettings(settings);
+	          document.body.dataset.boardTheme = settings.boardTheme;
+	          document.body.dataset.pieceTheme = settings.pieceTheme;
+	          document.body.style.setProperty('--annotation-arrow-color', settings.annotationArrowColor);
+	          document.body.style.setProperty('--annotation-highlight-color', hexToRgba(settings.annotationHighlightColor, 0.38));
           if (appearanceStatusEl) {
             appearanceStatusEl.textContent = 'Appearance saved.';
             appearanceStatusEl.className = 'account-status success';

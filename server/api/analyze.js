@@ -200,14 +200,14 @@ exports.handler = async (event, context = {}) => {
     if (moves.length === 0 && positions.length === 0) {
       return json(400, { error: 'No moves were provided.' });
     }
-    if (moves.length > 120) {
-      return retryable('Server review is capped at 120 plies.');
+    if (moves.length > 500) {
+      return retryable('Server review is capped at 500 plies.');
     }
-    if (moves.length > 120) {
-      return retryable('Server review is capped at 120 plies. Use the streaming endpoint for full games.');
+    if (moves.length > 500) {
+      return retryable('Server review is capped at 500 plies. Use the streaming endpoint for full games.');
     }
-    if (positions.length > 120) {
-      return retryable('Server review is capped at 120 positions per request.');
+    if (positions.length > 500) {
+      return retryable('Server review is capped at 500 positions per request.');
     }
 
       const Chess = loadChess();
@@ -358,8 +358,8 @@ exports.streamHandler = async (req, res) => {
     res.end();
     return;
   }
-  if (moves.length > 120) {
-    sseWrite(res, 'error', { error: 'Server review is capped at 120 plies.' });
+  if (moves.length > 500) {
+    sseWrite(res, 'error', { error: 'Server review is capped at 500 plies.' });
     res.end();
     return;
   }

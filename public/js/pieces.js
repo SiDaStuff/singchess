@@ -115,6 +115,128 @@ PIECE_SVG['bP'] = makeSvg(`
   <path d="M22.5 9c-2.21 0-4 1.79-4 4 0 .89.29 1.71.78 2.38C17.33 16.5 16 18.59 16 21c0 2.03.94 3.84 2.41 5.03C15.41 27.09 11 31.58 11 39.5H34c0-7.92-4.41-12.41-7.41-13.47C28.06 24.84 29 23.03 29 21c0-2.41-1.33-4.5-3.28-5.62.49-.67.78-1.49.78-2.38 0-2.21-1.79-4-4-4z" fill="#000" stroke="#000" stroke-width="1.5" stroke-linecap="round"/>
 `);
 
+function pieceLetter(piece) {
+  const type = piece?.[1] || 'P';
+  return type === 'N' ? 'N' : type;
+}
+
+function makeBadgePieceSvg(piece, options) {
+  const isWhite = piece[0] === 'w';
+  const letter = pieceLetter(piece);
+  const motifColor = isWhite ? options.lightMotif : options.darkMotif;
+  const fill = isWhite ? options.lightFill : options.darkFill;
+  const stroke = isWhite ? options.lightStroke : options.darkStroke;
+  const text = isWhite ? options.lightText : options.darkText;
+  const glow = options.glow || 'none';
+  const detail = options.detail || '';
+  return makeSvg(`
+    <defs>
+      <filter id="piece-shadow" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="0" dy="1.2" stdDeviation="1.2" flood-color="${options.shadow || '#102438'}" flood-opacity="0.26"/>
+      </filter>
+    </defs>
+    <g filter="url(#piece-shadow)" stroke-linecap="round" stroke-linejoin="round">
+      <path d="${options.body}" fill="${fill}" stroke="${stroke}" stroke-width="${options.strokeWidth || 1.8}"/>
+      ${detail}
+      ${pieceMotif(piece, motifColor || text)}
+      <text x="22.5" y="${options.textY || 28.5}" text-anchor="middle"
+        font-family="${options.font || 'Georgia, serif'}" font-size="${options.fontSize || 19}"
+        font-weight="${options.fontWeight || 800}" fill="${text}" stroke="${options.textStroke || 'none'}"
+        stroke-width="${options.textStrokeWidth || 0}" paint-order="stroke">${letter}</text>
+      ${glow}
+    </g>
+  `);
+}
+
+function pieceMotif(piece, color) {
+  const type = piece?.[1] || 'P';
+  const common = `fill="none" stroke="${color}" stroke-width="1.45" opacity="0.86"`;
+  if (type === 'K') return `<path d="M22.5 10v6M19.5 13h6" ${common}/>`;
+  if (type === 'Q') return `<path d="M17 14l2-4 3.5 4 3.5-4 2 4" ${common}/>`;
+  if (type === 'R') return `<path d="M17 15v-5h3v2h5v-2h3v5" ${common}/>`;
+  if (type === 'B') return `<path d="M18 15l9-5M20 10h5" ${common}/>`;
+  if (type === 'N') return `<path d="M18 16c3-5 7-6 10-2M18 16l4 1.8" ${common}/>`;
+  return `<circle cx="22.5" cy="13" r="3.2" fill="${color}" opacity="0.82"/>`;
+}
+
+function makeThemedPieceSvg(piece, theme) {
+  const isWhite = piece[0] === 'w';
+  if (theme === 'glass') {
+    return makeBadgePieceSvg(piece, {
+      body: 'M22.5 5.5c8.8 0 15.8 7 15.8 15.8 0 5.5-2.8 10.4-7.1 13.2l2.8 4.8H11l2.8-4.8A15.6 15.6 0 0 1 7.2 21.3c0-8.8 6.6-15.8 15.3-15.8z',
+      lightFill: '#f7fbff',
+      darkFill: '#243b53',
+      lightStroke: '#7fb7d8',
+      darkStroke: '#9bd6f0',
+      lightText: '#20364c',
+      darkText: '#eef9ff',
+      strokeWidth: 1.5,
+      font: 'Inter, Arial, sans-serif',
+      fontSize: 18,
+      textY: 28,
+      shadow: '#31506f',
+      detail: `<path d="M13 15c5-4.5 14-4.5 19 0" fill="none" stroke="${isWhite ? '#ffffff' : '#5f8baa'}" stroke-width="2.5" opacity="0.7"/>`,
+    });
+  }
+  if (theme === 'wood') {
+    return makeBadgePieceSvg(piece, {
+      body: 'M13 39h19l-2.5-5H15.5L13 39zm2.5-5h14v-6.5c5-2.1 7-6.2 6.1-10.2C34.4 11.7 29.2 8 22.5 8s-11.9 3.7-13.1 9.3c-.9 4 1.1 8.1 6.1 10.2V34z',
+      lightFill: '#f0c47f',
+      darkFill: '#6d3e20',
+      lightStroke: '#5d341d',
+      darkStroke: '#2a1710',
+      lightText: '#4a2a18',
+      darkText: '#ffe3ad',
+      strokeWidth: 2,
+      font: 'Georgia, serif',
+      fontSize: 18,
+      textY: 27,
+      shadow: '#2b1a10',
+      detail: `<path d="M15 18c4.8-2 10.2-2 15 0M15.5 31h14M18 13c2.2 4 2.2 8.4 0 13M27 13c-2.2 4-2.2 8.4 0 13" fill="none" stroke="${isWhite ? '#b77735' : '#a66a38'}" stroke-width="1" opacity="0.65"/>`,
+    });
+  }
+  if (theme === 'neon') {
+    const stroke = isWhite ? '#00d4ff' : '#9cff6e';
+    const text = isWhite ? '#e8fffb' : '#172033';
+    return makeBadgePieceSvg(piece, {
+      body: 'M22.5 6 36 15v15L22.5 39 9 30V15L22.5 6z',
+      lightFill: '#172033',
+      darkFill: '#d9fff8',
+      lightStroke: stroke,
+      darkStroke: '#172033',
+      lightText: text,
+      darkText: text,
+      textStroke: isWhite ? '#172033' : '#d9fff8',
+      textStrokeWidth: 0.8,
+      strokeWidth: 2.4,
+      font: 'IBM Plex Mono, monospace',
+      fontSize: 18,
+      textY: 29,
+      shadow: stroke,
+      detail: `<path d="M14 17h17M12 30h21M22.5 6v33" fill="none" stroke="${stroke}" stroke-width="1.2" opacity="0.72"/>`,
+      glow: `<path d="M22.5 6 36 15v15L22.5 39 9 30V15L22.5 6z" fill="none" stroke="${stroke}" stroke-width="1" opacity="0.65"/>`,
+    });
+  }
+  if (theme === 'mono') {
+    return makeBadgePieceSvg(piece, {
+      body: 'M10 37h25v-4H10v4zm3-4h19V13H13v20zM17 9h11v4H17V9z',
+      lightFill: '#f3f3f3',
+      darkFill: '#1f1f1f',
+      lightStroke: '#111111',
+      darkStroke: '#111111',
+      lightText: '#111111',
+      darkText: '#f3f3f3',
+      strokeWidth: 2,
+      font: 'IBM Plex Mono, monospace',
+      fontSize: 18,
+      fontWeight: 900,
+      textY: 28.5,
+      shadow: '#111111',
+    });
+  }
+  return PIECE_SVG[piece] || '';
+}
+
 // Get SVG data URI for a piece
 function getPieceSvgUri(piece) {
   let svg = PIECE_SVG[piece];
@@ -127,26 +249,6 @@ function getPieceSvgUri(piece) {
       return 'classic';
     }
   })();
-  const palettes = {
-    glass: { light: '#f8fbff', dark: '#31506f', stroke: '#102438', accent: '#d8edf8' },
-    wood: { light: '#f3d9a4', dark: '#6f3f1f', stroke: '#2b1a10', accent: '#fff1cf' },
-    neon: { light: '#d9fff8', dark: '#172033', stroke: '#00d4ff', accent: '#9cff6e' },
-    mono: { light: '#f2f2f2', dark: '#202020', stroke: '#050505', accent: '#ffffff' },
-  };
-  const palette = palettes[theme];
-  if (palette) {
-    const isWhite = piece[0] === 'w';
-    const fill = isWhite ? palette.light : palette.dark;
-    const contrast = isWhite ? palette.dark : palette.light;
-    svg = svg
-      .replaceAll('#fff', fill)
-      .replaceAll('#ffffff', fill)
-      .replaceAll('#000', isWhite ? palette.stroke : palette.dark)
-      .replaceAll('stroke="#fff"', `stroke="${contrast}"`)
-      .replaceAll('stroke="#000"', `stroke="${palette.stroke}"`);
-    if (theme === 'neon') {
-      svg = svg.replace('<svg ', `<svg filter="drop-shadow(0 0 1.5px ${palette.accent})" `);
-    }
-  }
+  if (theme && theme !== 'classic') svg = makeThemedPieceSvg(piece, theme);
   return 'data:image/svg+xml,' + encodeURIComponent(svg);
 }

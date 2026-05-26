@@ -34,17 +34,32 @@ class ChessBoard {
 	    window.addEventListener('resize', this._onResize, { passive: true });
 	  }
 
-	  _applySavedVisualSettings() {
-	    try {
-	      const raw = window.localStorage?.getItem('sidastuff.engineSettings');
-	      const settings = raw ? JSON.parse(raw) : {};
-	      document.body.dataset.boardTheme = settings.boardTheme || 'classic';
-	      document.body.dataset.pieceTheme = settings.pieceTheme || 'classic';
-	    } catch (_) {
-	      document.body.dataset.boardTheme = 'classic';
-	      document.body.dataset.pieceTheme = 'classic';
-	    }
-	  }
+		  _applySavedVisualSettings() {
+		    try {
+		      const raw = window.localStorage?.getItem('sidastuff.engineSettings');
+		      const settings = raw ? JSON.parse(raw) : {};
+		      document.body.dataset.boardTheme = settings.boardTheme || 'classic';
+		      document.body.dataset.pieceTheme = settings.pieceTheme || 'classic';
+		      document.body.style.setProperty('--annotation-arrow-color', settings.annotationArrowColor || '#d88a1d');
+		      document.body.style.setProperty('--annotation-highlight-color', this._annotationHighlightColor(settings.annotationHighlightColor));
+		    } catch (_) {
+		      document.body.dataset.boardTheme = 'classic';
+		      document.body.dataset.pieceTheme = 'classic';
+		      document.body.style.setProperty('--annotation-arrow-color', '#d88a1d');
+		      document.body.style.setProperty('--annotation-highlight-color', 'rgba(210, 38, 38, 0.38)');
+		    }
+		  }
+
+		  _annotationHighlightColor(value) {
+		    const raw = String(value || '#d22626').trim();
+		    const match = raw.match(/^#?([0-9a-f]{6})$/i);
+		    if (!match) return raw || 'rgba(210, 38, 38, 0.38)';
+		    const hex = match[1];
+		    const red = parseInt(hex.slice(0, 2), 16);
+		    const green = parseInt(hex.slice(2, 4), 16);
+		    const blue = parseInt(hex.slice(4, 6), 16);
+		    return `rgba(${red}, ${green}, ${blue}, 0.38)`;
+		  }
 
   // Set position from FEN
 	  setPositionFromFen(fen) {
@@ -213,15 +228,15 @@ class ChessBoard {
     this._updateArrows();
   }
 
-  addUserArrow(from, to, options = {}) {
-    if (!from || !to || from === to) return;
-    this.userArrows.push({
-      from,
-      to,
-      color: options.color || '#d88a1d',
-    });
-    this._updateArrows();
-  }
+	  addUserArrow(from, to, options = {}) {
+	    if (!from || !to || from === to) return;
+	    this.userArrows.push({
+	      from,
+	      to,
+	      color: options.color || this._annotationArrowColor(),
+	    });
+	    this._updateArrows();
+	  }
 
   clearUserArrows() {
     if (this.userArrows.length === 0) return;
@@ -294,6 +309,15 @@ class ChessBoard {
 	    this._updateHighlights();
 	  }
 
+	  _annotationArrowColor() {
+	    try {
+	      const value = getComputedStyle(document.body).getPropertyValue('--annotation-arrow-color').trim();
+	      return value || '#d88a1d';
+	    } catch (_error) {
+	      return '#d88a1d';
+	    }
+	  }
+
   _getLegalMovesFrom(sq) {
     if (!this._chessInstance) return [];
     const moves = this._chessInstance.moves({ square: sq, verbose: true });
@@ -364,16 +388,16 @@ class ChessBoard {
     this.arrowLayer.setAttribute('viewBox', `0 0 ${width} ${height}`);
     this.arrowLayer.setAttribute('width', width);
     this.arrowLayer.setAttribute('height', height);
-    this.arrowLayer.innerHTML = `
-      <defs>
-        <marker id="best-move-arrowhead" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto" markerUnits="strokeWidth">
-          <path d="M 0 0 L 7 3.5 L 0 7 z" fill="${this.bestMoveArrow?.color || '#96BC4B'}"></path>
-        </marker>
-        <marker id="user-arrowhead" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto" markerUnits="strokeWidth">
-          <path d="M 0 0 L 7 3.5 L 0 7 z" fill="#d88a1d"></path>
-        </marker>
-      </defs>
-    `;
+	    this.arrowLayer.innerHTML = `
+	      <defs>
+	        <marker id="best-move-arrowhead" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto" markerUnits="strokeWidth">
+	          <path d="M 0 0 L 7 3.5 L 0 7 z" fill="${this.bestMoveArrow?.color || '#96BC4B'}"></path>
+	        </marker>
+	        <marker id="user-arrowhead" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto" markerUnits="strokeWidth">
+	          <path d="M 0 0 L 7 3.5 L 0 7 z" fill="${this._annotationArrowColor()}"></path>
+	        </marker>
+	      </defs>
+	    `;
 
     for (const arrow of this.userArrows) {
       this._appendArrowElement(arrow, 'user-arrowhead', 0.78, 5);
