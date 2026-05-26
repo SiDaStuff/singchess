@@ -2558,6 +2558,80 @@ body[data-mode="coach"] .analysis-overview {
   font-weight: 700;
 }
 
+.anticheat-advanced {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--card-radius);
+  background: var(--bg-muted);
+  overflow: hidden;
+}
+
+.anticheat-advanced summary {
+  padding: 12px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.anticheat-advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+.anticheat-advanced[open] summary {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.anticheat-advanced .anticheat-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 14px 0;
+}
+
+.anticheat-metric {
+  padding: 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+
+.anticheat-metric span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.anticheat-metric strong {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.98rem;
+}
+
+.anticheat-game-list {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px 14px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.anticheat-game {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+
+.anticheat-game small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
 body[data-mode="anticheat"] .live-eval,
 body[data-mode="anticheat"] .btn-review,
 body[data-mode="anticheat"] .move-list-container,
@@ -3412,6 +3486,9 @@ body[data-mode="puzzle"] .eval-graph-card {
 
 .modal {
   width: min(640px, 100%);
+  max-height: min(92vh, 900px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: var(--card-radius);
@@ -3797,6 +3874,10 @@ body[data-mode="puzzle"] .eval-graph-card {
 
 .modal-body {
   padding: 16px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  min-height: 0;
 }
 
 .modal-help {
@@ -4665,7 +4746,7 @@ body.app-dialog-open {
   width: min(440px, 100%);
   max-height: min(88vh, 720px);
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
   border: 1px solid var(--border-color);
   border-radius: var(--card-radius);
@@ -4710,8 +4791,10 @@ body.app-dialog-open {
 
 .app-dialog-body {
   padding: 14px 16px;
-  overflow: auto;
+  overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  min-height: 0;
 }
 
 .app-dialog-text {
@@ -4888,5 +4971,9 @@ body.modal-open {
     grid-template-columns: 1fr;
     justify-items: center;
     text-align: center;
+  }
+
+  .anticheat-advanced .anticheat-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

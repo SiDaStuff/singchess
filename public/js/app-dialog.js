@@ -2,6 +2,14 @@
   let root = null;
   let resolver = null;
 
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
   function ensureRoot() {
     if (root) return root;
     root = document.createElement('div');
@@ -57,8 +65,9 @@
   function open(options = {}) {
     const el = ensureRoot();
     el.dataset.allowOutside = options.allowOutsideClick === false ? 'false' : 'true';
-    el.classList.toggle('app-dialog-form', !!options.form);
-    el.classList.toggle(`app-dialog-${options.icon || 'info'}`, true);
+    el.className = 'app-dialog-root';
+    if (options.form) el.classList.add('app-dialog-form');
+    el.classList.add(`app-dialog-${options.icon || 'info'}`);
 
     const titleEl = el.querySelector('#app-dialog-title');
     const bodyEl = el.querySelector('#app-dialog-body');
@@ -67,9 +76,12 @@
 
     titleEl.textContent = options.title || '';
     iconEl.textContent = iconName(options.icon);
-    bodyEl.innerHTML = options.html || '';
-    if (!options.html && (options.text || options.message)) {
-      bodyEl.innerHTML = `<p class="app-dialog-text">${options.text || options.message}</p>`;
+    if (options.html) {
+      bodyEl.innerHTML = options.html;
+    } else if (options.text || options.message) {
+      bodyEl.innerHTML = `<p class="app-dialog-text">${escapeHtml(options.text || options.message)}</p>`;
+    } else {
+      bodyEl.innerHTML = '';
     }
 
     actionsEl.innerHTML = '';
@@ -94,11 +106,13 @@
       button.className = `btn ${btn.kind === 'primary' ? 'btn-primary' : 'btn-secondary'} app-dialog-btn`;
       button.textContent = btn.label;
       button.addEventListener('click', async () => {
+        let payload = { ...btn.result };
         if (btn.id === 'confirm' && typeof options.preConfirm === 'function') {
-          const ok = await options.preConfirm();
-          if (ok === false) return;
+          const preResult = await options.preConfirm();
+          if (preResult === false) return;
+          if (preResult && typeof preResult === 'object') payload.value = preResult;
         }
-        close(btn.result);
+        close(payload);
       });
       actionsEl.appendChild(button);
     });

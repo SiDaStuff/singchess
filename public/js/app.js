@@ -1499,7 +1499,7 @@ _navigateTo(path, options = {}) {
 			  }
 
 		  _enterAnticheatMode() {
-	    document.body.classList.remove('menu-active');
+	    this._activateGameLayout();
 	    document.body.dataset.mode = 'anticheat';
 	    this.liveEvalToken += 1;
 	    this.puzzleMode.active = false;
@@ -1734,7 +1734,7 @@ _navigateTo(path, options = {}) {
 	  }
 
 		  _enterReviewMode() {
-		    document.body.classList.remove('menu-active');
+		    this._activateGameLayout();
 		    document.body.dataset.mode = 'review';
 		    this.puzzleMode.active = false;
 		    this.anticheatMode.active = false;
@@ -1753,8 +1753,15 @@ _navigateTo(path, options = {}) {
 		    this._updateCurrentMoveIndicator();
 		  }
 
-	  _enterCoachMode(options = null) {
+	  _activateGameLayout() {
 	    document.body.classList.remove('menu-active');
+	    if (this.elMainMenu) this.elMainMenu.hidden = true;
+	    if (this.elMainContent) this.elMainContent.hidden = false;
+	    if (this.elBoostPage) this.elBoostPage.hidden = true;
+	  }
+
+	  _enterCoachMode(options = null) {
+	    this._activateGameLayout();
 	    document.body.dataset.mode = 'coach';
 	    this.puzzleMode.active = false;
 	    this.anticheatMode.active = false;
@@ -1774,6 +1781,8 @@ _navigateTo(path, options = {}) {
 	      this._syncCoachControls();
 	      this._syncActionButtons();
 	      this._updateCurrentMoveIndicator();
+	      this._updateBoard();
+	      this.board.clearLoading();
 	      this._requestLiveEvaluation('Analyzing restored coach position...');
 	      return;
 	    }
@@ -2430,7 +2439,7 @@ _navigateTo(path, options = {}) {
       cancelButtonText: 'Cancel',
       confirmButtonText: 'Start Coach',
       didOpen: () => {
-        const root = window.Swal?.getHtmlContainer?.();
+        const root = document.getElementById('app-dialog-body');
         const adjustToggle = root?.querySelector('#swal-coach-ai-adjust');
         const adjustStyleSelect = root?.querySelector('#swal-coach-adjust-style');
         adjustToggle?.addEventListener('change', () => {
@@ -2492,7 +2501,7 @@ _navigateTo(path, options = {}) {
 	  }
 
 				  async _enterPuzzleMode() {
-				    document.body.classList.remove('menu-active');
+				    this._activateGameLayout();
 				    document.body.dataset.mode = 'puzzle';
 			    if (this.elLiveEval) this.elLiveEval.hidden = true;
 	    if (this.coachMode.active) {
@@ -3354,6 +3363,8 @@ _navigateTo(path, options = {}) {
 	    this._setCoachDialog(`Coach set to ${this._effectiveCoachElo()} ELO (${targetNote}). Make your first move.`, 'Coaching');
     this._syncCoachVisibility();
     this._syncCoachControls();
+    this.board.clearLoading();
+    this._updateBoard();
 
     if (humanColor === 'b') {
       await this._makeCoachMove();
@@ -4152,7 +4163,21 @@ _navigateTo(path, options = {}) {
 	    const radius = 52;
 	    const circumference = 2 * Math.PI * radius;
 	    const offset = circumference * (1 - score / 100);
-	    const gamesCount = summary.games || (Array.isArray(data.games) ? data.games.length : 0);
+	    const games = Array.isArray(data.games) ? data.games : [];
+	    const gamesCount = summary.games || games.length;
+	    const metric = (label, value) => `
+	      <div class="anticheat-metric">
+	        <span>${this._escapeHtml(label)}</span>
+	        <strong>${this._escapeHtml(value)}</strong>
+	      </div>`;
+	    const gameRows = games.slice(0, 12).map((game) => `
+	      <div class="anticheat-game">
+	        <div>
+	          <strong>${this._escapeHtml(game.title || 'Game')}</strong>
+	          <small>${this._escapeHtml(game.note || '')}</small>
+	        </div>
+	        <strong>${Math.round(game.score || 0)}</strong>
+	      </div>`).join('');
 	    this.elAnticheatResults.innerHTML = `
 	      <div class="anticheat-result-ring anticheat-result-ring--${riskClass}">
 	        <div class="anticheat-ring-wrap" style="--score:${score}">
@@ -4178,6 +4203,20 @@ _navigateTo(path, options = {}) {
 	          <span class="anticheat-ring-meta">${gamesCount} game${gamesCount === 1 ? '' : 's'} analyzed</span>
 	        </div>
 	      </div>
+	      <details class="anticheat-advanced" open>
+	        <summary>Advanced metrics</summary>
+	        <div class="anticheat-metrics">
+	          ${metric('Games', gamesCount)}
+	          ${metric('Win rate', `${Math.round(summary.winRate || 0)}%`)}
+	          ${metric('Accuracy', `${Math.round(summary.accuracy || 0)}%`)}
+	          ${metric('Best moves', `${Math.round(summary.bestRate || 0)}%`)}
+	          ${metric('ACPL', Math.round(summary.acpl || 0))}
+	          ${metric('Mistakes', `${Math.round(summary.mistakeRate || 0)}%`)}
+	          ${metric('Fast bests', `${Math.round(summary.fastBestRate || 0)}%`)}
+	          ${metric('Fast criticals', `${Math.round(summary.fastCriticalRate || 0)}%`)}
+	        </div>
+	        ${gameRows ? `<div class="anticheat-game-list">${gameRows}</div>` : ''}
+	      </details>
 	    `;
 	  }
 

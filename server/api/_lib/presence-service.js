@@ -77,10 +77,12 @@ async function clearUserWarning(uid) {
 async function getPendingWarning(uid) {
   const warning = await getUserWarning(uid);
   if (!warning?.message || warning.delivered) return null;
+  const message = sanitizeWarningMessage(warning.message);
+  if (!message) return null;
   return {
-    message: String(warning.message),
+    message,
     warnedAt: Number(warning.warnedAt) || 0,
-    warnedBy: String(warning.warnedBy || ''),
+    warnedBy: String(warning.warnedBy || '').slice(0, 120),
   };
 }
 
@@ -94,11 +96,18 @@ async function requireAdmin(event) {
   return user;
 }
 
+function sanitizeWarningMessage(raw) {
+  return String(raw || '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .trim()
+    .slice(0, 500);
+}
+
 async function warnUserByEmail(event) {
   await requireAdmin(event);
   const body = JSON.parse(event.body || '{}');
   const email = String(body.email || '').trim().toLowerCase();
-  const message = String(body.message || '').trim();
+  const message = sanitizeWarningMessage(body.message);
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(400, { error: 'Valid recipient email is required.' });
   if (!message) return json(400, { error: 'Warning message is required.' });
   const { admin: firebaseAdmin } = initAdmin();
@@ -109,7 +118,7 @@ async function warnUserByEmail(event) {
     return json(404, { error: 'No account exists for that email.' });
   }
   const actor = await requireUser(event);
-  await setUserWarning(target.uid, { message, warnedBy: actor.email });
+  await setUserWarning(target.uid, { message: sanitizeWarningMessage(message), warnedBy: actor.email });
   return json(200, { success: true, email, message });
 }
 

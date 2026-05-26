@@ -245,7 +245,7 @@
     const email = (document.getElementById('warn-user-email')?.value || '').trim();
     const message = (document.getElementById('warn-user-message')?.value || '').trim();
     if (!email) return setStatus('Enter the user email.', 'error');
-    if (!message) return setStatus('Enter a warning message.', 'error');
+    if (!message || message.length > 500) return setStatus('Enter a warning message (max 500 characters).', 'error');
     showLoading('Sending warning...');
     try {
       const response = await fetch('/api/admin/warn-user', {
