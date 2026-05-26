@@ -28,6 +28,7 @@ class ChessReviewApp {
 			white: null,
 			black: null,
 			active: false,
+			flagged: false,
 			timerId: null,
 			lastTick: 0,
 			currentSide: null,
@@ -131,6 +132,7 @@ class ChessReviewApp {
 		    this._initEngineControls();
 		    this._applyLocalPuzzleProfile();
 		    this._bindEvents();
+		    this._injectClearSavedGamesButton();
     this._syncPlayerNameplates();
 	    this._syncCoachVisibility();
 	    this._syncPuzzleVisibility();
@@ -501,6 +503,40 @@ _navigateTo(path, options = {}) {
 		    } catch (err) {
 		      this._showPopup({ icon: 'error', title: 'Clear failed', text: err.message || 'Unable to clear local cache.' });
 		    }
+		  }
+
+		  _clearSavedGames() {
+		    try {
+		      this._forgetSavedGameState('review');
+		      this._forgetSavedGameState('coach');
+		      this._showPopup({
+		        icon: 'success',
+		        title: 'Saved games cleared',
+		        text: 'Stored review and coach games were removed from this device.',
+		      });
+		    } catch (err) {
+		      this._showPopup({ icon: 'error', title: 'Clear failed', text: err.message || 'Unable to clear saved games.' });
+		    }
+		  }
+
+		  _injectClearSavedGamesButton() {
+		    const actions = document.querySelector('.header-actions');
+		    if (!actions || document.getElementById('btn-clear-saved-games')) return;
+		    const btn = document.createElement('button');
+		    btn.id = 'btn-clear-saved-games';
+		    btn.type = 'button';
+		    btn.className = 'btn btn-secondary';
+		    btn.title = 'Clear saved review and coach games';
+		    btn.setAttribute('aria-label', 'Clear saved games');
+		    btn.innerHTML = `
+		      <span class="btn-content">
+		        <span class="material-symbols-outlined btn-symbol">delete_sweep</span>
+		        <span class="btn-label">Clear saves</span>
+		      </span>`;
+		    const settingsBtn = document.getElementById('btn-settings');
+		    if (settingsBtn) actions.insertBefore(btn, settingsBtn);
+		    else actions.appendChild(btn);
+		    btn.addEventListener('click', () => this._clearSavedGames());
 		  }
 
 		  async _handlePageEmailAuth(mode) {
@@ -2104,6 +2140,11 @@ _navigateTo(path, options = {}) {
   _updateGameStatus() {
     if (!this.elGameStatus) return;
 
+    if (this.gameStatus === 'Time') {
+      this.elGameStatus.style.display = 'block';
+      return;
+    }
+
     const reason = this._getGameEndReason();
     this.gameStatus = reason;
 
@@ -3139,10 +3180,45 @@ _navigateTo(path, options = {}) {
 			this.clockState.timerId = null;
 		}
 		this.clockState.active = false;
+		this.clockState.flagged = false;
 		this.clockState.white = null;
 		this.clockState.black = null;
 		this.clockState.lastTick = 0;
 		this.clockState.currentSide = null;
+	}
+
+	_endGameOnTime(losingColor) {
+		if (!this.clockState.active || this.clockState.flagged) return;
+		this.clockState.flagged = true;
+		if (this.clockState.timerId) {
+			clearInterval(this.clockState.timerId);
+			this.clockState.timerId = null;
+		}
+		this.clockState.active = false;
+		const losingName = losingColor === 'w' ? 'White' : 'Black';
+		this.gameStatus = 'Time';
+		if (this.elGameStatus) {
+			this.elGameStatus.style.display = 'block';
+			this.elGameStatusTitle.textContent = 'Game End';
+			this.elGameStatusReason.textContent = 'Time';
+			this.elGameStatusDetails.textContent = `${losingName} lost on time.`;
+		}
+		if (this.coachMode.active) {
+			const humanLost = this.coachMode.humanColor === losingColor;
+			const message = humanLost
+				? 'You lost on time.'
+				: 'Coach lost on time. You win!';
+			this.coachMode.thinking = false;
+			this.board.interactive = false;
+			this.board.clearBestMoveArrow();
+			this._setCoachDialog(message, 'Game Over');
+			if (!humanLost && !this.coachMode.gameOverCelebrated) {
+				this.coachMode.gameOverCelebrated = true;
+				this._celebrate();
+			}
+			this._syncCoachControls();
+		}
+		this._updateClockDisplays();
 	}
 
 	_startClockTimer() {
@@ -3156,6 +3232,10 @@ _navigateTo(path, options = {}) {
 			const currentSide = this.clockState.currentSide;
 			if (currentSide && Number.isFinite(this.clockState[currentSide])) {
 				this.clockState[currentSide] = Math.max(0, this.clockState[currentSide] - elapsed);
+				if (this.clockState[currentSide] <= 0 && !this.clockState.flagged) {
+					this._endGameOnTime(currentSide === 'white' ? 'w' : 'b');
+					return;
+				}
 			}
 			this._updateClockDisplays();
 		}, 250);
@@ -3628,7 +3708,9 @@ _navigateTo(path, options = {}) {
 		  }
 
   _checkCoachGameOver() {
-    if (!this.coachMode.active || !this.chess.game_over()) return false;
+    if (!this.coachMode.active) return false;
+    if (this.gameStatus === 'Time' || this.clockState.flagged) return true;
+    if (!this.chess.game_over()) return false;
 
     let message = 'Game over.';
     const humanWon = this.chess.in_checkmate() && this.chess.turn() !== this.coachMode.humanColor;
@@ -3985,46 +4067,41 @@ _navigateTo(path, options = {}) {
 	  _renderAnticheatResults(data) {
 	    if (!this.elAnticheatResults || !data?.summary) return;
 	    const summary = data.summary;
+	    const score = Math.max(0, Math.min(100, Math.round(summary.score || 0)));
 	    const riskClass = summary.riskLevel === 'High' ? 'high' : summary.riskLevel === 'Watch' ? 'watch' : 'low';
 	    if (this.elAnticheatRiskPill) {
 	      this.elAnticheatRiskPill.textContent = summary.riskLevel || 'Low';
 	      this.elAnticheatRiskPill.className = `anticheat-risk-pill ${riskClass}`;
 	    }
-	    const games = Array.isArray(data.games) ? data.games : [];
-	    const metric = (label, value) => `
-	      <div class="anticheat-metric">
-	        <span>${this._escapeHtml(label)}</span>
-	        <strong>${this._escapeHtml(value)}</strong>
-	      </div>
-	    `;
-	    const gameRows = games.slice(0, 12).map((game) => `
-	      <div class="anticheat-game">
-	        <div>
-	          <strong>${this._escapeHtml(game.title || 'Game')}</strong>
-	          <small>${this._escapeHtml(game.note || '')}</small>
-	        </div>
-	        <strong>${Math.round(game.score || 0)}</strong>
-	      </div>
-	    `).join('');
+	    const radius = 52;
+	    const circumference = 2 * Math.PI * radius;
+	    const offset = circumference * (1 - score / 100);
+	    const gamesCount = summary.games || (Array.isArray(data.games) ? data.games.length : 0);
 	    this.elAnticheatResults.innerHTML = `
-	      <div class="anticheat-score-card">
-	        <div class="anticheat-score">${Math.round(summary.score || 0)}</div>
-	        <div class="anticheat-score-details">
-	          <strong>${this._escapeHtml(summary.headline || 'Anticheat score')}</strong>
-	          <span>${this._escapeHtml(summary.explanation || 'This is a heuristic review, not proof of cheating.')}</span>
-	          <div class="anticheat-metrics">
-	            ${metric('Games', summary.games || games.length)}
-	            ${metric('Win rate', `${Math.round(summary.winRate || 0)}%`)}
-	            ${metric('Accuracy', `${Math.round(summary.accuracy || 0)}%`)}
-	            ${metric('Best moves', `${Math.round(summary.bestRate || 0)}%`)}
-	            ${metric('ACPL', Math.round(summary.acpl || 0))}
-	            ${metric('Mistakes', `${Math.round(summary.mistakeRate || 0)}%`)}
-	            ${metric('Fast bests', `${Math.round(summary.fastBestRate || 0)}%`)}
-	            ${metric('Fast criticals', `${Math.round(summary.fastCriticalRate || 0)}%`)}
+	      <div class="anticheat-result-ring anticheat-result-ring--${riskClass}">
+	        <div class="anticheat-ring-wrap" style="--score:${score}">
+	          <svg class="anticheat-ring-svg" viewBox="0 0 120 120" aria-hidden="true">
+	            <circle class="anticheat-ring-track" cx="60" cy="60" r="${radius}"></circle>
+	            <circle
+	              class="anticheat-ring-progress"
+	              cx="60"
+	              cy="60"
+	              r="${radius}"
+	              stroke-dasharray="${circumference.toFixed(2)}"
+	              stroke-dashoffset="${offset.toFixed(2)}"
+	            ></circle>
+	          </svg>
+	          <div class="anticheat-ring-center">
+	            <span class="anticheat-ring-score">${score}</span>
+	            <span class="anticheat-ring-label">${this._escapeHtml(summary.riskLevel || 'Low')}</span>
 	          </div>
 	        </div>
+	        <div class="anticheat-ring-copy">
+	          <strong>${this._escapeHtml(summary.headline || 'Anticheat score')}</strong>
+	          <p>${this._escapeHtml(summary.explanation || 'Heuristic review only — not proof of cheating.')}</p>
+	          <span class="anticheat-ring-meta">${gamesCount} game${gamesCount === 1 ? '' : 's'} analyzed</span>
+	        </div>
 	      </div>
-	      <div class="anticheat-game-list">${gameRows}</div>
 	    `;
 	  }
 
@@ -4831,8 +4908,11 @@ _navigateTo(path, options = {}) {
 	    if (loadingCoachGame && this.coachMode.active) {
 	      this.initialClocks = { white: 1200, black: 1200 };
 	      this.gameClockHistory = [];
+	      this.gameStatus = null;
+	      this.board.interactive = true;
 	      this._resetClockState();
 	      this.clockState.active = true;
+	      this.clockState.flagged = false;
 	      this.clockState.white = 1200;
 	      this.clockState.black = 1200;
 	      this.clockState.currentSide = this.chess.turn() === 'w' ? 'white' : 'black';

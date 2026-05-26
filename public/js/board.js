@@ -21,6 +21,7 @@ class ChessBoard {
     this.pendingDrag = null;
     this.dragPointerId = null;
     this._suppressNextClick = false;
+    this._prefersTap = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
     this._onResize = () => {
       this._updateArrows();
       this._updateLoadingOverlay();
@@ -563,6 +564,7 @@ class ChessBoard {
 
     this.container.addEventListener('pointerdown', (e) => {
       if (!this.interactive) return;
+      if (this._prefersTap) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       const sqEl = e.target.closest('.square');
       if (!sqEl) return;

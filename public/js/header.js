@@ -1,13 +1,13 @@
 (function () {
   const links = [
     ['/', 'Home'],
-    ['/review.html', 'Review'],
-    ['/coach.html', 'Coach'],
-    ['/puzzles.html', 'Puzzles'],
-    ['/anticheat.html', 'Anticheat'],
-    ['/boost.html', 'Boost'],
-    ['/account.html', 'Account'],
-    ['/settings.html', 'Settings'],
+    ['/review', 'Review'],
+    ['/coach', 'Coach'],
+    ['/puzzles', 'Puzzles'],
+    ['/anticheat', 'Anticheat'],
+    ['/boost', 'Boost'],
+    ['/account', 'Account'],
+    ['/settings', 'Settings'],
   ];
 
   function activeHref() {
@@ -28,7 +28,7 @@
       </a>
       <button class="site-menu-toggle" type="button" aria-expanded="false" aria-controls="site-menu">Menu</button>
       <nav class="site-menu" id="site-menu" aria-label="Site navigation">
-        ${links.map(([href, label]) => `<a href="${href}" class="${current === href ? 'active' : ''}" ${href === '/account.html' ? 'id="header-account-link"' : ''}>${label}</a>`).join('')}
+        ${links.map(([href, label]) => `<a href="${href}" class="${current === href || current === `${href}.html` ? 'active' : ''}" ${href === '/account' ? 'id="header-account-link"' : ''}>${label}</a>`).join('')}
       </nav>
     `;
     const placeholder = document.querySelector('[data-site-header]');
