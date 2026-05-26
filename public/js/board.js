@@ -145,28 +145,34 @@ class ChessBoard {
       if (existing) existing.remove();
 
 	      const piece = this.position[sq];
-	      if (piece) {
-	        const img = document.createElement('img');
-	        img.className = 'piece';
-	        if (this.changedSquares?.includes(sq)) img.classList.add('piece-arrive');
-	        img.src = getPieceSvgUri(piece);
-	        img.draggable = false;
-	        sqEl.appendChild(img);
-	      }
+		      if (piece) {
+		        const img = document.createElement('img');
+		        img.className = 'piece';
+		        if (this.changedSquares?.includes(sq)) img.classList.add('piece-arrive');
+		        img.src = getPieceSvgUri(piece);
+		        img.onerror = () => {
+		          const fallback = typeof getPieceFallbackSvgUri === 'function' ? getPieceFallbackSvgUri(piece) : '';
+		          if (fallback && img.src !== fallback) img.src = fallback;
+		        };
+		        img.draggable = false;
+		        sqEl.appendChild(img);
+		      }
 	    });
 	    this.changedSquares = [];
 	  }
 
 	  _updateHighlights() {
 	    const squares = this.container.querySelectorAll('.square');
-	    squares.forEach(sqEl => {
-		      sqEl.classList.remove('highlight', 'selected', 'best-from', 'best-to', 'has-piece', 'inverted');
+		    squares.forEach(sqEl => {
+			      sqEl.classList.remove('highlight', 'selected', 'best-from', 'best-to', 'has-piece', 'inverted');
 	      sqEl.style.removeProperty('--move-highlight-color');
 	      sqEl.style.removeProperty('--move-highlight-ring');
 	      // Remove legal dots
 	      const dot = sqEl.querySelector('.legal-dot');
 	      if (dot) dot.remove();
-    });
+	      const hud = sqEl.querySelector('.selected-piece-hud');
+	      if (hud) hud.remove();
+	    });
 
 	    // Apply highlights
 		    this.invertedSquares.forEach((square) => {
@@ -184,10 +190,19 @@ class ChessBoard {
 	    });
 
     // Selected square
-    if (this.selectedSquare) {
-      const sqEl = this.container.querySelector(`[data-square="${this.selectedSquare}"]`);
-      if (sqEl) sqEl.classList.add('selected');
-    }
+	    if (this.selectedSquare) {
+	      const sqEl = this.container.querySelector(`[data-square="${this.selectedSquare}"]`);
+	      if (sqEl) {
+	        sqEl.classList.add('selected');
+	        const piece = this.position[this.selectedSquare];
+	        if (piece) {
+	          const hud = document.createElement('div');
+	          hud.className = 'selected-piece-hud';
+	          hud.textContent = this._pieceHudLabel(piece);
+	          sqEl.appendChild(hud);
+	        }
+	      }
+	    }
 
     // Legal move indicators
     this.legalMoves.forEach(sq => {
@@ -316,6 +331,12 @@ class ChessBoard {
 	    } catch (_error) {
 	      return '#d88a1d';
 	    }
+	  }
+
+	  _pieceHudLabel(piece) {
+	    const color = piece?.[0] === 'w' ? 'W' : 'B';
+	    const names = { K: 'K', Q: 'Q', R: 'R', B: 'B', N: 'N', P: 'P' };
+	    return `${color}${names[piece?.[1]] || ''}`;
 	  }
 
   _getLegalMovesFrom(sq) {
@@ -489,9 +510,13 @@ class ChessBoard {
       this.legalMoves = this._getLegalMovesFrom(sq);
       this._updateHighlights();
 
-      dragImg = document.createElement('img');
-      dragImg.src = getPieceSvgUri(piece);
-      dragImg.className = 'drag-piece';
+	      dragImg = document.createElement('img');
+	      dragImg.src = getPieceSvgUri(piece);
+	      dragImg.onerror = () => {
+	        const fallback = typeof getPieceFallbackSvgUri === 'function' ? getPieceFallbackSvgUri(piece) : '';
+	        if (fallback && dragImg.src !== fallback) dragImg.src = fallback;
+	      };
+	      dragImg.className = 'drag-piece';
       const sqRect = sqEl.getBoundingClientRect();
       const size = sqRect.width * 1.06;
       dragImg.style.width = size + 'px';

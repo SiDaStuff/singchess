@@ -4,7 +4,8 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "build": "node scripts/copy-stockfish.mjs && node scripts/build-puzzles.mjs",
+    "build": "node scripts/build-pieces.mjs && node scripts/copy-stockfish.mjs && node scripts/build-puzzles.mjs",
+    "build:pieces": "node scripts/build-pieces.mjs",
     "build:puzzles": "node scripts/build-puzzles.mjs",
     "start": "node server/index.js",
     "dev": "node server/dev.js",

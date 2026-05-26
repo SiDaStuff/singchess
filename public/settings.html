@@ -74,8 +74,7 @@
 	            <option value="classic">Classic</option>
 	            <option value="glass">Glass</option>
             <option value="wood">Wood</option>
-            <option value="neon">Neon</option>
-	            <option value="mono">Mono</option>
+	            <option value="neo">Neo</option>
 	          </select>
 	        </label>
 
@@ -172,6 +171,10 @@
 	            if (pieces[square] && typeof getPieceSvgUri === 'function') {
 	              const img = document.createElement('img');
 	              img.src = getPieceSvgUri(pieces[square]);
+	              img.onerror = function () {
+	                const fallback = typeof getPieceFallbackSvgUri === 'function' ? getPieceFallbackSvgUri(pieces[square]) : '';
+	                if (fallback && img.src !== fallback) img.src = fallback;
+	              };
 	              img.alt = '';
 	              cell.appendChild(img);
 	            }
@@ -186,6 +189,10 @@
 	        ['wK', 'wQ', 'wN', 'bK', 'bQ', 'bN'].forEach((piece) => {
 	          const img = document.createElement('img');
 	          img.src = getPieceSvgUri(piece);
+	          img.onerror = function () {
+	            const fallback = typeof getPieceFallbackSvgUri === 'function' ? getPieceFallbackSvgUri(piece) : '';
+	            if (fallback && img.src !== fallback) img.src = fallback;
+	          };
 	          img.alt = '';
 	          root.appendChild(img);
 	        });
@@ -209,7 +216,7 @@
         if (saved.strength && depthEl) depthEl.value = saved.strength;
 	        if (saved.maxTimeMs && timeoutEl) timeoutEl.value = String(saved.maxTimeMs);
 	        if (saved.boardTheme && boardThemeEl) boardThemeEl.value = saved.boardTheme;
-	        if (saved.pieceTheme && pieceThemeEl) pieceThemeEl.value = saved.pieceTheme;
+	        if (saved.pieceTheme && pieceThemeEl) pieceThemeEl.value = ['classic', 'glass', 'wood', 'neo'].includes(saved.pieceTheme) ? saved.pieceTheme : 'classic';
 	        if (arrowColorEl) arrowColorEl.value = toColorInputValue(saved.annotationArrowColor, DEFAULT_ARROW_COLOR);
 	        if (highlightColorEl) highlightColorEl.value = toColorInputValue(saved.annotationHighlightColor, DEFAULT_HIGHLIGHT_COLOR);
 	        document.body.dataset.boardTheme = boardThemeEl?.value || 'classic';

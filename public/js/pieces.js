@@ -237,10 +237,9 @@ function makeThemedPieceSvg(piece, theme) {
   return PIECE_SVG[piece] || '';
 }
 
-// Get SVG data URI for a piece
-function getPieceSvgUri(piece) {
-  let svg = PIECE_SVG[piece];
-  if (!svg) return '';
+const PIECE_ASSET_THEMES = new Set(['classic', 'glass', 'wood', 'neo']);
+
+function getPieceAssetTheme() {
   const theme = document.body?.dataset?.pieceTheme || (() => {
     try {
       const raw = window.localStorage?.getItem('sidastuff.engineSettings');
@@ -249,6 +248,26 @@ function getPieceSvgUri(piece) {
       return 'classic';
     }
   })();
-  if (theme && theme !== 'classic') svg = makeThemedPieceSvg(piece, theme);
-  return 'data:image/svg+xml,' + encodeURIComponent(svg);
+  return PIECE_ASSET_THEMES.has(theme) ? theme : 'classic';
+}
+
+function getPieceAssetName(piece) {
+  if (!piece || piece.length < 2) return '';
+  return `${piece[0]}${piece[1].toLowerCase()}`;
+}
+
+function getPieceAssetUri(piece) {
+  const assetName = getPieceAssetName(piece);
+  if (!assetName) return '';
+  return `./assets/pieces/${getPieceAssetTheme()}/${assetName}.png`;
+}
+
+function getPieceFallbackSvgUri(piece) {
+  const svg = PIECE_SVG[piece];
+  return svg ? 'data:image/svg+xml,' + encodeURIComponent(svg) : '';
+}
+
+// Get image URI for a piece.
+function getPieceSvgUri(piece) {
+  return getPieceAssetUri(piece) || getPieceFallbackSvgUri(piece);
 }
