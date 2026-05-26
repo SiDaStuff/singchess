@@ -143,6 +143,8 @@ class ChessReviewApp {
 		    this._resetInsightPanel();
 		    this._loadPublicStats();
 			    this._initRouting();
+			    this._recordSiteVisit();
+			    this._ensureImportModalTabs();
 			    window.addEventListener('resize', () => this._updateEvalBar(this.currentEvalScore), { passive: true });
 		  }
 
@@ -382,37 +384,29 @@ class ChessReviewApp {
 		  }
 
 		  _showPopup(options = {}) {
-			    const config = {
-			      icon: options.icon || 'info',
-			      title: options.title || '',
-			      text: options.text || options.message || '',
-			      html: options.html,
-			      confirmButtonColor: '#202721',
-			      confirmButtonText: options.confirmButtonText || 'OK',
-			      showCancelButton: !!options.showCancelButton,
-			      cancelButtonText: options.cancelButtonText || 'Cancel',
-			      showDenyButton: !!options.showDenyButton,
-			      denyButtonText: options.denyButtonText || 'No',
-				      denyButtonColor: options.denyButtonColor || '#c8b6ff',
-			      reverseButtons: options.reverseButtons ?? true,
-			      allowOutsideClick: options.allowOutsideClick ?? true,
-			      focusConfirm: options.focusConfirm ?? true,
-			      preConfirm: options.preConfirm,
-			      didOpen: options.didOpen,
-			      customClass: {
-			        popup: `app-popup ${options.form ? 'app-popup-form' : ''}`.trim(),
-			        confirmButton: 'app-popup-confirm',
-			        cancelButton: 'app-popup-cancel',
-			        denyButton: 'app-popup-deny',
-			      },
-			    };
-
-	    if (window.Swal?.fire) {
-	      return window.Swal.fire(config);
-	    }
-
-		    const confirmed = !config.showCancelButton || window.confirm([config.title, config.text || options.message || ''].filter(Boolean).join('\n'));
+		    if (window.AppDialog?.open) {
+		      return window.AppDialog.open(options);
+		    }
+		    const confirmed = !options.showCancelButton || window.confirm([options.title, options.text || options.message || ''].filter(Boolean).join('\n'));
 		    return Promise.resolve({ isConfirmed: confirmed, isDismissed: !confirmed });
+		  }
+
+		  _showUserWarning(warning = {}) {
+		    const message = String(warning.message || '').trim();
+		    if (!message) return;
+		    return this._showPopup({
+		      icon: 'warning',
+		      title: 'Message from admin',
+		      text: message,
+		      confirmButtonText: 'OK',
+		      allowOutsideClick: false,
+		    });
+		  }
+
+		  _recordSiteVisit() {
+		    if (sessionStorage.getItem('sidastuff.visitRecorded')) return;
+		    fetch('/api/site/visit', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+		    sessionStorage.setItem('sidastuff.visitRecorded', '1');
 		  }
 
 		  _initRouting() {
@@ -888,6 +882,7 @@ _navigateTo(path, options = {}) {
 		    this._applyProfileToPuzzleMode(this.authState.profile);
 		    this._syncAccountUi();
 		    this._syncPuzzlePanel();
+		    if (me.pendingWarning) this._showUserWarning(me.pendingWarning);
 		    return me;
 		  }
 
@@ -913,6 +908,12 @@ _navigateTo(path, options = {}) {
 			      source.addEventListener('disabled', async (event) => {
 			        const payload = event.data ? JSON.parse(event.data) : {};
 			        this._handleBannedSession(payload.reason || '', payload.error);
+			      });
+			      source.addEventListener('warning', (event) => {
+			        try {
+			          const payload = event.data ? JSON.parse(event.data) : {};
+			          this._showUserWarning(payload);
+			        } catch (_err) {}
 			      });
 		      source.addEventListener('error', () => {
 		        if (source.readyState === EventSource.CLOSED) this._stopStatusStream();
@@ -1182,7 +1183,7 @@ _navigateTo(path, options = {}) {
 		      showDenyButton: !signedIn,
 		      denyButtonText: 'Google',
 		      didOpen: () => {
-		        const root = window.Swal?.getHtmlContainer?.();
+		        const root = document.getElementById('app-dialog-body');
 		        if (!root) return;
 		        root.querySelector('#swal-gift-boost-btn')?.addEventListener('click', () => {
 		          this._giftBoostFromSwal(root);
@@ -1202,7 +1203,7 @@ _navigateTo(path, options = {}) {
 		        if (this.authState.user) {
 		          return true;
 		        }
-		        const root = window.Swal.getHtmlContainer();
+		        const root = document.getElementById('app-dialog-body');
 		        const email = (root.querySelector('#swal-auth-email')?.value || '').trim();
 		        const password = root.querySelector('#swal-auth-password')?.value || '';
 		        const statusEl = root.querySelector('#swal-account-status');
@@ -1233,7 +1234,7 @@ _navigateTo(path, options = {}) {
 		  }
 
 		  _hideAccountModal() {
-		    if (window.Swal?.isVisible?.()) window.Swal.close();
+		    window.AppDialog?.close?.({ isDismissed: true });
 		  }
 
 		  async _giftBoostFromSwal(root) {
@@ -2243,15 +2244,22 @@ _navigateTo(path, options = {}) {
 	  }
 
   _showPgnModal() {
+    this._ensureImportModalTabs();
     this.elPgnModal.style.display = 'flex';
+    document.body.classList.add('modal-open');
     this._setImportStatus('');
     this._renderImportResults([]);
+    const tabs = this.elPgnModal.querySelector('.import-tabs');
+    if (tabs) {
+      tabs.querySelector('[data-import-tab="pgn"]')?.click();
+    }
     this._syncImportMode();
-    this.elPgnInput.focus();
+    this.elPgnInput?.focus();
   }
 
   _hidePgnModal() {
     this.elPgnModal.style.display = 'none';
+    document.body.classList.remove('modal-open');
   }
 
   _settingsSwalHtml() {
@@ -2305,7 +2313,7 @@ _navigateTo(path, options = {}) {
       cancelButtonText: 'Cancel',
       confirmButtonText: 'Save',
       preConfirm: () => {
-        const root = window.Swal.getHtmlContainer();
+        const root = document.getElementById('app-dialog-body');
         return {
           module: root.querySelector('#swal-engine-module')?.value,
           strength: root.querySelector('#swal-engine-strength')?.value,
@@ -2330,7 +2338,7 @@ _navigateTo(path, options = {}) {
   }
 
   _hideSettingsModal() {
-    if (window.Swal?.isVisible?.()) window.Swal.close();
+    window.AppDialog?.close?.({ isDismissed: true });
   }
 
 	  _recommendedEngineModule() {
@@ -2430,7 +2438,7 @@ _navigateTo(path, options = {}) {
         });
       },
       preConfirm: () => {
-        const root = window.Swal.getHtmlContainer();
+        const root = document.getElementById('app-dialog-body');
         const rawElo = parseInt(root.querySelector('#swal-coach-elo')?.value || '1200', 10);
         const eloValue = clamp(Number.isFinite(rawElo) ? rawElo : 1200, 100, 2800);
         const colorChoice = root.querySelector('input[name="swal-coach-color"]:checked')?.value || 'w';
@@ -2459,7 +2467,7 @@ _navigateTo(path, options = {}) {
 		  }
 
   _hideCoachSetupModal() {
-    if (window.Swal?.isVisible?.()) window.Swal.close();
+    window.AppDialog?.close?.({ isDismissed: true });
   }
 
   _readCoachSetup() {
@@ -2818,6 +2826,7 @@ _navigateTo(path, options = {}) {
 				      if (this.elLiveEval) this.elLiveEval.hidden = false;
 				      const rated = !this.puzzleMode.failed ? await this._recordPuzzleAttempt(true) : false;
 				      this._celebrate();
+				      this._playNamedSound('end');
 					      this._setPuzzleStatus(checkmateSolved && !isExpected
 					        ? 'Solved by checkmate.'
 					        : !rated && !this.puzzleMode.failed
@@ -3819,14 +3828,81 @@ _navigateTo(path, options = {}) {
     this._syncCoachControls();
   }
 
+	  _ensureImportModalTabs() {
+	    const modal = this.elPgnModal;
+	    const body = modal?.querySelector('.modal-body');
+	    if (!body || body.querySelector('.import-tabs')) return;
+	    const grid = body.querySelector('.import-source-grid');
+	    const textarea = body.querySelector('#pgn-input');
+	    const divider = body.querySelector('.modal-divider');
+	    const status = body.querySelector('#import-status');
+	    const results = body.querySelector('#import-results');
+	    if (!grid || !textarea) return;
+
+	    const tabs = document.createElement('div');
+	    tabs.className = 'import-tabs';
+	    tabs.setAttribute('role', 'tablist');
+	    tabs.innerHTML = `
+	      <button type="button" class="import-tab active" data-import-tab="pgn" role="tab">Paste PGN</button>
+	      <button type="button" class="import-tab" data-import-tab="username" role="tab">From username</button>`;
+
+	    const panelPgn = document.createElement('div');
+	    panelPgn.className = 'import-panel import-panel-pgn active';
+	    panelPgn.dataset.importPanel = 'pgn';
+	    panelPgn.appendChild(textarea);
+
+	    const panelUsername = document.createElement('div');
+	    panelUsername.className = 'import-panel import-panel-username';
+	    panelUsername.dataset.importPanel = 'username';
+	    panelUsername.appendChild(grid);
+	    if (status) panelUsername.appendChild(status);
+	    if (results) panelUsername.appendChild(results);
+
+	    if (divider) divider.remove();
+	    body.insertBefore(tabs, body.firstChild);
+	    body.appendChild(panelPgn);
+	    body.appendChild(panelUsername);
+
+	    tabs.querySelectorAll('.import-tab').forEach((tab) => {
+	      tab.addEventListener('click', () => {
+	        const mode = tab.dataset.importTab;
+	        tabs.querySelectorAll('.import-tab').forEach((entry) => entry.classList.toggle('active', entry === tab));
+	        body.querySelectorAll('.import-panel').forEach((panel) => {
+	          panel.classList.toggle('active', panel.dataset.importPanel === mode);
+	        });
+	        if (this.elImportSource) {
+	          this.elImportSource.value = mode === 'pgn' ? 'pgn' : 'lichess';
+	        }
+	        this._syncImportMode();
+	        if (mode === 'pgn') this.elPgnInput?.focus();
+	        else this.elImportUsername?.focus();
+	      });
+	    });
+
+	    this.elImportSource?.addEventListener('change', () => {
+	      const isPgn = this.elImportSource.value === 'pgn';
+	      tabs.querySelector('[data-import-tab="pgn"]')?.classList.toggle('active', isPgn);
+	      tabs.querySelector('[data-import-tab="username"]')?.classList.toggle('active', !isPgn);
+	      body.querySelector('.import-panel-pgn')?.classList.toggle('active', isPgn);
+	      body.querySelector('.import-panel-username')?.classList.toggle('active', !isPgn);
+	    });
+	  }
+
 	  _syncImportMode() {
 	    if (!this.elImportSource || !this.elBtnImportUsername) return;
 	    const isPgnMode = this.elImportSource.value === 'pgn';
-    this.elBtnImportUsername.querySelector('.btn-label').textContent = isPgnMode ? 'Load PGN' : 'Load Username';
-    this.elImportUsername.disabled = isPgnMode;
-    this.elImportLimit.disabled = isPgnMode;
-    this.elImportUsername.parentElement.style.opacity = isPgnMode ? '0.55' : '1';
-	    this.elImportLimit.parentElement.style.opacity = isPgnMode ? '0.55' : '1';
+	    const label = this.elBtnImportUsername.querySelector('.btn-label');
+	    if (label) label.textContent = 'Load games';
+	    this.elImportUsername.disabled = isPgnMode;
+	    this.elImportLimit.disabled = isPgnMode;
+	    if (this.elImportUsername.parentElement) {
+	      this.elImportUsername.parentElement.hidden = isPgnMode;
+	    }
+	    if (this.elImportLimit.parentElement) {
+	      this.elImportLimit.parentElement.hidden = isPgnMode;
+	    }
+	    const footer = this.elPgnModal?.querySelector('.modal-footer');
+	    if (footer) footer.hidden = !isPgnMode;
 	  }
 
 	  _syncAnticheatForm() {
@@ -5041,13 +5117,13 @@ _navigateTo(path, options = {}) {
 	    const result = await this._showPopup({
 	      form: true,
 	      icon: 'question',
-	      title: `Restore previous ${isCoach ? 'coach game' : 'review'}?`,
+	      title: isCoach ? 'Continue coach game?' : 'Continue review?',
 	      html: this._savedGameRestoreHtml(type, state),
-	      confirmButtonText: 'Restore',
+	      confirmButtonText: isCoach ? 'Resume coach' : 'Resume review',
 	      showCancelButton: true,
 	      cancelButtonText: isCoach ? 'New coach game' : 'Import new game',
 	      allowOutsideClick: false,
-	      reverseButtons: false,
+	      reverseButtons: true,
 	    });
 
 	    if (result.isConfirmed) {

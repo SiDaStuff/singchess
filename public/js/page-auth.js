@@ -57,6 +57,22 @@
     }
   }
 
+  function showWarningPopup(message) {
+    const text = String(message || '').trim();
+    if (!text) return;
+    if (window.AppDialog?.open) {
+      window.AppDialog.open({
+        icon: 'warning',
+        title: 'Message from admin',
+        text,
+        confirmButtonText: 'OK',
+        allowOutsideClick: false,
+      });
+      return;
+    }
+    window.alert(text);
+  }
+
   function setStatus(message, kind = '') {
     const el = document.getElementById('page-status');
     if (!el) return;
@@ -104,6 +120,12 @@
         const firebase = ensureFirebase();
         if (firebase?.auth) await firebase.auth().signOut();
         window.location.replace(`/signin.html?banned=1${payload.reason ? `&reason=${encodeURIComponent(payload.reason)}` : ''}`);
+      });
+      source.addEventListener('warning', (event) => {
+        try {
+          const payload = event.data ? JSON.parse(event.data) : {};
+          showWarningPopup(payload.message || '');
+        } catch (_err) {}
       });
       source.addEventListener('error', () => {
         if (source.readyState === EventSource.CLOSED) stopAccountStatusStream();
@@ -168,6 +190,78 @@
     if (adminPanel) adminPanel.hidden = !me.isAdmin;
     const banPanel = document.getElementById('admin-ban-panel');
     if (banPanel) banPanel.hidden = !me.isAdmin;
+    const dashboardPanel = document.getElementById('admin-dashboard-panel');
+    if (dashboardPanel) dashboardPanel.hidden = !me.isAdmin;
+    const warnPanel = document.getElementById('admin-warn-panel');
+    if (warnPanel) warnPanel.hidden = !me.isAdmin;
+    if (me.isAdmin) loadAdminDashboard(user);
+    if (me.pendingWarning) showWarningPopup(me.pendingWarning.message);
+  }
+
+  function renderOnlineUsers(users = []) {
+    const list = document.getElementById('admin-online-list');
+    if (!list) return;
+    if (!users.length) {
+      list.innerHTML = '<p class="admin-online-empty">No users connected.</p>';
+      return;
+    }
+    list.innerHTML = users.map((entry) => `
+      <div class="admin-online-row">
+        <strong>${escapeHtml(entry.username || entry.email || 'Player')}</strong>
+        <span>${escapeHtml(entry.email || '')}</span>
+      </div>`).join('');
+  }
+
+  function escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  async function loadAdminDashboard(user) {
+    try {
+      const response = await fetch('/api/admin/dashboard', {
+        headers: await authHeaders(user),
+        cache: 'no-store',
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error || `Dashboard failed with ${response.status}`);
+      const onlineCount = document.getElementById('admin-online-count');
+      const totalVisitors = document.getElementById('admin-total-visitors');
+      if (onlineCount) onlineCount.textContent = String(result.onlineCount || 0);
+      if (totalVisitors) totalVisitors.textContent = String(result.totalVisitors || 0);
+      renderOnlineUsers(result.onlineUsers || []);
+    } catch (err) {
+      setStatus(err.message || 'Could not load admin dashboard.', 'error');
+    }
+  }
+
+  async function warnUser() {
+    const firebase = ensureFirebase();
+    const user = firebase?.auth?.().currentUser;
+    if (!user) return setStatus('Sign in as admin first.', 'error');
+    const email = (document.getElementById('warn-user-email')?.value || '').trim();
+    const message = (document.getElementById('warn-user-message')?.value || '').trim();
+    if (!email) return setStatus('Enter the user email.', 'error');
+    if (!message) return setStatus('Enter a warning message.', 'error');
+    showLoading('Sending warning...');
+    try {
+      const response = await fetch('/api/admin/warn-user', {
+        method: 'POST',
+        headers: await authHeaders(user, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ email, message }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error || `Warning failed with ${response.status}`);
+      setStatus(`Warning queued for ${result.email}.`, 'success');
+      document.getElementById('warn-user-message').value = '';
+    } catch (err) {
+      setStatus(err.message || 'Warning failed.', 'error');
+    } finally {
+      hideLoading();
+    }
   }
 
   async function emailAuth(mode) {
@@ -337,6 +431,12 @@
     document.getElementById('btn-gift-boost')?.addEventListener('click', giftBoost);
     document.getElementById('btn-ban-user')?.addEventListener('click', () => manageBanUser('ban'));
     document.getElementById('btn-unban-user')?.addEventListener('click', () => manageBanUser('unban'));
+    document.getElementById('btn-warn-user')?.addEventListener('click', warnUser);
+    document.getElementById('btn-refresh-admin-dashboard')?.addEventListener('click', async () => {
+      const firebase = ensureFirebase();
+      const user = firebase?.auth?.().currentUser;
+      if (user) await loadAdminDashboard(user);
+    });
 
     let accountLoadingFallback = null;
     if (page === 'account') {

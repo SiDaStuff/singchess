@@ -214,6 +214,14 @@ async function getMe(event) {
   }
 
   const plan = activePlan(profile);
+  const warning = profile.warning || null;
+  const pendingWarning = warning?.message && !warning.delivered
+    ? {
+      message: String(warning.message),
+      warnedAt: Number(warning.warnedAt) || 0,
+      warnedBy: String(warning.warnedBy || ''),
+    }
+    : null;
   return {
     user,
     profile,
@@ -222,6 +230,7 @@ async function getMe(event) {
     limits: FREE_LIMITS,
     day,
     isAdmin: user.email === ADMIN_EMAIL,
+    pendingWarning,
   };
 }
 

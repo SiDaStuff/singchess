@@ -125,8 +125,41 @@ function normalizeStats(raw = {}) {
     coachGamesPlayed: Math.max(0, Number(raw.coachGamesPlayed) || 0),
     brilliantMoves: Math.max(0, Number(raw.brilliantMoves) || 0),
     puzzlesSolved: Math.max(0, Number(raw.puzzlesSolved ?? raw.brilliantMoves) || 0),
+    siteVisitorsTotal: Math.max(0, Number(raw.siteVisitorsTotal) || 0),
     updatedAt: Number(raw.updatedAt) || 0,
   };
+}
+
+async function incrementSiteVisitors(delta = 1) {
+  const amount = Math.max(0, Number(delta) || 0);
+  if (!amount) return getPublicStats();
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const currentResponse = await firebaseRequest('/publicStats.json', {
+      method: 'GET',
+      headers: { 'X-Firebase-ETag': 'true' },
+    });
+    const current = normalizeStats(currentResponse.json || {});
+    const next = {
+      ...current,
+      siteVisitorsTotal: current.siteVisitorsTotal + amount,
+      updatedAt: Date.now(),
+    };
+    const body = JSON.stringify(next);
+    try {
+      await firebaseRequest('/publicStats.json', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+          'if-match': currentResponse.headers.etag || '*',
+        },
+      }, body);
+      return next;
+    } catch (err) {
+      if (err.statusCode !== 412 || attempt === 3) throw err;
+    }
+  }
+  return getPublicStats();
 }
 
 async function getPublicStats() {
@@ -253,6 +286,7 @@ async function tryClaimRateLimit(bucket, rawIp, windowMs = 5 * 60 * 1000) {
 module.exports = {
   getPublicStats,
   incrementPublicStats,
+  incrementSiteVisitors,
   claimUniqueBrilliantMoves,
   tryClaimRateLimit,
 };

@@ -21,6 +21,8 @@ const giftBoostFn = require('./api/gift-boost.js');
 const adminBanUserFn = require('./api/admin-ban-user.js');
 const usersMeStreamFn = require('./api/users-me-stream.js');
 const banStatusFn = require('./api/ban-status.js');
+const adminDashboardFn = require('./api/admin-dashboard.js');
+const siteVisitFn = require('./api/site-visit.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -159,6 +161,9 @@ app.get('/api/users/me', wrapHandler(usersMeFn));
 app.get('/api/users/me/stream', usersMeStreamFn.streamHandler);
 app.post('/api/admin/gift-boost', writeLimit, wrapHandler(giftBoostFn));
 app.post('/api/admin/ban-user', writeLimit, wrapHandler(adminBanUserFn));
+app.get('/api/admin/dashboard', wrapHandler(adminDashboardFn));
+app.post('/api/admin/warn-user', writeLimit, wrapHandler(adminDashboardFn));
+app.post('/api/site/visit', writeLimit, wrapHandler(siteVisitFn));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 

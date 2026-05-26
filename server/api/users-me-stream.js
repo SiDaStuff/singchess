@@ -1,4 +1,11 @@
-const { requireUser, json } = require('./_lib/user-service');
+const { requireUser } = require('./_lib/user-service');
+const {
+  setUserPresence,
+  touchUserPresence,
+  clearUserPresence,
+  getPendingWarning,
+  markWarningDelivered,
+} = require('./_lib/presence-service');
 
 function sseWrite(res, event, data) {
   res.write(`event: ${event}\n`);
@@ -13,6 +20,13 @@ function makeEvent(req) {
     path: req.path,
     rawUrl: req.originalUrl,
   };
+}
+
+async function pushWarningIfNeeded(res, uid) {
+  const warning = await getPendingWarning(uid);
+  if (!warning) return;
+  sseWrite(res, 'warning', warning);
+  await markWarningDelivered(uid);
 }
 
 exports.streamHandler = async (req, res) => {
@@ -43,19 +57,22 @@ exports.streamHandler = async (req, res) => {
     if (closed) return;
     closed = true;
     clearInterval(interval);
+    clearUserPresence(user.uid).catch(() => {});
     if (!res.finished) res.end();
   };
 
   const sendHeartbeat = () => {
     if (res.destroyed) return stopStream();
     sseWrite(res, 'heartbeat', { timestamp: Date.now() });
+    touchUserPresence(user.uid).catch(() => {});
   };
 
   const checkStatus = async () => {
     if (res.destroyed) return stopStream();
     try {
-      await requireUser(event);
+      const activeUser = await requireUser(event);
       sseWrite(res, 'status', { message: 'active' });
+      await pushWarningIfNeeded(res, activeUser.uid);
     } catch (err) {
       sseWrite(res, 'disabled', {
         error: err.message || 'Account disabled.',
@@ -66,7 +83,19 @@ exports.streamHandler = async (req, res) => {
     }
   };
 
+  try {
+    const profile = await require('./_lib/user-service').getProfile(user.uid, user);
+    await setUserPresence(user.uid, {
+      email: user.email,
+      username: profile.username || user.name,
+    });
+  } catch (_err) {
+    await setUserPresence(user.uid, { email: user.email, username: user.name });
+  }
+
   sseWrite(res, 'status', { message: 'connected', email: user.email });
+  await pushWarningIfNeeded(res, user.uid);
+
   const interval = setInterval(() => {
     sendHeartbeat();
     checkStatus();

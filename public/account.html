@@ -45,6 +45,24 @@
             <label class="field"><span class="field-label">Days</span><input id="gift-boost-days" class="input-select" type="number" min="1" max="366" value="30"></label>
             <button id="btn-gift-boost" class="btn btn-primary" type="button">Gift Boost</button>
           </div>
+          <div class="admin-dashboard-panel" id="admin-dashboard-panel" hidden>
+            <h3>Live site</h3>
+            <div class="standalone-grid admin-dashboard-stats">
+              <div class="standalone-stat"><span>Online now</span><strong id="admin-online-count">0</strong></div>
+              <div class="standalone-stat"><span>Total visitors</span><strong id="admin-total-visitors">0</strong></div>
+            </div>
+            <div class="admin-online-list" id="admin-online-list">
+              <p class="admin-online-empty">No users connected.</p>
+            </div>
+            <button id="btn-refresh-admin-dashboard" class="btn btn-secondary" type="button">Refresh</button>
+          </div>
+          <div class="admin-warn-panel" id="admin-warn-panel" hidden>
+            <h3>Warn player</h3>
+            <p class="admin-panel-help">The message appears in a popup on their next login or immediately if they are online.</p>
+            <label class="field"><span class="field-label">Email</span><input id="warn-user-email" class="input-select" type="email" placeholder="player@example.com"></label>
+            <label class="field"><span class="field-label">Message</span><textarea id="warn-user-message" class="input-select admin-warn-message" rows="3" placeholder="Please follow community guidelines."></textarea></label>
+            <button id="btn-warn-user" class="btn btn-primary" type="button">Send warning</button>
+          </div>
           <div class="admin-ban-panel" id="admin-ban-panel" hidden>
             <h3>Ban / Unban Player</h3>
             <label class="field"><span class="field-label">Email</span><input id="ban-user-email" class="input-select" type="email" placeholder="player@example.com"></label>
@@ -71,6 +89,7 @@
   </div>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js" crossorigin="anonymous"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js" crossorigin="anonymous"></script>
+  <script src="./js/app-dialog.js"></script>
   <script src="./js/header.js"></script>
   <script src="./js/footer.js"></script>
   <script src="./js/page-auth.js"></script>
