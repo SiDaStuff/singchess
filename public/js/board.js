@@ -170,8 +170,6 @@ class ChessBoard {
 	      // Remove legal dots
 	      const dot = sqEl.querySelector('.legal-dot');
 	      if (dot) dot.remove();
-	      const hud = sqEl.querySelector('.selected-piece-hud');
-	      if (hud) hud.remove();
 	    });
 
 	    // Apply highlights
@@ -192,16 +190,7 @@ class ChessBoard {
     // Selected square
 	    if (this.selectedSquare) {
 	      const sqEl = this.container.querySelector(`[data-square="${this.selectedSquare}"]`);
-	      if (sqEl) {
-	        sqEl.classList.add('selected');
-	        const piece = this.position[this.selectedSquare];
-	        if (piece) {
-	          const hud = document.createElement('div');
-	          hud.className = 'selected-piece-hud';
-	          hud.textContent = this._pieceHudLabel(piece);
-	          sqEl.appendChild(hud);
-	        }
-	      }
+	      if (sqEl) sqEl.classList.add('selected');
 	    }
 
     // Legal move indicators
@@ -331,12 +320,6 @@ class ChessBoard {
 	    } catch (_error) {
 	      return '#d88a1d';
 	    }
-	  }
-
-	  _pieceHudLabel(piece) {
-	    const color = piece?.[0] === 'w' ? 'W' : 'B';
-	    const names = { K: 'K', Q: 'Q', R: 'R', B: 'B', N: 'N', P: 'P' };
-	    return `${color}${names[piece?.[1]] || ''}`;
 	  }
 
   _getLegalMovesFrom(sq) {

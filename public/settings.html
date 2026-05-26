@@ -80,7 +80,6 @@
 
 	        <div class="settings-preview-grid">
 	          <div class="appearance-preview-board" id="appearance-board-preview" aria-label="Board preview"></div>
-	          <div class="appearance-preview-pieces" id="appearance-piece-preview" aria-label="Piece preview"></div>
 	        </div>
 
 	        <div class="settings-color-grid">
@@ -183,21 +182,6 @@
 	        }
 	      }
 
-	      function renderPiecePreview(root) {
-	        if (!root || typeof getPieceSvgUri !== 'function') return;
-	        root.innerHTML = '';
-	        ['wK', 'wQ', 'wN', 'bK', 'bQ', 'bN'].forEach((piece) => {
-	          const img = document.createElement('img');
-	          img.src = getPieceSvgUri(piece);
-	          img.onerror = function () {
-	            const fallback = typeof getPieceFallbackSvgUri === 'function' ? getPieceFallbackSvgUri(piece) : '';
-	            if (fallback && img.src !== fallback) img.src = fallback;
-	          };
-	          img.alt = '';
-	          root.appendChild(img);
-	        });
-	      }
-
       document.addEventListener('DOMContentLoaded', function () {
         const saved = loadSettings();
         const moduleEl = document.getElementById('settings-engine-module');
@@ -208,7 +192,6 @@
 	        const arrowColorEl = document.getElementById('settings-arrow-color');
 	        const highlightColorEl = document.getElementById('settings-highlight-color');
 	        const boardPreviewEl = document.getElementById('appearance-board-preview');
-	        const piecePreviewEl = document.getElementById('appearance-piece-preview');
 	        const statusEl = document.getElementById('engine-settings-status');
 	        const appearanceStatusEl = document.getElementById('appearance-settings-status');
 
@@ -224,7 +207,6 @@
 	        document.body.style.setProperty('--annotation-arrow-color', arrowColorEl?.value || DEFAULT_ARROW_COLOR);
 	        document.body.style.setProperty('--annotation-highlight-color', hexToRgba(highlightColorEl?.value || DEFAULT_HIGHLIGHT_COLOR, 0.38));
 	        renderBoardPreview(boardPreviewEl);
-	        renderPiecePreview(piecePreviewEl);
 
 	        boardThemeEl?.addEventListener('input', function () {
 	          document.body.dataset.boardTheme = boardThemeEl.value || 'classic';
@@ -233,7 +215,6 @@
 	        pieceThemeEl?.addEventListener('input', function () {
 	          document.body.dataset.pieceTheme = pieceThemeEl.value || 'classic';
 	          renderBoardPreview(boardPreviewEl);
-	          renderPiecePreview(piecePreviewEl);
 	        });
 	        arrowColorEl?.addEventListener('input', function () {
 	          document.body.style.setProperty('--annotation-arrow-color', arrowColorEl.value || DEFAULT_ARROW_COLOR);
