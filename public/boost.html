@@ -12,63 +12,196 @@
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0" rel="stylesheet" crossorigin="anonymous">
 </head>
 <body class="standalone-body" data-page="boost">
+  <div data-site-header></div>
   <div class="standalone-shell">
-    <nav class="standalone-nav">
-      <a class="standalone-brand" href="/"><img src="./assets/logo.png" alt="">SiDaStuff Chess</a>
-      <div class="standalone-links">
-        <a href="/review">Review</a>
-        <a href="/puzzles">Puzzles</a>
-        <a href="/account">Account</a>
-        <a class="active" href="/boost">Boost</a>
-      </div>
-    </nav>
-    <main class="standalone-main">
-      <section class="card standalone-card boost-card">
-        <span class="material-symbols-outlined boost-page-icon">bolt</span>
-        <h1>Boost</h1>
-        <p>Boost is verified through Patreon. Checkout, then connect Patreon to activate Boost on your account.</p>
-        <div class="boost-pricing">
-          <div class="boost-price">
-            <strong>$3</strong><span>/month</span>
+    <main class="standalone-main boost-page-main">
+      <!-- Confetti canvas for purchase celebration -->
+      <canvas id="confetti-canvas" class="confetti-canvas"></canvas>
+
+      <!-- Hero Section -->
+      <section class="boost-hero">
+        <div class="boost-hero-content">
+          <div class="boost-hero-icon">
+            <span class="material-symbols-outlined">bolt</span>
           </div>
-          <div class="boost-price alt">
-            <strong>$30</strong><span>/year</span>
-          </div>
+          <h1>Power Up Your Chess</h1>
+          <p class="boost-tagline">Unlock unlimited analysis and priority support</p>
         </div>
-        <div class="boost-comparison">
-          <table class="plan-table">
-            <thead><tr><th>Feature</th><th>Free</th><th>Boost</th></tr></thead>
-            <tbody>
-              <tr><td>Server reviews / day</td><td>3</td><td><strong>Unlimited</strong></td></tr>
-              <tr><td>Anticheat runs / day</td><td>1</td><td><strong>Unlimited</strong></td></tr>
-              <tr><td>Server review strength</td><td>Standard</td><td><strong>Stronger</strong></td></tr>
-              <tr><td>Stockfish server toggle</td><td>No</td><td><strong>Yes</strong></td></tr>
-              <tr><td>Priority account status</td><td>No</td><td><strong>Yes</strong></td></tr>
-            </tbody>
-          </table>
-        </div>
-        <ul class="boost-perks">
-          <li>Unlimited server reviews and anti-cheat runs</li>
-          <li>Stronger, higher-priority analysis sessions</li>
-          <li>Stockfish review toggle unlocked</li>
-          <li>Faster account readiness and priority support</li>
-          <li>Exclusive advanced puzzle insights</li>
-        </ul>
-        <p class="account-usage">Plan: <strong id="boost-plan">Free</strong></p>
-        <p class="account-usage" id="boost-expires"></p>
-        <div class="standalone-actions" id="boost-signed-out" hidden>
-          <a class="btn btn-primary" href="/signin.html">Sign In</a>
-          <a class="btn btn-secondary" href="/signup.html">Create account</a>
-        </div>
-        <div class="standalone-actions" id="boost-signed-in" hidden>
-          <a id="btn-boost-checkout" class="btn btn-primary" href="#" target="_blank" rel="noopener noreferrer">Checkout on Patreon</a>
-          <button id="btn-boost-connect" class="btn btn-secondary" type="button">Connect Patreon</button>
-          <a class="btn btn-secondary" href="/account.html">Account</a>
-        </div>
-        <p class="account-status" id="boost-status"></p>
       </section>
+
+      <!-- Status Section -->
+      <div class="boost-status-container" id="boost-status-container" hidden>
+        <div class="boost-status-card" id="boost-status-card">
+          <span class="material-symbols-outlined boost-status-icon">check_circle</span>
+          <div>
+            <strong id="boost-status-title">Boost Active</strong>
+            <p id="boost-status-text">Your premium features are ready</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Authentication Required -->
+      <div class="boost-auth-required" id="boost-auth-required" hidden>
+        <h2>Sign in to get started</h2>
+        <p>Create your account or sign in to unlock Boost benefits</p>
+        <div class="standalone-actions">
+          <a class="btn btn-primary" href="/signin.html">Sign In</a>
+          <a class="btn btn-secondary" href="/signup.html">Create Account</a>
+        </div>
+      </div>
+
+      <!-- Main Boost Content (signed in) -->
+      <div id="boost-content" hidden>
+        <!-- Price and Plan Options -->
+        <section class="boost-pricing-section">
+          <h2>Simple, Transparent Pricing</h2>
+          <div class="boost-plans">
+            <div class="boost-plan plan-monthly featured">
+              <div class="plan-header">
+                <span class="plan-name">Monthly</span>
+              </div>
+              <div class="plan-price">
+                <span class="currency">$</span><span class="amount">3</span><span class="period">/month</span>
+              </div>
+              <div class="plan-trial">
+                <strong>7-day free trial</strong>
+                <p>Cancel anytime, no commitment</p>
+              </div>
+              <ul class="plan-highlights">
+                <li><span class="material-symbols-outlined">check</span> Unlimited reviews</li>
+                <li><span class="material-symbols-outlined">check</span> Stronger analysis</li>
+                <li><span class="material-symbols-outlined">check</span> Priority support</li>
+              </ul>
+              <a id="btn-boost-checkout-monthly" class="btn btn-primary btn-large btn-featured" href="#" target="_blank" rel="noopener noreferrer">Start Free Trial</a>
+            </div>
+          </div>
+        </section>
+
+        <!-- Features Comparison -->
+        <section class="boost-features-section">
+          <h2>What You Get with Boost</h2>
+          <div class="boost-features-grid">
+            <div class="feature-card">
+              <div class="feature-icon">
+                <span class="material-symbols-outlined">speed</span>
+              </div>
+              <h3>Unlimited Analysis</h3>
+              <p>Unlimited server reviews and anticheat analysis. No daily limits holding you back.</p>
+            </div>
+
+            <div class="feature-card">
+              <div class="feature-icon">
+                <span class="material-symbols-outlined">trending_up</span>
+              </div>
+              <h3>Stronger Engine</h3>
+              <p>Access deeper, more powerful analysis with higher-priority processing power.</p>
+            </div>
+
+            <div class="feature-card">
+              <div class="feature-icon">
+                <span class="material-symbols-outlined">settings</span>
+              </div>
+              <h3>Stockfish Toggle</h3>
+              <p>Switch between different analysis engines to fit your review preferences.</p>
+            </div>
+
+            <div class="feature-card">
+              <div class="feature-icon">
+                <span class="material-symbols-outlined">support_agent</span>
+              </div>
+              <h3>Priority Support</h3>
+              <p>Get faster, priority responses to questions and technical issues.</p>
+            </div>
+
+            <div class="feature-card">
+              <div class="feature-icon">
+                <span class="material-symbols-outlined">auto_awesome</span>
+              </div>
+              <h3>Advanced Insights</h3>
+              <p>Unlock exclusive puzzle analysis and advanced move recommendations.</p>
+            </div>
+
+            <div class="feature-card">
+              <div class="feature-icon">
+                <span class="material-symbols-outlined">flash_on</span>
+              </div>
+              <h3>Faster Processing</h3>
+              <p>Priority queue means your analysis starts immediately with no delays.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Comparison Table -->
+        <section class="boost-comparison-section">
+          <h2>Feature Comparison</h2>
+          <div class="comparison-table-wrapper">
+            <table class="comparison-table">
+              <thead>
+                <tr>
+                  <th>Feature</th>
+                  <th class="free-col">Free</th>
+                  <th class="boost-col">Boost</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Server reviews per day</td>
+                  <td><span class="badge-limited">3</span></td>
+                  <td><span class="badge-unlimited">Unlimited</span></td>
+                </tr>
+                <tr>
+                  <td>Anticheat runs per day</td>
+                  <td><span class="badge-limited">1</span></td>
+                  <td><span class="badge-unlimited">Unlimited</span></td>
+                </tr>
+                <tr>
+                  <td>Analysis strength</td>
+                  <td>Standard</td>
+                  <td><strong>Stronger</strong></td>
+                </tr>
+                <tr>
+                  <td>Stockfish engine toggle</td>
+                  <td><span class="material-symbols-outlined no-badge">close</span></td>
+                  <td><span class="material-symbols-outlined yes-badge">check</span></td>
+                </tr>
+                <tr>
+                  <td>Priority support</td>
+                  <td><span class="material-symbols-outlined no-badge">close</span></td>
+                  <td><span class="material-symbols-outlined yes-badge">check</span></td>
+                </tr>
+                <tr>
+                  <td>Processing priority</td>
+                  <td>Standard</td>
+                  <td><strong>High Priority</strong></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- CTA Section -->
+        <section class="boost-cta-section">
+          <div class="boost-cta-content">
+            <h2>Ready to Power Up?</h2>
+            <p id="boost-cta-text">Start your free trial today with no credit card required</p>
+            <div class="standalone-actions">
+              <a id="btn-boost-checkout-cta" class="btn btn-primary btn-large" href="#" target="_blank" rel="noopener noreferrer">Start Free Trial - $3/month</a>
+              <button id="btn-boost-connect" class="btn btn-secondary btn-large" type="button">Already a patron? Connect Patreon</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Footer Link -->
+        <div class="boost-footer-link">
+          <a href="/account.html">Back to Account</a>
+        </div>
+      </div>
+
+      <p class="account-status boost-error-status" id="boost-status"></p>
     </main>
   </div>
+  <div data-site-footer></div>
+
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js" crossorigin="anonymous"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js" crossorigin="anonymous"></script>
   <script src="./js/header.js"></script>
