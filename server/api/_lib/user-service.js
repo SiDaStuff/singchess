@@ -160,6 +160,23 @@ function activePlan(profile = {}) {
   return { plan: 'free', name: 'Free', limits: FREE_LIMITS };
 }
 
+async function maybeRefreshPatreon(uid, profile) {
+  const provider = String(profile?.subscription?.provider || '').toLowerCase();
+  const hasPatreon = !!profile?.patreon;
+  if (provider !== 'patreon' && !hasPatreon) return { refreshed: false };
+
+  const lastCheckedAt = Number(profile?.patreon?.lastCheckedAt) || 0;
+  const maxAgeMs = 24 * 60 * 60 * 1000;
+  if (lastCheckedAt && (Date.now() - lastCheckedAt) < maxAgeMs) return { refreshed: false };
+
+  try {
+    const { ensurePatreonFresh } = require('./patreon-service');
+    return await ensurePatreonFresh(uid, profile, { maxAgeMs });
+  } catch (err) {
+    return { refreshed: false, error: err.message || 'patreon_refresh_failed' };
+  }
+}
+
 function usageDay(now = new Date()) {
   return now.toISOString().slice(0, 10);
 }
@@ -212,6 +229,9 @@ async function getMe(event) {
   if (!profileSnap.exists()) {
     await profileRef.set(profile);
   }
+
+  // Patreon Boost is refreshed at most once per 24 hours (cached).
+  await maybeRefreshPatreon(user.uid, profile);
 
   const plan = activePlan(profile);
   const warning = profile.warning || null;

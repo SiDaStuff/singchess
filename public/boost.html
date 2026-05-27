@@ -16,17 +16,17 @@
     <nav class="standalone-nav">
       <a class="standalone-brand" href="/"><img src="./assets/logo.png" alt="">SiDaStuff Chess</a>
       <div class="standalone-links">
-        <a href="/review.html">Review</a>
-        <a href="/puzzles.html">Puzzles</a>
-        <a href="/account.html">Account</a>
-        <a class="active" href="/boost.html">Boost</a>
+        <a href="/review">Review</a>
+        <a href="/puzzles">Puzzles</a>
+        <a href="/account">Account</a>
+        <a class="active" href="/boost">Boost</a>
       </div>
     </nav>
     <main class="standalone-main">
       <section class="card standalone-card boost-card">
-        <span class="material-symbols-outlined boost-page-icon">workspace_premium</span>
+        <span class="material-symbols-outlined boost-page-icon">bolt</span>
         <h1>Boost</h1>
-        <p>Upgrade to Boost for unlimited review power, stronger analysis, and premium account priority.</p>
+        <p>Boost is verified through Patreon. Checkout, then connect Patreon to activate Boost on your account.</p>
         <div class="boost-pricing">
           <div class="boost-price">
             <strong>$3</strong><span>/month</span>
@@ -54,16 +54,26 @@
           <li>Faster account readiness and priority support</li>
           <li>Exclusive advanced puzzle insights</li>
         </ul>
-        <div class="standalone-actions">
-          <a class="btn btn-primary" href="/account.html">Open Account</a>
-          <a class="btn btn-secondary" href="/signin.html">Sign In</a>
+        <p class="account-usage">Plan: <strong id="boost-plan">Free</strong></p>
+        <p class="account-usage" id="boost-expires"></p>
+        <div class="standalone-actions" id="boost-signed-out" hidden>
+          <a class="btn btn-primary" href="/signin.html">Sign In</a>
+          <a class="btn btn-secondary" href="/signup.html">Create account</a>
         </div>
+        <div class="standalone-actions" id="boost-signed-in" hidden>
+          <a id="btn-boost-checkout" class="btn btn-primary" href="#" target="_blank" rel="noopener noreferrer">Checkout on Patreon</a>
+          <button id="btn-boost-connect" class="btn btn-secondary" type="button">Connect Patreon</button>
+          <a class="btn btn-secondary" href="/account.html">Account</a>
+        </div>
+        <p class="account-status" id="boost-status"></p>
       </section>
     </main>
   </div>
-  <script src="./js/page-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js" crossorigin="anonymous"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js" crossorigin="anonymous"></script>
   <script src="./js/header.js"></script>
   <script src="./js/footer.js"></script>
+  <script src="./js/boost.js"></script>
 </body>
 </html>
 

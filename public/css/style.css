@@ -335,7 +335,7 @@ body:not(.menu-active) .main-menu {
 		}
 
 .boost-page-icon {
-  color: #8f6a45;
+  color: var(--boost-text);
   font-size: 2.35rem;
   margin-bottom: 4px;
 }

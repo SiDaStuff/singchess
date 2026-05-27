@@ -23,6 +23,8 @@ const usersMeStreamFn = require('./api/users-me-stream.js');
 const banStatusFn = require('./api/ban-status.js');
 const adminDashboardFn = require('./api/admin-dashboard.js');
 const siteVisitFn = require('./api/site-visit.js');
+const patreonConnectFn = require('./api/patreon-connect.js');
+const patreonCallbackFn = require('./api/patreon-callback.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -164,6 +166,8 @@ app.post('/api/admin/ban-user', writeLimit, wrapHandler(adminBanUserFn));
 app.get('/api/admin/dashboard', wrapHandler(adminDashboardFn));
 app.post('/api/admin/warn-user', writeLimit, wrapHandler(adminDashboardFn));
 app.post('/api/site/visit', writeLimit, wrapHandler(siteVisitFn));
+app.get('/api/patreon/connect', wrapHandler(patreonConnectFn));
+app.get('/api/patreon/callback', wrapHandler(patreonCallbackFn));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
