@@ -186,6 +186,9 @@
     setText('account-usage', plan.plan === 'boost'
       ? 'Boost includes unlimited server reviews and anticheat runs.'
       : `Today: ${Math.max(0, Number(usage.anticheat) || 0)}/${limits.anticheatRunsPerDay || 1} anticheat, ${Math.max(0, Number(usage.serverReviews) || 0)}/${limits.serverReviewsPerDay || 3} server reviews.`);
+    const boostCta = document.getElementById('account-boost-cta');
+    if (boostCta) boostCta.style.display = plan.plan === 'free' ? 'block' : 'none';
+
     const adminPanel = document.getElementById('admin-boost-panel');
     if (adminPanel) adminPanel.hidden = !me.isAdmin;
     const banPanel = document.getElementById('admin-ban-panel');

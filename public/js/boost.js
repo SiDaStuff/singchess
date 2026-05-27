@@ -177,16 +177,24 @@
     // User is free, show checkout options
     if (elBtnCheckoutMonthly) {
       elBtnCheckoutMonthly.hidden = false;
-      elBtnCheckoutMonthly.href = checkoutUrl;
+      elBtnCheckoutMonthly.removeAttribute('href');
     }
     if (elBtnCheckoutCta) {
       elBtnCheckoutCta.hidden = false;
-      elBtnCheckoutCta.href = checkoutUrl;
+      elBtnCheckoutCta.removeAttribute('href');
     }
     if (elBtnConnect) elBtnConnect.hidden = false;
     
-    if (elCtaText) elCtaText.textContent = 'Start your free trial today with no credit card required';
     setStatus('', '');
+
+    // Post-payment check: Ask if they just completed payment
+    if (user) {
+      setTimeout(() => {
+        if (confirm("Did you just complete your payment on Patreon? Click OK to link your account and verify your purchase.")) {
+          startConnect(user);
+        }
+      }, 1000);
+    }
   }
 
   async function startConnect(user) {
@@ -211,15 +219,20 @@
       await startConnect(user);
     });
 
-    // Track checkout button clicks for confetti celebration
+    // Handle checkout button clicks with warning and celebration
     const checkoutButtons = [elBtnCheckoutMonthly, elBtnCheckoutYearly, elBtnCheckoutCta];
     checkoutButtons.forEach(btn => {
       if (btn) {
         btn.addEventListener('click', (e) => {
-          // Give users a fun celebration before leaving
-          setTimeout(() => {
-            confetti.celebrate(200);
-          }, 200);
+          e.preventDefault();
+          
+          if (confirm("You will need a Patreon account to complete this purchase. Proceed to checkout?")) {
+            // Give users a fun celebration before leaving
+            setTimeout(() => {
+              confetti.celebrate(200);
+              window.location.assign(checkoutUrl);
+            }, 200);
+          }
         });
       }
     });

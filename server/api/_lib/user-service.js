@@ -102,10 +102,10 @@ async function requireUser(event) {
   const { admin: firebaseAdmin } = initAdmin();
   const decoded = await firebaseAdmin.auth().verifyIdToken(token);
   const userRecord = await firebaseAdmin.auth().getUser(decoded.uid);
-  const ban = await getBanForUid(decoded.uid).catch(() => ({}));
-  if (userRecord.disabled || ban.disabled) {
-    throw banError(String(ban.reason || '').trim());
-  }
+    const ban = await getBanForUid(decoded.uid).catch(() => ({}));
+    if (userRecord.disabled === true || ban.disabled === true) {
+      throw banError(String(ban.reason || '').trim());
+    }
   return {
     uid: decoded.uid,
     email: String(decoded.email || '').toLowerCase(),
@@ -276,12 +276,12 @@ async function requireQuota(event, kind) {
   if (me.plan.plan === 'boost') return { ...me, quota: { allowed: true, unlimited: true } };
   const limit = kind === 'anticheat' ? FREE_LIMITS.anticheatRunsPerDay : FREE_LIMITS.serverReviewsPerDay;
   const claim = await claimUsage(me.user.uid, kind, limit);
-  if (!claim.allowed) {
-    const error = new Error(kind === 'anticheat'
-      ? 'Free plan includes 1 server anticheat run per day. Upgrade to Boost or wait for the daily reset.'
-      : 'Free plan includes 3 server game reviews per day. Further reviews should run in the browser until usage resets.');
-    error.statusCode = 402;
-    error.code = 'quota_exceeded';
+    if (!claim.allowed) {
+      const error = new Error(kind === 'anticheat'
+        ? 'You\'ve reached your daily limit for server anticheat runs. Unlock unlimited, high-precision anticheat checks with a Boost subscription!'
+        : 'You\'ve reached your daily limit for server game reviews. Get unlimited server-side analysis and faster processing by upgrading to Boost!');
+      error.statusCode = 402;
+      error.code = 'quota_exceeded';
     error.quota = claim;
     error.plan = me.plan;
     throw error;

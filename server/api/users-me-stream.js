@@ -74,12 +74,22 @@ exports.streamHandler = async (req, res) => {
       sseWrite(res, 'status', { message: 'active' });
       await pushWarningIfNeeded(res, activeUser.uid);
     } catch (err) {
+      // Only trigger "disabled" if it's actually a 403 Forbidden (ban)
+      // 401 Unauthorized (expired token) should be handled by the client as a session end, not a ban.
+    if (err.statusCode === 403 && err.code === 'account_banned') {
       sseWrite(res, 'disabled', {
         error: err.message || 'Account disabled.',
         code: err.code || err.statusCode || 403,
         reason: err.reason || '',
       });
       stopStream();
+    } else {
+        // For other errors (like 401), we just send an error event and let the client decide
+        sseWrite(res, 'error', {
+          error: err.message || 'Session error.',
+          code: err.code || err.statusCode || 500,
+        });
+      }
     }
   };
 
