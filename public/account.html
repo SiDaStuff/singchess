@@ -3,98 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Account | SiDaStuff Chess</title>
+  <title>Loading | SiDaStuff Chess</title>
+  <meta name="robots" content="noindex">
   <link rel="icon" type="image/png" href="./assets/logo.png">
-  <link rel="stylesheet" href="./css/style.css">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0" rel="stylesheet" crossorigin="anonymous">
+  <script>
+    // The SPA lives at / and serves every route client-side.
+    // This page is only used for legacy direct links and crawlers.
+    (function () {
+      try {
+        var path = (window.location.pathname || '/').replace(/\.html$/i, '').replace(/\/+$/, '') || '/';
+        if (path === '/index') path = '/';
+        var search = window.location.search || '';
+        var hash = window.location.hash || '';
+        // Pass the original route via ?spa-route so the SPA can restore it after loading.
+        if (path !== '/' && !/[?&]spa-route=/.test(search)) {
+          search += (search.indexOf('?') >= 0 ? '&' : '?') + 'spa-route=' + encodeURIComponent(path);
+        }
+        window.location.replace('/' + search + hash);
+      } catch (err) {
+        window.location.replace('/');
+      }
+    })();
+  </script>
+  <noscript>
+    <meta http-equiv="refresh" content="0; url=/">
+  </noscript>
 </head>
-<body class="standalone-body" data-page="account">
-  <div data-site-header></div>
-  <div class="standalone-shell">
-    <main class="standalone-main">
-      <section class="card standalone-card">
-        <h1>Account</h1>
-        <div id="account-signed-out-page" hidden>
-          <p>Sign in to view your plan, usage, and puzzle rating.</p>
-          <div class="standalone-actions">
-            <a class="btn btn-primary" href="/signin.html">Sign In</a>
-            <a class="btn btn-secondary" href="/signup.html">Create Account</a>
-          </div>
-        </div>
-        <div id="account-signed-in-page" hidden>
-          <div class="account-profile-row">
-            <div class="account-avatar material-symbols-outlined" aria-hidden="true">person</div>
-            <div>
-              <strong id="account-display-name">Player</strong>
-              <span id="account-email-label"></span>
-            </div>
-          </div>
-           <div class="standalone-grid">
-             <div class="standalone-stat"><span>Plan</span><strong id="account-plan">Free</strong></div>
-             <div class="standalone-stat"><span>Puzzle rating</span><strong id="account-puzzle-rating">1500</strong></div>
-             <div class="standalone-stat"><span>Solved</span><strong id="account-puzzles-solved">0</strong></div>
-             <div class="standalone-stat"><span>Attempted</span><strong id="account-puzzles-attempted">0</strong></div>
-           </div>
-           <div id="account-boost-cta" class="text-center" style="margin: 1rem 0; display: none;">
-             <a href="/boost.html" class="btn btn-primary">Get Boost Now</a>
-           </div>
-          <p class="account-usage" id="account-usage"></p>
-          <div class="admin-boost-panel" id="admin-boost-panel" hidden>
-            <h3>Gift Boost</h3>
-            <label class="field"><span class="field-label">Email</span><input id="gift-boost-email" class="input-select" type="email" placeholder="player@example.com"></label>
-            <label class="field"><span class="field-label">Days</span><input id="gift-boost-days" class="input-select" type="number" min="1" max="366" value="30"></label>
-            <button id="btn-gift-boost" class="btn btn-primary" type="button">Gift Boost</button>
-          </div>
-          <div class="admin-dashboard-panel" id="admin-dashboard-panel" hidden>
-            <h3>Live site</h3>
-            <div class="standalone-grid admin-dashboard-stats">
-              <div class="standalone-stat"><span>Online now</span><strong id="admin-online-count">0</strong></div>
-              <div class="standalone-stat"><span>Total visitors</span><strong id="admin-total-visitors">0</strong></div>
-            </div>
-            <div class="admin-online-list" id="admin-online-list">
-              <p class="admin-online-empty">No users connected.</p>
-            </div>
-            <button id="btn-refresh-admin-dashboard" class="btn btn-secondary" type="button">Refresh</button>
-          </div>
-          <div class="admin-warn-panel" id="admin-warn-panel" hidden>
-            <h3>Warn player</h3>
-            <p class="admin-panel-help">The message appears in a popup on their next login or immediately if they are online.</p>
-            <label class="field"><span class="field-label">Email</span><input id="warn-user-email" class="input-select" type="email" placeholder="player@example.com"></label>
-            <label class="field"><span class="field-label">Message</span><textarea id="warn-user-message" class="input-select admin-warn-message" rows="3" placeholder="Please follow community guidelines."></textarea></label>
-            <button id="btn-warn-user" class="btn btn-primary" type="button">Send warning</button>
-          </div>
-          <div class="admin-ban-panel" id="admin-ban-panel" hidden>
-            <h3>Ban / Unban Player</h3>
-            <label class="field"><span class="field-label">Email</span><input id="ban-user-email" class="input-select" type="email" placeholder="player@example.com"></label>
-            <label class="field"><span class="field-label">Reason</span><input id="ban-user-reason" class="input-select" type="text" placeholder="Policy violation or abuse"></label>
-            <div class="standalone-actions">
-              <button id="btn-ban-user" class="btn btn-primary" type="button">Ban User</button>
-              <button id="btn-unban-user" class="btn btn-secondary" type="button">Unban User</button>
-            </div>
-          </div>
-          <div class="standalone-actions">
-            <button id="btn-reset-password" class="btn btn-secondary" type="button">Reset Password</button>
-            <button id="btn-signout" class="btn btn-secondary" type="button">Sign Out</button>
-          </div>
-        </div>
-        <p class="account-status" id="page-status"></p>
-      </section>
-    </main>
-  </div>
-  <div data-site-footer></div>
-  <div class="modal-overlay app-loading-overlay" id="app-loading-overlay" style="display:none">
-    <div class="modal modal-loading" role="status" aria-live="polite">
-      <div class="modal-body"><div class="modal-loading-spinner" aria-hidden="true"></div><h2>Loading</h2><p id="app-loading-text">Loading profile...</p></div>
-    </div>
-  </div>
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js" crossorigin="anonymous"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js" crossorigin="anonymous"></script>
-  <script src="./js/app-dialog.js"></script>
-  <script src="./js/header.js"></script>
-  <script src="./js/footer.js"></script>
-  <script src="./js/page-auth.js"></script>
+<body>
+  <p>Redirecting to <a href="/">SiDaStuff Chess</a>...</p>
 </body>
 </html>

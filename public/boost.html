@@ -3,94 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Boost | SiDaStuff Chess</title>
+  <title>Loading | SiDaStuff Chess</title>
+  <meta name="robots" content="noindex">
   <link rel="icon" type="image/png" href="./assets/logo.png">
-  <link rel="stylesheet" href="./css/style.css">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0" rel="stylesheet" crossorigin="anonymous">
+  <script>
+    // The SPA lives at / and serves every route client-side.
+    // This page is only used for legacy direct links and crawlers.
+    (function () {
+      try {
+        var path = (window.location.pathname || '/').replace(/\.html$/i, '').replace(/\/+$/, '') || '/';
+        if (path === '/index') path = '/';
+        var search = window.location.search || '';
+        var hash = window.location.hash || '';
+        // Pass the original route via ?spa-route so the SPA can restore it after loading.
+        if (path !== '/' && !/[?&]spa-route=/.test(search)) {
+          search += (search.indexOf('?') >= 0 ? '&' : '?') + 'spa-route=' + encodeURIComponent(path);
+        }
+        window.location.replace('/' + search + hash);
+      } catch (err) {
+        window.location.replace('/');
+      }
+    })();
+  </script>
+  <noscript>
+    <meta http-equiv="refresh" content="0; url=/">
+  </noscript>
 </head>
-<body class="standalone-body" data-page="boost">
-  <div data-site-header></div>
-  <div class="standalone-shell">
-    <main class="standalone-main boost-page-main">
-      <canvas id="confetti-canvas" class="confetti-canvas"></canvas>
-
-       <!-- Status Section -->
-       <div class="boost-status-container" id="boost-status-container" hidden>
-         <div class="boost-status-card" id="boost-status-card">
-           <span class="material-symbols-outlined boost-status-icon">check_circle</span>
-           <div>
-             <strong id="boost-status-title">Boost Active</strong>
-             <p id="boost-status-text">Your premium features are ready. Go dominate the board.</p>
-           </div>
-         </div>
-       </div>
-
-       <!-- Authentication Required -->
-       <div class="boost-auth-required" id="boost-auth-required" hidden>
-         <h2 class="text-center">Join the Elite</h2>
-         <p class="text-center">Sign in or create an account to unlock the tools used by the world's best players.</p>
-         <div class="standalone-actions center-actions">
-           <a class="btn btn-primary" href="/signin.html">Sign In</a>
-           <a class="btn btn-secondary" href="/signup.html">Create Account</a>
-         </div>
-       </div>
-
-        <!-- Main Boost Content (signed in) -->
-        <div id="boost-content" hidden>
-          <section class="boost-pricing-section">
-            <h2 class="text-center">Get Boost</h2>
-            <p class="text-center section-subtitle">Unlock unlimited reviews and deep engine analysis.</p>
-            <div class="boost-plans">
-              <div class="boost-plan plan-monthly featured">
-                <div class="plan-header">
-                  <span class="plan-name">Monthly Boost</span>
-                </div>
-                <div class="plan-price">
-                  <span class="currency">$</span><span class="amount">3</span><span class="period">/month</span>
-                </div>
-                <div class="plan-highlights">
-                  <li><span class="material-symbols-outlined">check</span> Unlimited game reviews</li>
-                  <li><span class="material-symbols-outlined">check</span> Maximum engine strength</li>
-                  <li><span class="material-symbols-outlined">check</span> Priority processing</li>
-                </div>
-                <a id="btn-boost-checkout-monthly" class="btn btn-primary btn-large" href="#" target="_blank" rel="noopener noreferrer">
-                  Get Boost Now
-                </a>
-              </div>
-            </div>
-          </section>
-
-          <div class="text-center" style="margin-top: 2rem;">
-            <button id="btn-boost-connect" class="btn btn-secondary" type="button">Already a patron? Link my Patreon account</button>
-          </div>
-
-          <div class="boost-footer-link" style="text-align: center; margin-top: 2rem;">
-            <a href="/account.html">Back to Account</a>
-          </div>
-        </div>
-
-       <p class="account-status boost-error-status" id="boost-status"></p>
-    </main>
-  </div>
-  <div data-site-footer></div>
-
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js" crossorigin="anonymous"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js" crossorigin="anonymous"></script>
-  <script src="./js/header.js"></script>
-  <script src="./js/footer.js"></script>
-  <script src="./js/boost.js"></script>
+<body>
+  <p>Redirecting to <a href="/">SiDaStuff Chess</a>...</p>
 </body>
 </html>
-</write_to_file>
-<task_progress>
-- [x] Simplify boost.html (remove fake content)
-- [ ] Add Boost buttons to account.html and other pages
-- [ ] Implement redirection to boost page for boost features
-- [ ] Implement Patreon payment flow:
-    - [ ] Warning popup before Patreon redirect
-    - [ ] Post-payment verification flow ("Link my Patreon account")
-- [ ] Verify all changes
-</task_progress>

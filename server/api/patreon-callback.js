@@ -7,6 +7,7 @@ const {
 } = require('./_lib/patreon-service');
 
 exports.handler = async (event) => {
+  if (event.httpMethod === 'OPTIONS') return json(200, {});
   if (event.httpMethod !== 'GET') return json(405, { error: 'Use GET.' });
   try {
     const query = event.queryStringParameters || {};

@@ -27,7 +27,7 @@ function dbUnavailableResponse(headers) {
     statusCode: 503,
     headers,
     body: JSON.stringify({
-      error: 'Local puzzle chunks are not built yet. Run npm run build:puzzles on the server.',
+        error: 'Local puzzle chunks are not built yet. Run npm run puzzles:build on the server.',
       code: 'puzzle_db_missing',
     }),
   };
@@ -57,22 +57,18 @@ exports.handler = async (event) => {
     }
 
     const { type, theme, difficulty, target, exclude } = event.queryStringParameters || {};
-    const attemptedIds = new Set();
+    // Note: per-user "already attempted" tracking is owned by the client
+    // (puzzleMode.attemptedPuzzleIds). The server is stateless across requests
+    // for daily puzzles (deterministic by date), so no attemptedIds set is
+    // seeded here — the previous 409 "already attempted" guard was dead code.
 
     if (event.httpMethod === 'GET' && type === 'daily') {
-      const payload = await puzzleDb.getDailyPuzzle({ attemptedIds });
+      const payload = await puzzleDb.getDailyPuzzle({ attemptedIds: new Set() });
       if (!payload) {
         return {
           statusCode: 409,
           headers,
           body: JSON.stringify({ error: 'Could not find a daily puzzle right now.' }),
-        };
-      }
-      if (attemptedIds.has(safePuzzleId(payload.puzzle?.id))) {
-        return {
-          statusCode: 409,
-          headers,
-          body: JSON.stringify({ error: 'You have already attempted today\'s daily puzzle.' }),
         };
       }
       return {

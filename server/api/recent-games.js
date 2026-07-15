@@ -107,15 +107,19 @@ async function chessComGames(username, limit) {
 }
 
 exports.handler = async (event) => {
+  if (event.httpMethod === 'OPTIONS') return json(200, {});
   const source = event.queryStringParameters?.source;
-  const username = String(event.queryStringParameters?.username || '').trim();
+  const rawUsername = event.queryStringParameters?.username;
+  const username = String(rawUsername || '').trim();
   const limit = Math.max(1, Math.min(Number(event.queryStringParameters?.limit) || 10, 20));
 
+  // Validate source
   if (!['lichess', 'chesscom'].includes(source)) {
     return json(400, { error: 'source must be lichess or chesscom.' });
   }
-  if (!username) {
-    return json(400, { error: 'username is required.' });
+  // Validate username: alphanumeric, dots, underscores, hyphens only, 1-40 chars
+  if (!username || !/^[a-zA-Z0-9._-]{1,40}$/.test(username)) {
+    return json(400, { error: 'Valid username is required (alphanumeric, dots, underscores, hyphens; 1-40 chars).' });
   }
 
   try {

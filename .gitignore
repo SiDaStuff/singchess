@@ -11,3 +11,5 @@ server/data/puzzles/
 server/data/puzzles-next/
 server/data/puzzle-build-buckets/
 .env
+dist/
+

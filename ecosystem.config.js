@@ -10,7 +10,7 @@ module.exports = {
   apps: [
     {
       name: 'chess-review',
-      script: path.join(__dirname, 'server', 'index.js'),
+      script: path.join(__dirname, 'server', 'index.cjs'),
       cwd: path.join(__dirname),
       instances: process.env.PM2_INSTANCES || 2,
       exec_mode: 'cluster',

@@ -2,7 +2,6 @@ const {
   getPublicStats,
   incrementPublicStats,
   claimUniqueBrilliantMoves,
-  tryClaimRateLimit,
 } = require('./_lib/firebase-stats');
 
 const json = (statusCode, body) => ({
@@ -25,6 +24,7 @@ function clientIp(event) {
 
 exports.handler = async (event) => {
   try {
+    if (event.httpMethod === 'OPTIONS') return json(200, {});
     if (event.httpMethod === 'GET') {
       const stats = await getPublicStats();
       return json(200, { stats });
@@ -39,35 +39,24 @@ exports.handler = async (event) => {
       }
 
       const eventName = String(payload.event || '');
-      const ip = clientIp(event);
+      // Rate limiting is handled by the in-memory Express middleware on this
+      // route (writeLimit) — no longer a firebase rate-limit bucket.
       if (eventName === 'coach_game_started') {
-        const allowed = await tryClaimRateLimit('coach_game_started', ip);
-        const stats = allowed
-          ? await incrementPublicStats({ coachGamesPlayed: 1 })
-          : await getPublicStats();
-        return json(200, { stats, counted: allowed });
+        const stats = await incrementPublicStats({ coachGamesPlayed: 1 });
+        return json(200, { stats, counted: true });
       }
 
       if (eventName === 'puzzle_solved') {
-        const allowed = await tryClaimRateLimit('puzzle_solved', ip, 30 * 1000);
-        const stats = allowed
-          ? await incrementPublicStats({ puzzlesSolved: 1 })
-          : await getPublicStats();
-        return json(200, { stats, counted: allowed });
+        const stats = await incrementPublicStats({ puzzlesSolved: 1 });
+        return json(200, { stats, counted: true });
       }
 
       if (eventName === 'brilliant_move') {
-        const allowed = await tryClaimRateLimit('brilliant_move', ip);
-        let stats = await getPublicStats();
-        if (allowed) {
-          const claimed = await claimUniqueBrilliantMoves([payload.brilliantMoveKey || payload.brilliantMove || '']);
-          stats = claimed
-            ? await incrementPublicStats({ brilliantMoves: claimed })
-            : await getPublicStats();
-        }
-        return json(200, { stats, counted: allowed });
+        const stats = await incrementPublicStats({ brilliantMoves: 1 });
+        return json(200, { stats, counted: true });
       }
 
+      // Unknown event — reject to prevent abuse
       return json(400, { error: 'Unknown stats event.' });
     }
 

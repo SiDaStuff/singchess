@@ -1,25 +1,51 @@
-const { ServerStockfishEngine } = require('./_lib/stockfish-engine');
+const { getServerEngine, resetServerEngine } = require('./_lib/stockfish-engine');
 const { loadAnalyzer, loadChess } = require('./_lib/analysis-loader');
 const {
   incrementPublicStats,
 } = require('./_lib/firebase-stats');
 const { requireQuota } = require('./_lib/user-service');
+const crypto = require('crypto');
 
-const SERVER_REVIEW_PROFILE = {
-  depth: 14,
-  multiPv: 1,
-  timeoutMs: 4500,
-};
-const SERVER_POSITION_BATCH_LIMIT = 8;
+const SERVER_POSITION_BATCH_LIMIT = 12;
 const SERVER_ACTIVE_ANALYSIS_LIMIT = 5;
 
-const cachedEngines = new Map();
-const cachedEngineInits = new Map();
+// Auto-detect CPU cores and set thread count for the engine.
+// Limits to 4 threads max to avoid overloading serverless instances.
+function _detectThreadCount() {
+  const os = require('os');
+  const cores = Math.max(1, os.cpus?.length || 1);
+  return Math.min(cores, 4);
+}
+
+// Default review profiles tuned for speed while maintaining quality.
+// Depth 14 is the speed/quality sweet spot for non-boost reviews: at fixed
+// depth lite-single reaches depth 14 in ~0.6s/position (vs ~1.3s at 16),
+// roughly halving review wall-clock while leaving move classifications
+// essentially unchanged. Boost "strong" reviews use SERVER_STRONG below.
+const _threads = _detectThreadCount();
+const SERVER_REVIEW_PROFILE = {
+  depth: 14,
+  multiPv: 3,
+  timeoutMs: 5000,
+  threads: _threads,
+};
+const SERVER_STRONG_REVIEW_PROFILE = {
+  depth: 18,
+  multiPv: 3,
+  timeoutMs: 8000,
+  threads: _threads,
+};
+
 let engineChain = Promise.resolve();
 let activeAnalysisJobs = 0;
 const analysisQueue = [];
 const evalCache = new Map();
-const EVAL_CACHE_LIMIT = 800;
+const EVAL_CACHE_LIMIT = 2000;
+
+// Hash FEN to avoid long cache keys (FEN can be 80+ chars)
+function hashFen(fen) {
+  return crypto.createHash('sha256').update(fen).digest('hex').slice(0, 16);
+}
 
 function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
@@ -47,7 +73,7 @@ function cachedEngineAdapter(engine) {
     },
     newGame: () => engine.newGame(),
     evaluate: async (fen, depth, timeoutMs) => {
-      const key = `eval|${depth}|${fen}`;
+      const key = `eval|${depth}|${hashFen(fen)}`;
       const cached = cacheGet(key);
       if (cached) return cached;
       const result = await engine.evaluate(fen, depth, timeoutMs);
@@ -55,7 +81,7 @@ function cachedEngineAdapter(engine) {
       return result;
     },
     evaluateMultiPV: async (fen, depth, numPV, timeoutMs) => {
-      const key = `multipv|${depth}|${numPV}|${fen}`;
+      const key = `multipv|${depth}|${numPV}|${hashFen(fen)}`;
       const cached = cacheGet(key);
       if (cached) return cached;
       const result = await engine.evaluateMultiPV(fen, depth, numPV, timeoutMs);
@@ -75,37 +101,15 @@ function withTimeout(promise, timeoutMs, message) {
   });
 }
 
-async function getServerEngine(preferFull = false) {
-  const key = preferFull ? 'full' : 'lite';
-  const cachedEngine = cachedEngines.get(key);
-  if (cachedEngine?.ready) return cachedEngine;
-  if (!cachedEngineInits.has(key)) {
-    const engine = new ServerStockfishEngine({ preferFull });
-    cachedEngines.set(key, engine);
-    cachedEngineInits.set(key, engine.init().catch((err) => {
-      try {
-        engine?.destroy();
-      } catch (_destroyErr) {
-        // Ignore teardown failures after a failed init.
-      }
-      cachedEngines.delete(key);
-      cachedEngineInits.delete(key);
-      throw err;
-    }));
-  }
-  await cachedEngineInits.get(key);
-  return cachedEngines.get(key);
-}
-
-function resetServerEngine(preferFull = false) {
-  const key = preferFull ? 'full' : 'lite';
-  try {
-    cachedEngines.get(key)?.destroy();
-  } catch (_destroyErr) {
-    // Ignore teardown while recovering.
-  }
-  cachedEngines.delete(key);
-  cachedEngineInits.delete(key);
+// The engine is a single shared, process-wide instance owned by
+// stockfish-engine.js (the `stockfish` npm package is a hard singleton: a
+// second initEngine() call throws "INIT_ENGINE(...) is not a function" and
+// crashes the process via an uncaught WASM LinkError). Adapters expose the
+// ready/newGame/evaluate/evaluateMultiPV surface MoveAnalyzer expects;
+// evaluatePositionsPooled fans out across the single-element list.
+async function getEngineAdapters(_preferFull = false) {
+  const single = await withTimeout(getServerEngine(), 8000, 'Server engine is still warming up.');
+  return [cachedEngineAdapter(single)];
 }
 
 function withEngineQueue(work) {
@@ -172,8 +176,34 @@ function retryable(message) {
 
 exports.handler = async (event, context = {}) => {
   context.callbackWaitsForEmptyEventLoop = false;
+  if (event.httpMethod === 'OPTIONS') {
+    return json(200, {});
+  }
   if (event.httpMethod !== 'POST') {
     return json(405, { error: 'Use POST.' });
+  }
+
+  // Validate the request body BEFORE claiming quota. A malformed/empty payload
+  // should 400 without burning the user's daily review slot — otherwise a few
+  // bad requests (or an attacker with a stolen token) can lock a free user out
+  // for the day.
+  let payload = {};
+  try {
+    payload = JSON.parse(event.body || '{}');
+  } catch (_err) {
+    return json(400, { error: 'Invalid JSON body.' });
+  }
+
+  const moves = Array.isArray(payload.moves) ? payload.moves : [];
+  const positions = Array.isArray(payload.positions) ? payload.positions : [];
+  if (moves.length === 0 && positions.length === 0) {
+    return json(400, { error: 'No moves were provided.' });
+  }
+  if (moves.length > 500) {
+    return retryable('Server review is capped at 500 plies.');
+  }
+  if (positions.length > 500) {
+    return retryable('Server review is capped at 500 positions per request.');
   }
 
   let quotaState = null;
@@ -188,37 +218,17 @@ exports.handler = async (event, context = {}) => {
     });
   }
 
-  let payload = {};
-  try {
-    payload = JSON.parse(event.body || '{}');
-  } catch (_err) {
-    return json(400, { error: 'Invalid JSON body.' });
-  }
-
-    const moves = Array.isArray(payload.moves) ? payload.moves : [];
-    const positions = Array.isArray(payload.positions) ? payload.positions : [];
-    if (moves.length === 0 && positions.length === 0) {
-      return json(400, { error: 'No moves were provided.' });
-    }
-    if (moves.length > 500) {
-      return retryable('Server review is capped at 500 plies.');
-    }
-    if (moves.length > 500) {
-      return retryable('Server review is capped at 500 plies. Use the streaming endpoint for full games.');
-    }
-    if (positions.length > 500) {
-      return retryable('Server review is capped at 500 positions per request.');
-    }
-
       const Chess = loadChess();
         const { MoveAnalyzer } = loadAnalyzer();
 	      const analyzer = new MoveAnalyzer();
 	      const profile = payload.profile || {};
       const preferFullServer = quotaState.plan?.plan === 'boost' && profile.serverEngine === 'full';
+      const isStrong = preferFullServer && profile.strength === 'strong';
+      const baseProfile = isStrong ? SERVER_STRONG_REVIEW_PROFILE : SERVER_REVIEW_PROFILE;
       analyzer.setReviewProfile({
-        depth: 14,
-        multiPv: Math.max(1, Math.min(Number(profile.multiPv) || SERVER_REVIEW_PROFILE.multiPv, 2)),
-        timeoutMs: Math.max(1200, Math.min(Number(profile.timeoutMs) || SERVER_REVIEW_PROFILE.timeoutMs, SERVER_REVIEW_PROFILE.timeoutMs)),
+        depth: Math.max(baseProfile.depth, Math.min(Number(profile.depth) || baseProfile.depth, isStrong ? 20 : 18)),
+        multiPv: Math.max(1, Math.min(Number(profile.multiPv) || baseProfile.multiPv, isStrong ? 4 : 3)),
+        timeoutMs: Math.max(2000, Math.min(Number(profile.timeoutMs) || baseProfile.timeoutMs, baseProfile.timeoutMs)),
       });
 
   const initialFen = payload.initialFen || payload.headers?.FEN || undefined;
@@ -231,14 +241,10 @@ exports.handler = async (event, context = {}) => {
 
     try {
       return await withAnalysisSlot(async () => {
-        const engine = await withTimeout(
-	          getServerEngine(preferFullServer),
-          8000,
-          'Server engine is still warming up.'
-        );
-        const reviewEngine = cachedEngineAdapter(engine);
+        const engines = await getEngineAdapters(preferFullServer);
+        const reviewEngine = engines[0];
       if (positions.length > 0) {
-        const evals = await withEngineQueue(() => analyzer.evaluatePositions(positions, reviewEngine, null));
+        const evals = await withEngineQueue(() => analyzer.evaluatePositionsPooled(positions, engines, null));
         let publicStats = null;
         try {
           const movesAnalyzed = analyzedMoveCountForPositions(payload.chunkStart, evals.length);
@@ -260,7 +266,7 @@ exports.handler = async (event, context = {}) => {
       if (moves.length > 50) {
         analyzer._mateThreat = () => null;
       }
-      const results = await withEngineQueue(() => analyzer.analyzeGame(moves, reviewEngine, null, { initialFen, headers: payload.headers || {} }));
+      const results = await withEngineQueue(() => analyzer.analyzeGame(moves, reviewEngine, null, { initialFen, headers: payload.headers || {}, engines }));
       let publicStats = null;
       try {
         publicStats = await incrementPublicStats({ movesAnalyzed: moves.length });
@@ -281,10 +287,6 @@ exports.handler = async (event, context = {}) => {
     return json(200, {
         results: plainResults,
         opening: results.opening,
-        openingDrift: results.openingDrift,
-        trainingQueue: results.trainingQueue,
-        patternStats: results.patternStats,
-        reviewNarrative: results.reviewNarrative,
         criticalMoments,
       whiteAccuracy: results.whiteAccuracy,
       blackAccuracy: results.blackAccuracy,
@@ -304,8 +306,10 @@ exports.handler = async (event, context = {}) => {
   } catch (err) {
     console.error('Server analysis failed:', err);
     if (/cancelled|not ready|timed out waiting|out of memory|abort/i.test(String(err?.message || err))) {
-      resetServerEngine(false);
-      resetServerEngine(true);
+      // Non-destructive: clears the hash (UCI newGame) on the shared engine.
+      // We never destroy/recreate it — that would initEngine() a second time
+      // and crash the process.
+      resetServerEngine();
     }
     return retryable(err.message || 'Server analysis failed.');
   }
@@ -372,10 +376,12 @@ exports.streamHandler = async (req, res) => {
 	      const analyzer = new MoveAnalyzer();
 	      const profile = payload.profile || {};
       const preferFullServer = quotaState.plan?.plan === 'boost' && profile.serverEngine === 'full';
+      const isStrong = preferFullServer && profile.strength === 'strong';
+      const baseSseProfile = isStrong ? SERVER_STRONG_REVIEW_PROFILE : SERVER_REVIEW_PROFILE;
       analyzer.setReviewProfile({
-        depth: 14,
-        multiPv: Math.max(1, Math.min(Number(profile.multiPv) || SERVER_REVIEW_PROFILE.multiPv, 2)),
-        timeoutMs: Math.max(1200, Math.min(Number(profile.timeoutMs) || SERVER_REVIEW_PROFILE.timeoutMs, SERVER_REVIEW_PROFILE.timeoutMs)),
+        depth: baseSseProfile.depth,
+        multiPv: Math.max(1, Math.min(Number(profile.multiPv) || baseSseProfile.multiPv, baseSseProfile.multiPv)),
+        timeoutMs: Math.max(2000, Math.min(Number(profile.timeoutMs) || baseSseProfile.timeoutMs, baseSseProfile.timeoutMs)),
       });
 
       const initialFen = payload.initialFen || payload.headers?.FEN || undefined;
@@ -384,19 +390,18 @@ exports.streamHandler = async (req, res) => {
         if (!validation.load(initialFen)) throw new Error('Invalid initial FEN.');
       }
 
-      const engine = await withTimeout(getServerEngine(preferFullServer), 8000, 'Server engine is still warming up.');
-      const reviewEngine = cachedEngineAdapter(engine);
+      const engines = await getEngineAdapters(preferFullServer);
       const positions = analyzer._positionsForMoves(moves, initialFen);
       if (moves.length > 50) {
         analyzer._mateThreat = () => null;
       }
-      const evals = await withEngineQueue(() => analyzer.evaluatePositions(
+      const evals = await withEngineQueue(() => analyzer.evaluatePositionsPooled(
         positions,
-        reviewEngine,
-        (index, total) => {
+        engines,
+        (completed, total) => {
           if (res.destroyed) return;
           sseWrite(res, 'progress', {
-            completed: index + 1,
+            completed,
             total,
           });
         },
@@ -454,8 +459,10 @@ exports.streamHandler = async (req, res) => {
 	  } catch (err) {
 	    console.error('Server stream analysis failed:', err);
     if (/cancelled|not ready|timed out waiting|out of memory|abort/i.test(String(err?.message || err))) {
-      resetServerEngine(false);
-      resetServerEngine(true);
+      // Non-destructive: clears the hash (UCI newGame) on the shared engine.
+      // We never destroy/recreate it — that would initEngine() a second time
+      // and crash the process.
+      resetServerEngine();
     }
 	    sseWrite(res, 'error', { error: err.message || 'Server analysis failed.' });
   } finally {

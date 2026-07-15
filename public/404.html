@@ -3,25 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Page not found | SiDaStuff Chess</title>
-  <link rel="icon" type="image/png" href="/assets/logo.png">
-  <link rel="stylesheet" href="/css/example.css">
-  <link rel="stylesheet" href="/css/style.css">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <title>Loading | SiDaStuff Chess</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" type="image/png" href="./assets/logo.png">
+  <script>
+    // The SPA lives at / and serves every route client-side.
+    // This page is only used for legacy direct links and crawlers.
+    (function () {
+      try {
+        var path = (window.location.pathname || '/').replace(/\.html$/i, '').replace(/\/+$/, '') || '/';
+        if (path === '/index') path = '/';
+        var search = window.location.search || '';
+        var hash = window.location.hash || '';
+        // Pass the original route via ?spa-route so the SPA can restore it after loading.
+        if (path !== '/' && !/[?&]spa-route=/.test(search)) {
+          search += (search.indexOf('?') >= 0 ? '&' : '?') + 'spa-route=' + encodeURIComponent(path);
+        }
+        window.location.replace('/' + search + hash);
+      } catch (err) {
+        window.location.replace('/');
+      }
+    })();
+  </script>
+  <noscript>
+    <meta http-equiv="refresh" content="0; url=/">
+  </noscript>
 </head>
-<body class="site-header-enabled">
-  <div data-site-header></div>
-  <main class="standalone-main">
-    <section class="card standalone-card">
-      <h1>404</h1>
-      <p>That page was not found. The link may be old or mistyped.</p>
-      <div class="standalone-actions">
-        <a class="btn btn-primary" href="/">Back to home</a>
-        <a class="btn btn-secondary" href="/review">Review a game</a>
-      </div>
-    </section>
-  </main>
-  <script src="/js/header.js"></script>
-  <script src="/js/footer.js"></script>
+<body>
+  <p>Redirecting to <a href="/">SiDaStuff Chess</a>...</p>
 </body>
 </html>

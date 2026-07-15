@@ -3,49 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Account Help | SiDaStuff Chess</title>
+  <title>Loading | SiDaStuff Chess</title>
+  <meta name="robots" content="noindex">
   <link rel="icon" type="image/png" href="./assets/logo.png">
-  <link rel="stylesheet" href="./css/style.css">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
+  <script>
+    // The SPA lives at / and serves every route client-side.
+    // This page is only used for legacy direct links and crawlers.
+    (function () {
+      try {
+        var path = (window.location.pathname || '/').replace(/\.html$/i, '').replace(/\/+$/, '') || '/';
+        if (path === '/index') path = '/';
+        var search = window.location.search || '';
+        var hash = window.location.hash || '';
+        // Pass the original route via ?spa-route so the SPA can restore it after loading.
+        if (path !== '/' && !/[?&]spa-route=/.test(search)) {
+          search += (search.indexOf('?') >= 0 ? '&' : '?') + 'spa-route=' + encodeURIComponent(path);
+        }
+        window.location.replace('/' + search + hash);
+      } catch (err) {
+        window.location.replace('/');
+      }
+    })();
+  </script>
+  <noscript>
+    <meta http-equiv="refresh" content="0; url=/">
+  </noscript>
 </head>
-<body class="standalone-body" data-page="auth">
-  <div class="standalone-shell">
-    <main class="standalone-main">
-      <section class="card standalone-card">
-        <h1>Account Help</h1>
-        <p>Reset your password or continue to account sign-in.</p>
-        <label class="field">
-          <span class="field-label">Email</span>
-          <input id="reset-email" class="input-select" type="email" autocomplete="email" placeholder="you@example.com">
-        </label>
-        <div id="reset-new-password-area" style="display:none">
-          <label class="field">
-            <span class="field-label">New password</span>
-            <input id="reset-new-password" class="input-select" type="password" autocomplete="new-password" placeholder="New password">
-          </label>
-          <label class="field">
-            <span class="field-label">Confirm password</span>
-            <input id="reset-confirm-password" class="input-select" type="password" autocomplete="new-password" placeholder="Confirm password">
-          </label>
-        </div>
-        <div class="standalone-actions">
-          <button id="btn-reset-password" class="btn btn-primary" type="button">Send Reset Email</button>
-          <a class="btn btn-secondary" href="/signin.html">Sign In</a>
-          <a class="btn btn-secondary" href="/signup.html">Create Account</a>
-        </div>
-        <p class="account-status" id="page-status"></p>
-      </section>
-    </main>
-  </div>
-  <div class="modal-overlay app-loading-overlay" id="app-loading-overlay" style="display:none">
-    <div class="modal modal-loading" role="status" aria-live="polite">
-      <div class="modal-body"><div class="modal-loading-spinner" aria-hidden="true"></div><h2>Loading</h2><p id="app-loading-text">Loading...</p></div>
-    </div>
-  </div>
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js" crossorigin="anonymous"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js" crossorigin="anonymous"></script>
-  <script src="./js/page-auth.js"></script>
+<body>
+  <p>Redirecting to <a href="/">SiDaStuff Chess</a>...</p>
 </body>
 </html>

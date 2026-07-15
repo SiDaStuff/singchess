@@ -3,282 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Settings | SiDaStuff Chess</title>
+  <title>Loading | SiDaStuff Chess</title>
+  <meta name="robots" content="noindex">
   <link rel="icon" type="image/png" href="./assets/logo.png">
-  <link rel="stylesheet" href="./css/style.css">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
-</head>
-<body class="standalone-body" data-page="settings">
-  <div data-site-header></div>
-  <div class="standalone-shell">
-    <main class="standalone-main">
-      <section class="card standalone-card">
-        <h1>Settings</h1>
-
-        <h2 style="font-size:1rem;margin-top:4px">Browser Engine</h2>
-        <p>These settings apply when using browser review, coach, live eval, and local analysis.</p>
-
-        <label class="field">
-          <span class="field-label">Engine Type</span>
-          <select id="settings-engine-module" class="input-select">
-            <option value="lite-single">Stockfish 18 Lite (7 MB, recommended)</option>
-            <option value="full-single">Stockfish 18 Full (108 MB)</option>
-          </select>
-        </label>
-
-        <label class="field">
-          <span class="field-label">Analysis Depth</span>
-          <select id="settings-engine-depth" class="input-select">
-            <option value="depth10">Depth 10 (fast)</option>
-            <option value="depth14" selected>Depth 14 (default)</option>
-            <option value="depth18">Depth 18</option>
-            <option value="depth22">Depth 22</option>
-            <option value="depth26">Depth 26 (slow)</option>
-          </select>
-        </label>
-
-        <label class="field">
-          <span class="field-label">Move Timeout</span>
-          <select id="settings-engine-timeout" class="input-select">
-            <option value="4000">4 seconds</option>
-            <option value="8000">8 seconds</option>
-            <option value="12000" selected>12 seconds (default)</option>
-            <option value="20000">20 seconds</option>
-            <option value="30000">30 seconds</option>
-          </select>
-        </label>
-
-        <button id="btn-save-engine-settings" class="btn btn-primary" type="button">Save Engine Settings</button>
-        <p class="account-status" id="engine-settings-status"></p>
-
-        <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
-
-        <h2 style="font-size:1rem">Board Appearance</h2>
-        <label class="field">
-          <span class="field-label">Board Colors</span>
-          <select id="settings-board-theme" class="input-select">
-            <option value="classic">Classic</option>
-            <option value="green">Tournament Green</option>
-            <option value="blue">Coastal Blue</option>
-            <option value="slate">Slate</option>
-            <option value="walnut">Walnut</option>
-            <option value="rose">Rosewood</option>
-          </select>
-        </label>
-
-	        <label class="field">
-	          <span class="field-label">Piece Icons</span>
-	          <select id="settings-piece-theme" class="input-select">
-	            <option value="classic">Classic</option>
-	            <option value="glass">Glass</option>
-            <option value="wood">Wood</option>
-	            <option value="neo">Neo</option>
-	          </select>
-	        </label>
-
-	        <div class="settings-preview-grid">
-	          <div class="appearance-preview-board" id="appearance-board-preview" aria-label="Board preview"></div>
-	        </div>
-
-	        <label class="switch-row app-switch-row">
-	          <span>
-	            <strong>Piece Animations</strong>
-	            <small>Fade pieces into place after moves.</small>
-	          </span>
-	          <span class="app-switch">
-	            <input id="settings-piece-animations" type="checkbox">
-	            <span class="app-switch-track"></span>
-	          </span>
-	        </label>
-
-	        <div class="settings-color-grid">
-	          <label class="field">
-	            <span class="field-label">Arrow Color</span>
-	            <input id="settings-arrow-color" class="input-select input-color" type="color" value="#d88a1d">
-	          </label>
-	          <label class="field">
-	            <span class="field-label">Highlight Color</span>
-	            <input id="settings-highlight-color" class="input-select input-color" type="color" value="#d22626">
-	          </label>
-	        </div>
-
-	        <button id="btn-save-appearance-settings" class="btn btn-primary" type="button">Save Appearance</button>
-	        <p class="account-status" id="appearance-settings-status"></p>
-
-        <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
-
-        <h2 style="font-size:1rem">Cache</h2>
-        <p>Clear local settings and puzzle progress stored in this browser.</p>
-        <button id="btn-clear-cache" class="btn btn-secondary" type="button">Clear Local Cache</button>
-        <p class="account-status" id="page-status"></p>
-      </section>
-    </main>
-  </div>
-  <div data-site-footer></div>
-  <div class="modal-overlay app-loading-overlay" id="app-loading-overlay" style="display:none">
-    <div class="modal modal-loading" role="status" aria-live="polite">
-      <div class="modal-body"><div class="modal-loading-spinner" aria-hidden="true"></div><h2>Loading</h2><p id="app-loading-text">Loading...</p></div>
-    </div>
-  </div>
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js" crossorigin="anonymous"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js" crossorigin="anonymous"></script>
-	  <script src="./js/header.js"></script>
-	  <script src="./js/footer.js"></script>
-	  <script src="./js/page-auth.js"></script>
-	  <script src="./js/pieces.js"></script>
-	  <script>
-	    (function () {
-	      const STORAGE_KEY = 'sidastuff.engineSettings';
-	      const DEFAULT_ARROW_COLOR = '#d88a1d';
-	      const DEFAULT_HIGHLIGHT_COLOR = '#d22626';
-
-      function loadSettings() {
-        try {
-          const raw = localStorage.getItem(STORAGE_KEY);
-          return raw ? JSON.parse(raw) : {};
-        } catch (_) { return {}; }
+  <script>
+    // The SPA lives at / and serves every route client-side.
+    // This page is only used for legacy direct links and crawlers.
+    (function () {
+      try {
+        var path = (window.location.pathname || '/').replace(/\.html$/i, '').replace(/\/+$/, '') || '/';
+        if (path === '/index') path = '/';
+        var search = window.location.search || '';
+        var hash = window.location.hash || '';
+        // Pass the original route via ?spa-route so the SPA can restore it after loading.
+        if (path !== '/' && !/[?&]spa-route=/.test(search)) {
+          search += (search.indexOf('?') >= 0 ? '&' : '?') + 'spa-route=' + encodeURIComponent(path);
+        }
+        window.location.replace('/' + search + hash);
+      } catch (err) {
+        window.location.replace('/');
       }
-
-	      function saveSettings(settings) {
-	        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch (_) {}
-	      }
-
-	      function hexToRgba(hex, alpha) {
-	        const match = String(hex || '').trim().match(/^#?([0-9a-f]{6})$/i);
-	        if (!match) return hex || `rgba(210, 38, 38, ${alpha})`;
-	        const value = match[1];
-	        const red = parseInt(value.slice(0, 2), 16);
-	        const green = parseInt(value.slice(2, 4), 16);
-	        const blue = parseInt(value.slice(4, 6), 16);
-	        return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
-	      }
-
-	      function toColorInputValue(value, fallback) {
-	        const raw = String(value || '').trim();
-	        if (/^#[0-9a-f]{6}$/i.test(raw)) return raw;
-	        const match = raw.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
-	        if (!match) return fallback;
-	        return '#' + [match[1], match[2], match[3]]
-	          .map((part) => Math.max(0, Math.min(255, Number(part) || 0)).toString(16).padStart(2, '0'))
-	          .join('');
-	      }
-
-	      function renderBoardPreview(root) {
-	        if (!root) return;
-	        root.innerHTML = '';
-	        const pieces = [
-	          ['bB', 'bQ', 'bP'],
-	          [null, null, null],
-	          ['wN', 'wK', 'wR'],
-	        ];
-	        for (let row = 0; row < 3; row += 1) {
-	          for (let col = 0; col < 3; col += 1) {
-	            const cell = document.createElement('div');
-	            cell.className = `preview-square ${(col + row) % 2 === 0 ? 'light' : 'dark'}`;
-	            const piece = pieces[row][col];
-	            if (piece && typeof getPieceSvgUri === 'function') {
-	              const img = document.createElement('img');
-	              img.src = getPieceSvgUri(piece);
-	              img.onerror = function () {
-	                const fallback = typeof getPieceFallbackSvgUri === 'function' ? getPieceFallbackSvgUri(piece) : '';
-	                if (fallback && img.src !== fallback) img.src = fallback;
-	              };
-	              img.alt = '';
-	              cell.appendChild(img);
-	            }
-	            root.appendChild(cell);
-	          }
-	        }
-	      }
-
-      document.addEventListener('DOMContentLoaded', function () {
-        const saved = loadSettings();
-        const moduleEl = document.getElementById('settings-engine-module');
-        const depthEl = document.getElementById('settings-engine-depth');
-        const timeoutEl = document.getElementById('settings-engine-timeout');
-	        const boardThemeEl = document.getElementById('settings-board-theme');
-	        const pieceThemeEl = document.getElementById('settings-piece-theme');
-	        const arrowColorEl = document.getElementById('settings-arrow-color');
-	        const highlightColorEl = document.getElementById('settings-highlight-color');
-	        const pieceAnimationsEl = document.getElementById('settings-piece-animations');
-	        const boardPreviewEl = document.getElementById('appearance-board-preview');
-	        const statusEl = document.getElementById('engine-settings-status');
-	        const appearanceStatusEl = document.getElementById('appearance-settings-status');
-
-        if (saved.module && moduleEl) moduleEl.value = saved.module;
-        if (saved.strength && depthEl) depthEl.value = saved.strength;
-	        if (saved.maxTimeMs && timeoutEl) timeoutEl.value = String(saved.maxTimeMs);
-	        if (saved.boardTheme && boardThemeEl) boardThemeEl.value = saved.boardTheme;
-	        if (saved.pieceTheme && pieceThemeEl) pieceThemeEl.value = ['classic', 'glass', 'wood', 'neo'].includes(saved.pieceTheme) ? saved.pieceTheme : 'classic';
-	        if (arrowColorEl) arrowColorEl.value = toColorInputValue(saved.annotationArrowColor, DEFAULT_ARROW_COLOR);
-	        if (highlightColorEl) highlightColorEl.value = toColorInputValue(saved.annotationHighlightColor, DEFAULT_HIGHLIGHT_COLOR);
-	        if (pieceAnimationsEl) pieceAnimationsEl.checked = !!saved.pieceAnimations;
-	        document.body.dataset.boardTheme = boardThemeEl?.value || 'classic';
-	        document.body.dataset.pieceTheme = pieceThemeEl?.value || 'classic';
-	        document.body.dataset.pieceAnimations = pieceAnimationsEl?.checked ? 'on' : 'off';
-	        document.body.style.setProperty('--annotation-arrow-color', arrowColorEl?.value || DEFAULT_ARROW_COLOR);
-	        document.body.style.setProperty('--annotation-highlight-color', hexToRgba(highlightColorEl?.value || DEFAULT_HIGHLIGHT_COLOR, 0.38));
-	        renderBoardPreview(boardPreviewEl);
-
-	        boardThemeEl?.addEventListener('input', function () {
-	          document.body.dataset.boardTheme = boardThemeEl.value || 'classic';
-	          renderBoardPreview(boardPreviewEl);
-	        });
-	        pieceThemeEl?.addEventListener('input', function () {
-	          document.body.dataset.pieceTheme = pieceThemeEl.value || 'classic';
-	          renderBoardPreview(boardPreviewEl);
-	        });
-	        arrowColorEl?.addEventListener('input', function () {
-	          document.body.style.setProperty('--annotation-arrow-color', arrowColorEl.value || DEFAULT_ARROW_COLOR);
-	        });
-	        highlightColorEl?.addEventListener('input', function () {
-	          document.body.style.setProperty('--annotation-highlight-color', hexToRgba(highlightColorEl.value || DEFAULT_HIGHLIGHT_COLOR, 0.38));
-	          renderBoardPreview(boardPreviewEl);
-	        });
-	        pieceAnimationsEl?.addEventListener('change', function () {
-	          document.body.dataset.pieceAnimations = pieceAnimationsEl.checked ? 'on' : 'off';
-	        });
-
-        document.getElementById('btn-save-engine-settings')?.addEventListener('click', function () {
-          const settings = {
-            ...loadSettings(),
-            module: moduleEl?.value || 'lite-single',
-            strength: depthEl?.value || 'depth14',
-            maxTimeMs: Number(timeoutEl?.value) || 12000,
-          };
-          saveSettings(settings);
-          if (statusEl) {
-            statusEl.textContent = 'Engine settings saved.';
-            statusEl.className = 'account-status success';
-            setTimeout(() => { statusEl.textContent = ''; statusEl.className = 'account-status'; }, 2500);
-          }
-        });
-
-        document.getElementById('btn-save-appearance-settings')?.addEventListener('click', function () {
-	          const settings = {
-	            ...loadSettings(),
-	            boardTheme: boardThemeEl?.value || 'classic',
-		            pieceTheme: pieceThemeEl?.value || 'classic',
-		            annotationArrowColor: arrowColorEl?.value || DEFAULT_ARROW_COLOR,
-		            annotationHighlightColor: highlightColorEl?.value || DEFAULT_HIGHLIGHT_COLOR,
-		            pieceAnimations: !!pieceAnimationsEl?.checked,
-		          };
-		          saveSettings(settings);
-		          document.body.dataset.boardTheme = settings.boardTheme;
-		          document.body.dataset.pieceTheme = settings.pieceTheme;
-		          document.body.dataset.pieceAnimations = settings.pieceAnimations ? 'on' : 'off';
-		          document.body.style.setProperty('--annotation-arrow-color', settings.annotationArrowColor);
-	          document.body.style.setProperty('--annotation-highlight-color', hexToRgba(settings.annotationHighlightColor, 0.38));
-          if (appearanceStatusEl) {
-            appearanceStatusEl.textContent = 'Appearance saved.';
-            appearanceStatusEl.className = 'account-status success';
-            setTimeout(() => { appearanceStatusEl.textContent = ''; appearanceStatusEl.className = 'account-status'; }, 2500);
-          }
-        });
-      });
     })();
   </script>
+  <noscript>
+    <meta http-equiv="refresh" content="0; url=/">
+  </noscript>
+</head>
+<body>
+  <p>Redirecting to <a href="/">SiDaStuff Chess</a>...</p>
 </body>
 </html>

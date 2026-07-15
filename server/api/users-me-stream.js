@@ -30,6 +30,8 @@ async function pushWarningIfNeeded(res, uid) {
 }
 
 exports.streamHandler = async (req, res) => {
+  const watchMode = String(req.query.watch || '').trim() === '1';
+
   res.set({
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-store, no-transform',
@@ -48,6 +50,23 @@ exports.streamHandler = async (req, res) => {
       code: err.code || err.statusCode || 401,
       reason: err.reason || '',
     });
+    res.end();
+    return;
+  }
+
+  // Single-shot: if not in watch mode, send status and close immediately
+  if (!watchMode) {
+    try {
+      const profile = await require('./_lib/user-service').getProfile(user.uid, user);
+      await setUserPresence(user.uid, {
+        email: user.email,
+        username: profile.username || user.name,
+      });
+    } catch (_err) {
+      await setUserPresence(user.uid, { email: user.email, username: user.name });
+    }
+    sseWrite(res, 'status', { message: 'connected', email: user.email });
+    await pushWarningIfNeeded(res, user.uid);
     res.end();
     return;
   }
@@ -74,8 +93,6 @@ exports.streamHandler = async (req, res) => {
       sseWrite(res, 'status', { message: 'active' });
       await pushWarningIfNeeded(res, activeUser.uid);
     } catch (err) {
-      // Only trigger "disabled" if it's actually a 403 Forbidden (ban)
-      // 401 Unauthorized (expired token) should be handled by the client as a session end, not a ban.
     if (err.statusCode === 403 && err.code === 'account_banned') {
       sseWrite(res, 'disabled', {
         error: err.message || 'Account disabled.',
@@ -84,7 +101,6 @@ exports.streamHandler = async (req, res) => {
       });
       stopStream();
     } else {
-        // For other errors (like 401), we just send an error event and let the client decide
         sseWrite(res, 'error', {
           error: err.message || 'Session error.',
           code: err.code || err.statusCode || 500,

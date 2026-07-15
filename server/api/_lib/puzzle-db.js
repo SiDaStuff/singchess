@@ -14,7 +14,7 @@ function loadManifest() {
   if (manifestError && fs.existsSync(MANIFEST_PATH)) manifestError = null;
   if (manifestError) return null;
   if (!fs.existsSync(MANIFEST_PATH)) {
-    manifestError = new Error(`Puzzle chunks missing. Run npm run build:puzzles to create ${path.basename(MANIFEST_PATH)}.`);
+    manifestError = new Error(`Puzzle chunks missing. Run npm run puzzles:build to create ${path.basename(MANIFEST_PATH)}.`);
     return null;
   }
 

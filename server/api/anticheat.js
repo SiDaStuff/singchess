@@ -1,11 +1,13 @@
-let ServerStockfishEngine = null;
+let getServerEngine = null;
+let resetServerEngine = null;
 let loadAnalyzer = null;
 let loadChess = null;
 let _moduleLoadError = null;
 try {
   const _sf = require('./_lib/stockfish-engine');
   const _al = require('./_lib/analysis-loader');
-  ServerStockfishEngine = _sf.ServerStockfishEngine;
+  getServerEngine = _sf.getServerEngine;
+  resetServerEngine = _sf.resetServerEngine;
   loadAnalyzer = _al.loadAnalyzer;
   loadChess = _al.loadChess;
 } catch (err) {
@@ -24,12 +26,18 @@ const ANTICHEAT_PROFILE = {
 };
 const { fetchCompat } = require('./_lib/fetch-compat');
 const { requireQuota } = require('./_lib/user-service');
+const crypto = require('crypto');
 
-let cachedEngine = null;
-let cachedEngineInit = null;
-let engineBusy = false;
+let activeAnalysisJobs = 0;
+const analysisQueue = [];
+const SERVER_ACTIVE_ANALYSIS_LIMIT = 5;
 const evalCache = new Map();
 const EVAL_CACHE_LIMIT = 900;
+
+// Hash FEN to avoid long cache keys
+function hashFen(fen) {
+  return crypto.createHash('sha256').update(fen).digest('hex').slice(0, 16);
+}
 
 const json = (statusCode, body) => ({
   statusCode,
@@ -66,7 +74,7 @@ function cachedEngineAdapter(engine) {
     },
     newGame: () => engine.newGame(),
     evaluate: async (fen, depth, timeoutMs) => {
-      const key = `eval|${depth}|${fen}`;
+      const key = `eval|${depth}|${hashFen(fen)}`;
       const cached = cacheGet(key);
       if (cached) return cached;
       const result = await engine.evaluate(fen, depth, timeoutMs);
@@ -74,7 +82,7 @@ function cachedEngineAdapter(engine) {
       return result;
     },
     evaluateMultiPV: async (fen, depth, numPV, timeoutMs) => {
-      const key = `multipv|${depth}|${numPV}|${fen}`;
+      const key = `multipv|${depth}|${numPV}|${hashFen(fen)}`;
       const cached = cacheGet(key);
       if (cached) return cached;
       const result = await engine.evaluateMultiPV(fen, depth, numPV, timeoutMs);
@@ -94,34 +102,38 @@ function withTimeout(promise, timeoutMs, message) {
   });
 }
 
-async function getServerEngine() {
-  if (cachedEngine?.ready) return cachedEngine;
-  if (!cachedEngineInit) {
-    cachedEngine = new ServerStockfishEngine();
-    cachedEngineInit = cachedEngine.init().catch((err) => {
-      try {
-        cachedEngine?.destroy();
-      } catch (_destroyErr) {
-        // Ignore teardown after failed init.
-      }
-      cachedEngine = null;
-      cachedEngineInit = null;
-      throw err;
-    });
+function drainAnalysisQueue() {
+  while (activeAnalysisJobs < SERVER_ACTIVE_ANALYSIS_LIMIT && analysisQueue.length) {
+    const next = analysisQueue.shift();
+    activeAnalysisJobs += 1;
+    next.resolve();
   }
-  await cachedEngineInit;
-  return cachedEngine;
 }
 
-function withEngineQueue(work) {
-  if (engineBusy) {
-    throw new Error('Server engine is busy. Try again in a moment.');
-  }
-  engineBusy = true;
-  return Promise.resolve()
-    .then(work)
+function analysisQueueStatus() {
+  return {
+    active: activeAnalysisJobs,
+    queued: analysisQueue.length,
+    limit: SERVER_ACTIVE_ANALYSIS_LIMIT,
+  };
+}
+
+function withEngineQueue(work, onQueued = null) {
+  const queuedIndex = analysisQueue.length + 1;
+  const enter = activeAnalysisJobs < SERVER_ACTIVE_ANALYSIS_LIMIT
+    ? Promise.resolve().then(() => {
+        activeAnalysisJobs += 1;
+      })
+    : new Promise((resolve) => {
+        analysisQueue.push({ resolve });
+        if (onQueued) onQueued({ ...analysisQueueStatus(), queuedPosition: queuedIndex });
+      });
+
+  return enter
+    .then(() => work(analysisQueueStatus()))
     .finally(() => {
-      engineBusy = false;
+      activeAnalysisJobs = Math.max(0, activeAnalysisJobs - 1);
+      drainAnalysisQueue();
     });
 }
 
@@ -410,6 +422,7 @@ async function analyzeParsedGame(game, analyzer, engine) {
 
 exports.handler = async (event, context = {}) => {
   context.callbackWaitsForEmptyEventLoop = false;
+  if (event.httpMethod === 'OPTIONS') return json(200, {});
   if (event.httpMethod !== 'POST') return json(405, { error: 'Use POST.' });
 
   let payload = {};
@@ -419,18 +432,33 @@ exports.handler = async (event, context = {}) => {
     return json(400, { error: 'Invalid JSON body.' });
   }
 
+  // Validate the games BEFORE claiming quota. An empty/invalid payload should
+  // 400 without burning the user's daily anticheat slot.
+  let preloadedPgns = null;
   try {
-    const quotaState = await requireQuota(event, 'anticheat');
+    if (_moduleLoadError && payload.mode !== 'list') {
+      return json(500, { error: `Anticheat module load failed: ${_moduleLoadError.message || String(_moduleLoadError)}` });
+    }
+    preloadedPgns = await loadPgns(payload);
+    if (!preloadedPgns.length) return json(400, { error: 'No games found.' });
+  } catch (err) {
+    return json(400, { error: err.message || 'Could not load games.' });
+  }
+
+  try {
+    // Charge per-game, up front, against the weekly quota (Boost/Max). Fails
+    // fast if the batch alone would exceed the remaining weekly budget, so we
+    // don't run expensive analysis a user can't afford. Free users are hard-
+    // blocked here with code 'upgrade_required' (no analysis runs).
+    const quotaState = await requireQuota(event, 'anticheat', { amount: preloadedPgns.length });
     // Allow 'list' mode even if the server lacks the engine modules.
     if (payload.mode === 'list') {
-      const pgns = await loadPgns(payload);
-      return json(200, { pgns, quota: quotaState.quota, plan: quotaState.plan });
+      return json(200, { pgns: preloadedPgns, quota: quotaState.quota, plan: quotaState.plan });
     }
 
     if (_moduleLoadError) return json(500, { error: `Anticheat module load failed: ${_moduleLoadError.message || String(_moduleLoadError)}` });
 
-    const pgns = await loadPgns(payload);
-    if (!pgns.length) return json(400, { error: 'No games found.' });
+    const pgns = preloadedPgns;
 
     const engine = await withTimeout(getServerEngine(), 9000, 'Server engine is still warming up.');
     const reviewEngine = cachedEngineAdapter(engine);
@@ -547,13 +575,14 @@ exports.handler = async (event, context = {}) => {
 		  } catch (err) {
     console.error('Anticheat failed:', err);
     if (/cancelled|not ready|timed out waiting|out of memory|abort/i.test(String(err?.message || err))) {
+      // Non-destructive: clears the hash (UCI newGame) on the shared engine.
+      // We never destroy/recreate it — that would initEngine() a second time
+      // and crash the process.
       try {
-        cachedEngine?.destroy();
-      } catch (_destroyErr) {
-        // Ignore teardown while recovering.
+        resetServerEngine();
+      } catch (_resetErr) {
+        // Ignore reset failures while recovering.
       }
-      cachedEngine = null;
-      cachedEngineInit = null;
     }
 	    return json(err.statusCode || 500, { error: err.message || 'Anticheat analysis failed.', code: err.code, quota: err.quota, plan: err.plan });
 	  }
@@ -574,13 +603,39 @@ exports.streamHandler = async (req, res) => {
     return;
   }
 
+  let payload = {};
+  try {
+    payload = req.body && typeof req.body === 'object' ? req.body : JSON.parse(req.body || '{}');
+  } catch (_err) {
+    sseWrite(res, 'error', { error: 'Invalid JSON body.' });
+    res.end();
+    return;
+  }
+
+  // Load games first so we can charge per-game against the weekly quota.
+  let preloadedPgns = [];
+  try {
+    preloadedPgns = await loadPgns(payload);
+    if (!preloadedPgns.length) {
+      sseWrite(res, 'error', { error: 'No games found.' });
+      res.end();
+      return;
+    }
+  } catch (err) {
+    sseWrite(res, 'error', { error: err.message || 'Could not load games.' });
+    res.end();
+    return;
+  }
+
   let quotaState = null;
   try {
+    // Charge per-game up front (Boost/Max weekly quota). Fails fast if the batch
+    // alone would exceed the remaining budget; Free users are hard-blocked here.
     quotaState = await requireQuota({
       httpMethod: req.method,
       headers: req.headers || {},
       body: req.body === undefined ? undefined : JSON.stringify(req.body),
-    }, 'anticheat');
+    }, 'anticheat', { amount: preloadedPgns.length });
   } catch (err) {
     sseWrite(res, 'error', {
       error: err.message || 'Anticheat quota check failed.',
@@ -592,22 +647,8 @@ exports.streamHandler = async (req, res) => {
     return;
   }
 
-  let payload = {};
   try {
-    payload = req.body && typeof req.body === 'object' ? req.body : JSON.parse(req.body || '{}');
-  } catch (_err) {
-    sseWrite(res, 'error', { error: 'Invalid JSON body.' });
-    res.end();
-    return;
-  }
-
-  try {
-    const pgns = await loadPgns(payload);
-    if (!pgns.length) {
-      sseWrite(res, 'error', { error: 'No games found.' });
-      res.end();
-      return;
-    }
+    const pgns = preloadedPgns;
 
     const engine = await withTimeout(getServerEngine(), 9000, 'Server engine is still warming up.');
     const reviewEngine = cachedEngineAdapter(engine);

@@ -1,6 +1,7 @@
 const { banUser, unbanUser, json } = require('./_lib/user-service');
 
 exports.handler = async (event) => {
+  if (event.httpMethod === 'OPTIONS') return json(200, {});
   if (event.httpMethod !== 'POST') return json(405, { error: 'Use POST.' });
   try {
     const body = JSON.parse(event.body || '{}');
