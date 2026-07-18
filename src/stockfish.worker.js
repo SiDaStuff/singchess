@@ -160,8 +160,67 @@ async function fetchWithCache(url, kind) {
   return buf.buffer;
 }
 
+/**
+ * Allowed origins for fetching the Stockfish JS/WASM assets. The fetched script
+ * is always converted to a same-origin blob: URL before being passed to
+ * importScripts(), so this validation also protects against CodeQL's
+ * client-side URL-redirection warning.
+ */
+const ALLOWED_ORIGINS = new Set([
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'https://chess.sidastuff.com',
+]);
+
+function isAllowedEngineUrl(url) {
+  try {
+    const parsed = new URL(url, self.location.href);
+    // Blob URLs we create ourselves are inherently same-origin and safe.
+    if (parsed.protocol === 'blob:') return true;
+    return ALLOWED_ORIGINS.has(parsed.origin);
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Patch the Stockfish glue so it resolves the WASM URL via our overrides and
+ * (when possible) uses a cached binary instead of re-fetching through its
+ * streaming loader.
+ */
+function patchStockfishJs(jsText) {
+  // The stockfish code: u=decodeURIComponent(e[0]||location.origin+...)
+  // Replace the fallback expression with one that checks our override first.
+  jsText = jsText.replace(
+    /(u=decodeURIComponent\(e\[0\]\|\|)(location\.origin\+location\.pathname\.replace\([^)]+\))(\))/,
+    '$1self.__stockfishWasmUrl||$2$3'
+  );
+  return jsText;
+}
+
+async function fetchEngineScript(url) {
+  if (!isAllowedEngineUrl(url)) {
+    throw new Error('Engine script URL is not from an allowed origin');
+  }
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Engine script fetch failed: ${response.status}`);
+  return response.arrayBuffer();
+}
+
 async function initStockfish(config) {
   const { jsPath, wasmPath, threads, hash } = config;
+  if (!jsPath || !wasmPath) {
+    throw new Error('Missing jsPath or wasmPath in Stockfish config');
+  }
+  if (!isAllowedEngineUrl(jsPath)) {
+    throw new Error('Engine script URL is not from an allowed origin');
+  }
+  if (!isAllowedEngineUrl(wasmPath)) {
+    throw new Error('Engine WASM URL is not from an allowed origin');
+  }
+
   const locateFile = (file) => {
     if (file.endsWith('.wasm')) return wasmPath;
     if (file.endsWith('.wasm.map')) return wasmPath + '.map';
@@ -174,72 +233,42 @@ async function initStockfish(config) {
   // download progress. The JS is loaded via a Blob URL (importScripts needs a
   // URL); the stockfish script's locateFile computes the wrong WASM path from
   // the blob URL, so we patch it to use self.__stockfishWasmUrl instead.
-  let jsBlobUrl = jsPath;
+  let jsBlobUrl = null;
   let wasmBinary = null;
+  let jsBuf = null;
+
   if (typeof caches !== 'undefined' && caches.open) {
     try {
-      const [jsBuf, wasmBuf] = await Promise.all([
+      [jsBuf, wasmBinary] = await Promise.all([
         fetchWithCache(jsPath, 'js'),
-        fetchWithCache(wasmPath, 'wasm'),
+        fetchWithCache(wasmPath, 'wasm').then((buf) => new Uint8Array(buf)),
       ]);
-      // The stockfish JS script derives its WASM URL from self.location. In a
-      // worker, self.location reflects the worker script's URL, not the JS that
-      // importScripts loads — so stockfish computes the wrong WASM path.
-      // Patch the JS to check self.__stockfishWasmUrl (which we set below)
-      // before falling through to the location-based computation.
-      let jsText = new TextDecoder().decode(jsBuf);
-      // The stockfish code: u=decodeURIComponent(e[0]||location.origin+location.pathname.replace(...))
-      // Replace the fallback expression with one that checks our override first.
-      jsText = jsText.replace(
-        /(u=decodeURIComponent\(e\[0\]\|\|)(location\.origin\+location\.pathname\.replace\([^)]+\))(\))/,
-        '$1self.__stockfishWasmUrl||$2$3'
-      );
-      const jsPatch = new TextEncoder().encode(jsText);
-      const jsBlob = new Blob([jsPatch], { type: 'text/javascript' });
-      jsBlobUrl = URL.createObjectURL(jsBlob);
-      blobUrls.push(jsBlobUrl);
-      wasmBinary = new Uint8Array(wasmBuf);
+      dbg('engine JS + WASM fetched from cache');
     } catch (err) {
-      dbg('cache fetch failed (' + err.message + '); falling back to direct importScripts');
-      // Apply the same location-hash patch to the direct URL load by fetching
-      // the JS text directly (without caching) and creating a blob URL.
-      try {
-        const fallbackResp = await fetch(jsPath);
-        if (fallbackResp.ok) {
-          const fallbackBuf = await fallbackResp.arrayBuffer();
-          let fallbackText = new TextDecoder().decode(fallbackBuf);
-          fallbackText = fallbackText.replace(
-            /(u=decodeURIComponent\(e\[0\]\|\|)(location\.origin\+location\.pathname\.replace\([^)]+\))(\))/,
-            '$1self.__stockfishWasmUrl||$2$3'
-          );
-          const fallbackBlob = new Blob([new TextEncoder().encode(fallbackText)], { type: 'text/javascript' });
-          jsBlobUrl = URL.createObjectURL(fallbackBlob);
-          blobUrls.push(jsBlobUrl);
-        }
-      } catch (_) {
-        // If even the direct fetch fails, accept the original fallback
-      }
+      dbg('cache fetch failed (' + err.message + '); falling back to direct fetch');
+      jsBuf = null;
       wasmBinary = null;
     }
-  } else {
-    dbg('Cache API unavailable; fetching JS directly for blob URL patch');
+  }
+
+  // If cache failed or is unavailable, fetch the JS directly. The WASM will be
+  // loaded by the stockfish glue from wasmPath, which is validated below.
+  if (!jsBuf) {
     try {
-      const directResp = await fetch(jsPath);
-      if (directResp.ok) {
-        const directBuf = await directResp.arrayBuffer();
-        let directText = new TextDecoder().decode(directBuf);
-        directText = directText.replace(
-          /(u=decodeURIComponent\(e\[0\]\|\|)(location\.origin\+location\.pathname\.replace\([^)]+\))(\))/,
-          '$1self.__stockfishWasmUrl||$2$3'
-        );
-        const directBlob = new Blob([new TextEncoder().encode(directText)], { type: 'text/javascript' });
-        jsBlobUrl = URL.createObjectURL(directBlob);
-        blobUrls.push(jsBlobUrl);
-      }
-    } catch (_) {
-      // Fall through to direct importScripts from server URL
+      jsBuf = await fetchEngineScript(jsPath);
+    } catch (err) {
+      dbg('direct JS fetch failed: ' + err.message);
+      throw err;
     }
   }
+
+  // Always load the engine JS from a same-origin blob: URL. This prevents
+  // CodeQL's client-side URL-redirection warning and isolates the engine from
+  // the configurable jsPath at importScripts time.
+  let jsText = patchStockfishJs(new TextDecoder().decode(jsBuf));
+  const jsBlob = new Blob([new TextEncoder().encode(jsText)], { type: 'text/javascript' });
+  jsBlobUrl = URL.createObjectURL(jsBlob);
+  blobUrls.push(jsBlobUrl);
 
   // Pre-seed Module with locateFile and the cached WASM bytes (if any).
   // If we have the binary already, override Emscripten's instantiateWasm so it
@@ -273,7 +302,6 @@ async function initStockfish(config) {
   // the engine prints anything. Previously a local `anyOutput` flag was
   // declared here but never set true, so this monitor could never distinguish
   // a silent hang from a healthy boot.
-  const originalHandlerCount = messageHandlers.length;
   const outputMonitor = setTimeout(() => {
     if (!_hasReceivedOutput && !engineReady) {
       dbg('No engine output received — WASM may have failed to load');
@@ -287,13 +315,8 @@ async function initStockfish(config) {
     // and if our topLevelOnMessage is already set, the stockfish handler is never
     // installed). We save the stockfish handler afterwards at line ~286.
     self.onmessage = null;
-    // Validate that jsBlobUrl is either a blob: URL (from our createObjectURL)
-    // or a known origin URL (from our config) before passing to importScripts.
-    const _allowedOrigins = ['http://localhost:3000', 'http://localhost:5173', 'https://chess.sidastuff.com'];
-    if (!jsBlobUrl.startsWith('blob:') && !_allowedOrigins.some(o => jsBlobUrl.startsWith(o + '/'))) {
-      sendToMain('ERROR', 'Engine URL is not allowed');
-      throw new Error('Engine script URL is not from an allowed origin');
-    }
+    // importScripts only ever receives a same-origin blob: URL we created,
+    // never the configurable jsPath directly.
     importScripts(jsBlobUrl);
   } catch (err) {
     dbg('importScripts threw: ' + (err && err.message ? err.message : String(err)));
