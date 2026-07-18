@@ -97,7 +97,7 @@ function dispatchToEngine(cmd) {
 // keyed by its URL (the path encodes the build version), so subsequent loads
 // are instant. On a cache miss we stream the response body and report
 // byte-accurate progress to the main thread for the Loading Engine overlay.
-const ENGINE_CACHE_NAME = 'stockfish-engine-v1';
+const ENGINE_CACHE_NAME = 'stockfish-engine-v3';
 const blobUrls = [];
 
 function reportDownloadProgress(kind, received, total, cached) {
@@ -172,8 +172,8 @@ async function initStockfish(config) {
 
   // Pre-fetch the engine JS + WASM through the persistent cache, reporting
   // download progress. The JS is loaded via a Blob URL (importScripts needs a
-  // URL); the WASM is injected via Module.wasmBinary so Emscripten skips its
-  // own fetch (the stockfish IIFE checks Module["wasmBinary"]).
+  // URL); the stockfish script's locateFile computes the wrong WASM path from
+  // the blob URL, so we patch it to use self.__stockfishWasmUrl instead.
   let jsBlobUrl = jsPath;
   let wasmBinary = null;
   if (typeof caches !== 'undefined' && caches.open) {
@@ -182,21 +182,71 @@ async function initStockfish(config) {
         fetchWithCache(jsPath, 'js'),
         fetchWithCache(wasmPath, 'wasm'),
       ]);
-      const jsBlob = new Blob([jsBuf], { type: 'text/javascript' });
+      // The stockfish JS script derives its WASM URL from self.location. In a
+      // worker, self.location reflects the worker script's URL, not the JS that
+      // importScripts loads — so stockfish computes the wrong WASM path.
+      // Patch the JS to check self.__stockfishWasmUrl (which we set below)
+      // before falling through to the location-based computation.
+      let jsText = new TextDecoder().decode(jsBuf);
+      // The stockfish code: u=decodeURIComponent(e[0]||location.origin+location.pathname.replace(...))
+      // Replace the fallback expression with one that checks our override first.
+      jsText = jsText.replace(
+        /(u=decodeURIComponent\(e\[0\]\|\|)(location\.origin\+location\.pathname\.replace\([^)]+\))(\))/,
+        '$1self.__stockfishWasmUrl||$2$3'
+      );
+      const jsPatch = new TextEncoder().encode(jsText);
+      const jsBlob = new Blob([jsPatch], { type: 'text/javascript' });
       jsBlobUrl = URL.createObjectURL(jsBlob);
       blobUrls.push(jsBlobUrl);
       wasmBinary = new Uint8Array(wasmBuf);
     } catch (err) {
       dbg('cache fetch failed (' + err.message + '); falling back to direct importScripts');
-      jsBlobUrl = jsPath;
+      // Apply the same location-hash patch to the direct URL load by fetching
+      // the JS text directly (without caching) and creating a blob URL.
+      try {
+        const fallbackResp = await fetch(jsPath);
+        if (fallbackResp.ok) {
+          const fallbackBuf = await fallbackResp.arrayBuffer();
+          let fallbackText = new TextDecoder().decode(fallbackBuf);
+          fallbackText = fallbackText.replace(
+            /(u=decodeURIComponent\(e\[0\]\|\|)(location\.origin\+location\.pathname\.replace\([^)]+\))(\))/,
+            '$1self.__stockfishWasmUrl||$2$3'
+          );
+          const fallbackBlob = new Blob([new TextEncoder().encode(fallbackText)], { type: 'text/javascript' });
+          jsBlobUrl = URL.createObjectURL(fallbackBlob);
+          blobUrls.push(jsBlobUrl);
+        }
+      } catch (_) {
+        // If even the direct fetch fails, accept the original fallback
+      }
       wasmBinary = null;
     }
   } else {
-    dbg('Cache API unavailable; using direct importScripts');
+    dbg('Cache API unavailable; fetching JS directly for blob URL patch');
+    try {
+      const directResp = await fetch(jsPath);
+      if (directResp.ok) {
+        const directBuf = await directResp.arrayBuffer();
+        let directText = new TextDecoder().decode(directBuf);
+        directText = directText.replace(
+          /(u=decodeURIComponent\(e\[0\]\|\|)(location\.origin\+location\.pathname\.replace\([^)]+\))(\))/,
+          '$1self.__stockfishWasmUrl||$2$3'
+        );
+        const directBlob = new Blob([new TextEncoder().encode(directText)], { type: 'text/javascript' });
+        jsBlobUrl = URL.createObjectURL(directBlob);
+        blobUrls.push(jsBlobUrl);
+      }
+    } catch (_) {
+      // Fall through to direct importScripts from server URL
+    }
   }
 
   // Pre-seed Module with locateFile and the cached WASM bytes (if any).
   self.Module = wasmBinary ? { locateFile, wasmBinary } : { locateFile };
+  // Stockfish JS derives the WASM URL from self.location (location-based
+  // fallback); set this override so the patched script uses our correct
+  // wasmPath instead of the blob/worker URL path.
+  self.__stockfishWasmUrl = wasmPath;
 
   // Track if we've received any engine output — if not, the WASM likely failed.
   // _hasReceivedOutput is set by the wrapped self.postMessage (line ~64) when
@@ -212,6 +262,11 @@ async function initStockfish(config) {
   }, 15000);
 
   try {
+    // Temporarily clear self.onmessage so the stockfish IIFE installs its own
+    // command-queue router (the stockfish script does `onmessage = onmessage || fn`,
+    // and if our topLevelOnMessage is already set, the stockfish handler is never
+    // installed). We save the stockfish handler afterwards at line ~286.
+    self.onmessage = null;
     importScripts(jsBlobUrl);
   } catch (err) {
     dbg('importScripts threw: ' + (err && err.message ? err.message : String(err)));
@@ -230,9 +285,10 @@ async function initStockfish(config) {
   }
   dbg('engine keys: ' + Object.keys(engine).slice(0, 20).join(','));
 
-  // The IIFE installed its own onmessage (the command queue router). Save it
-  // so we can dispatch UCI commands to the engine, then restore our top-level
-  // handler so main-thread messages come back to us.
+  // The IIFE installed its own onmessage (the command queue router), because we
+  // cleared self.onmessage before importScripts (line ~268). Save it so we can
+  // dispatch UCI commands to the engine, then restore our top-level handler so
+  // main-thread messages come back to us.
   scriptOnMessage = self.onmessage;
   self.onmessage = topLevelOnMessage;
   dbg('saved scriptOnMessage=' + (typeof scriptOnMessage));

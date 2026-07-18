@@ -1,22 +1,24 @@
-import { cpSync, existsSync, mkdirSync, rmSync, createWriteStream } from 'fs';
+import { cpSync, createWriteStream, existsSync, mkdirSync, rmSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import https from 'https';
+import { execSync } from 'child_process';
+import { tmpdir } from 'os';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const sourceDir = path.join(rootDir, 'public', 'vendor', 'stockfish');
 const targetDirFn = path.join(rootDir, 'server', 'vendor', 'stockfish');
 
-// Stockfish 16+ single-threaded WASM builds used by both the browser worker
+// Stockfish 18 single-threaded WASM builds used by both the browser worker
 // (src/stockfish.worker.js) and the server engine (server/api/_lib/stockfish-engine.js).
-// These files are large and therefore gitignored; download them on demand so a
-// fresh checkout can build and run without manual asset drops.
+// Downloaded from the stockfish npm package tarball (maintained by niklasf).
+const TARBALL_URL = 'https://registry.npmjs.org/stockfish/-/stockfish-18.0.8.tgz';
 const STOCKFISH_FILES = [
-  { name: 'stockfish-18-lite-single.js', url: 'https://github.com/niklasf/stockfish.wasm/releases/download/sf-18/stockfish-18-lite-single.js' },
-  { name: 'stockfish-18-lite-single.wasm', url: 'https://github.com/niklasf/stockfish.wasm/releases/download/sf-18/stockfish-18-lite-single.wasm' },
-  { name: 'stockfish-18-single.js', url: 'https://github.com/niklasf/stockfish.wasm/releases/download/sf-18/stockfish-18-single.js' },
-  { name: 'stockfish-18-single.wasm', url: 'https://github.com/niklasf/stockfish.wasm/releases/download/sf-18/stockfish-18-single.wasm' },
+  'stockfish-18-lite-single.js',
+  'stockfish-18-lite-single.wasm',
+  'stockfish-18-single.js',
+  'stockfish-18-single.wasm',
 ];
 
 function download(url, target, redirects = 0) {
@@ -47,22 +49,35 @@ function download(url, target, redirects = 0) {
 }
 
 // Self-heal: if the browser vendor dir is missing (fresh checkout, gitignored
-// assets), download the Stockfish WASM builds into public/vendor/stockfish.
+// assets), download the Stockfish WASM builds from the npm package tarball.
 async function ensureBrowserAssets() {
-  const missing = STOCKFISH_FILES.filter((f) => !existsSync(path.join(sourceDir, f.name)));
+  const missing = STOCKFISH_FILES.filter((f) => !existsSync(path.join(sourceDir, f)));
   if (!missing.length) return;
+
   mkdirSync(sourceDir, { recursive: true });
-  console.log(`Downloading ${missing.length} Stockfish asset(s) into ${path.relative(rootDir, sourceDir)}...`);
-  for (const file of missing) {
-    const target = path.join(sourceDir, file.name);
-    process.stdout.write(`  ${file.name} ... `);
-    try {
-      await download(file.url, target);
-      console.log('done');
-    } catch (err) {
-      console.log('FAILED');
-      throw new Error(`Could not download ${file.name}: ${err.message}\nPlace it manually at ${target}.`);
+  console.log(`Downloading ${missing.length} Stockfish asset(s) from npm ...`);
+
+  const tgzTmp = path.join(tmpdir(), 'stockfish.wasm.tgz');
+  const extractDir = path.join(tmpdir(), 'stockfish-extract');
+  mkdirSync(extractDir, { recursive: true });
+
+  try {
+    await download(TARBALL_URL, tgzTmp);
+    execSync(`tar -xzf "${tgzTmp}" -C "${extractDir}"`);
+    rmSync(tgzTmp);
+
+    for (const name of missing) {
+      const tgzPath = path.join(extractDir, 'package', 'bin', name);
+      const target = path.join(sourceDir, name);
+      if (existsSync(tgzPath)) {
+        cpSync(tgzPath, target);
+        console.log(`  ${name} ... done`);
+      } else {
+        console.log(`  ${name} ... NOT FOUND IN PACKAGE`);
+      }
     }
+  } finally {
+    rmSync(extractDir, { recursive: true, force: true });
   }
 }
 

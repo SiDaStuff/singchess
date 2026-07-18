@@ -82,7 +82,7 @@ The user must sign out and back in for the claim to take effect.
 ### 3. Run
 
 ```bash
-pm2 start ecosystem.config.js --env production
+pm2 start ecosystem.config.cjs --env production
 # or directly:
 TRUST_PROXY=1 SERVE_STATIC=0 NODE_ENV=production npm start
 ```

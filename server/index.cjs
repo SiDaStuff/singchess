@@ -237,12 +237,29 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 
 if (serveStatic) {
   const staticDir = isDev || !fs.existsSync(distDir) ? publicDir : distDir;
-  // Serve the server-vendored Stockfish WASM files at /vendor/so the browser
+  // Serve the server-vendored Stockfish WASM files at /vendor/ so the browser
   // worker can load them from the backend (even when the frontend is on Netlify
   // and the static assets are served elsewhere). Files live in
-  // server/vendor/stockfish/ after a successful stockfish:copy run on the server.
+  // server/vendor/stockfish/ after a successful npm run stockfish:copy on the
+  // host. Must include CORS headers because the frontend is on a different
+  // origin (chess.singdevelopments.com) when deployed to Netlify.
   const vendorDir = path.resolve(__dirname, 'vendor');
-  if (existsSync(vendorDir)) {
+  if (fs.existsSync(vendorDir)) {
+    app.use('/vendor', (req, res, next) => {
+      const origin = req.headers.origin;
+      if (origin && originAllowed(origin, req.headers.host)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+      }
+      // Override the default Cache-Control for WASM files (express.static sets
+      // 1h by default; wasm files are immutable once downloaded).
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      next();
+    });
+    // Ensure WASM files are served with the correct MIME type (Express's built-in
+    // mime types may not include application/wasm in older versions, causing
+    // WebAssembly.instantiateStreaming to fail with "Incorrect response MIME type").
+    express.static.mime.define({ 'application/wasm': ['wasm'] });
     app.use('/vendor', express.static(vendorDir, { etag: true, maxAge: '1h' }));
   }
   const staticIndexPath = path.join(staticDir, 'index.html');
