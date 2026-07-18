@@ -2733,7 +2733,7 @@ return window.firebase;
 	        <span class="link-username-text">
 	          Link this <strong>${this._escapeHtml(label)}</strong> username for faster imports next time?
 	        </span>
-	        <button type="button" class="btn btn-sm btn-link-username" data-link-source="${source}" data-link-username="${this._escapeHtml(username)}">
+	        <button type="button" class="btn btn-sm btn-link-username" data-link-source="${this._escapeHtml(source)}" data-link-username="${this._escapeHtml(username)}">
 	          <span class="material-symbols-outlined btn-symbol">link</span>
 	          <span class="btn-label">Link</span>
 	        </button>`;

@@ -1,5 +1,6 @@
 // Express wrapper that invokes existing server API handlers
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 const path = require('path');
 const fs = require('fs');
@@ -260,11 +261,21 @@ if (serveStatic) {
     // mime types may not include application/wasm in older versions, causing
     // WebAssembly.instantiateStreaming to fail with "Incorrect response MIME type").
     express.static.mime.define({ 'application/wasm': ['wasm'] });
-    app.use('/vendor', express.static(vendorDir, { etag: true, maxAge: '1h' }));
+    app.use('/vendor', express.static(vendorDir, {
+      etag: true,
+      maxAge: '1h',
+      setHeaders(res, filePath) {
+        // Explicit WASM MIME guard — some Express/mime versions still map .wasm
+        // to application/octet-stream, which breaks instantiateStreaming.
+        if (path.extname(filePath).toLowerCase() === '.wasm') {
+          res.setHeader('Content-Type', 'application/wasm');
+        }
+      },
+    }));
   }
   const staticIndexPath = path.join(staticDir, 'index.html');
   const apiConfigScript = API_BASE_URL
-    ? `<script>window.__API_CONFIG={baseUrl:'${API_BASE_URL.replace(/'/g, "\\'")}'}</script>`
+    ? `<script>window.__API_CONFIG={baseUrl:'${API_BASE_URL.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'}</script>`
     : '';
 
   // Cache the API-config-injected index.html so we don't fs.readFileSync it on
@@ -305,7 +316,15 @@ if (serveStatic) {
     },
   }));
 
-  app.get('*', (req, res, next) => {
+  // Rate-limit SPA catch-all to avoid filesystem DoS from unauthenticated requests
+  const spaLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests' },
+  });
+  app.get('*', spaLimiter, (req, res, next) => {
     if (req.path.startsWith('/api/') || path.extname(req.path)) return next();
     res.set('Cache-Control', 'no-store');
     return res.sendFile(staticIndexPath);

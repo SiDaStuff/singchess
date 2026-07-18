@@ -242,7 +242,27 @@ async function initStockfish(config) {
   }
 
   // Pre-seed Module with locateFile and the cached WASM bytes (if any).
-  self.Module = wasmBinary ? { locateFile, wasmBinary } : { locateFile };
+  // If we have the binary already, override Emscripten's instantiateWasm so it
+  // uses the cached bytes directly instead of re-fetching via streaming. This
+  // avoids MIME-type failures when the server/Vite serve .wasm as octet-stream.
+  self.Module = { locateFile };
+  if (wasmBinary) {
+    self.Module.wasmBinary = wasmBinary;
+    self.Module.instantiateWasm = (imports, successCallback) => {
+      try {
+        WebAssembly.instantiate(wasmBinary, imports).then((output) => {
+          successCallback(output.instance, output.module);
+        }, (err) => {
+          dbg('WASM instantiation rejected: ' + (err && err.message ? err.message : String(err)));
+          throw err;
+        });
+        return self.Module.exports;
+      } catch (err) {
+        dbg('instantiateWasm threw: ' + (err && err.message ? err.message : String(err)));
+        throw err;
+      }
+    };
+  }
   // Stockfish JS derives the WASM URL from self.location (location-based
   // fallback); set this override so the patched script uses our correct
   // wasmPath instead of the blob/worker URL path.
@@ -267,6 +287,13 @@ async function initStockfish(config) {
     // and if our topLevelOnMessage is already set, the stockfish handler is never
     // installed). We save the stockfish handler afterwards at line ~286.
     self.onmessage = null;
+    // Validate that jsBlobUrl is either a blob: URL (from our createObjectURL)
+    // or a known origin URL (from our config) before passing to importScripts.
+    const _allowedOrigins = ['http://localhost:3000', 'http://localhost:5173', 'https://chess.sidastuff.com'];
+    if (!jsBlobUrl.startsWith('blob:') && !_allowedOrigins.some(o => jsBlobUrl.startsWith(o + '/'))) {
+      sendToMain('ERROR', 'Engine URL is not allowed');
+      throw new Error('Engine script URL is not from an allowed origin');
+    }
     importScripts(jsBlobUrl);
   } catch (err) {
     dbg('importScripts threw: ' + (err && err.message ? err.message : String(err)));

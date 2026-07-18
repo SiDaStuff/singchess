@@ -303,7 +303,15 @@ function runCoachGames(user) {
 }
 
 function stripHtml(s) {
-  return String(s || '').replace(/<[^>]*>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
+  // Repeat until no more tags remain — `/<[^>]*>/g` strips <script> but
+  // nesting like <<script>script> survives one pass.
+  let v = String(s || '');
+  for (let i = 0; i < 10; i++) {
+    const next = v.replace(/<[^>]*>/g, '');
+    if (next === v) break;
+    v = next;
+  }
+  return v.replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
 }
 
 module.exports = {
