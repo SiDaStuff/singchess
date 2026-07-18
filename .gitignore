@@ -15,4 +15,5 @@ dist/
 old/
 .agents/
 .vscode/
+.vscode
 
