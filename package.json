@@ -25,6 +25,6 @@
     "stockfish": "^18.0.8"
   },
   "devDependencies": {
-    "vite": "^5.4.21"
+    "vite": "^6.4.3"
   }
 }
