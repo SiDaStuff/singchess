@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "npm run stockfish:copy",
+    "prebuild": "npm run stockfish:copy || true",
     "build": "vite build && node -e \"const fs=require('fs'); const src='src/stockfish.worker.js'; const dst='dist/src/stockfish.worker.js'; if(fs.existsSync(src)){ fs.mkdirSync('dist/src',{recursive:true}); fs.copyFileSync(src,dst); console.log('Copied '+src+' -> '+dst); } else { console.warn('Missing '+src); }\"",
     "preview": "vite preview",
     "start": "node server/index.cjs",
