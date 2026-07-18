@@ -21,9 +21,17 @@ if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VIT
 if (!BASE && typeof window !== 'undefined' && window.__API_CONFIG && window.__API_CONFIG.baseUrl) {
   BASE = String(window.__API_CONFIG.baseUrl).replace(/\/+$/, '');
 }
-// 3) Runtime: direct window.__API_URL (manual <script> or build config).
+// 3) Runtime: direct window.__API_URL.
 if (!BASE && typeof window !== 'undefined' && window.__API_URL) {
   BASE = String(window.__API_URL).replace(/\/+$/, '');
+}
+
+// Auto-prepend protocol if one is missing (common mistake: set VITE_API_URL
+// to "chess.sidastuff.com" without "https://"). Without this, apiFetch
+// constructs relative URLs like "chess.sidastuff.com/api/..." instead of
+// absolute "https://chess.sidastuff.com/api/...".
+if (BASE && !/^https?:\/\//i.test(BASE)) {
+  BASE = 'https://' + BASE;
 }
 
 // Dev diagnostic: log which base was resolved.
