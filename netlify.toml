@@ -1,0 +1,21 @@
+# Netlify deployment for SiDaStuff Chess Review (frontend only).
+# Builds the Vite SPA — no API calls to netlify; all API calls go to the
+# backend at chess.sidastuff.com via the compile-time VITE_API_URL.
+#
+# Deploy: connect the repo to Netlify, set:
+#   Build command: npm run build
+#   Publish directory: dist
+#   Environment: VITE_API_URL=https://chess.sidastuff.com
+#
+# If VITE_API_URL is not set, the bundle defaults to same-origin (works when
+# the Node server serves static files from dist/, or for local dev).
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Redirect all unmatched paths to index.html (SPA fallback).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

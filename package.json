@@ -1,0 +1,30 @@
+{
+  "name": "sidastuff-chess-review",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "prebuild": "",
+    "build": "vite build && node -e \"const fs=require('fs'); const src='src/stockfish.worker.js'; const dst='dist/src/stockfish.worker.js'; if(fs.existsSync(src)){ fs.mkdirSync('dist/src',{recursive:true}); fs.copyFileSync(src,dst); console.log('Copied '+src+' -> '+dst); }\"",
+    "preview": "vite preview",
+    "start": "node server/index.cjs",
+    "puzzles:build": "node scripts/build-puzzles.mjs",
+    "pieces:build": "node scripts/build-pieces.mjs",
+    "stockfish:copy": "node scripts/copy-stockfish.mjs",
+    "build:puzzles": "npm run puzzles:build",
+    "build:pieces": "npm run pieces:build",
+    "copy:stockfish": "npm run stockfish:copy"
+  },
+  "dependencies": {
+    "chess.js": "^0.10.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "firebase-admin": "^13.10.0",
+    "morgan": "^1.10.0",
+    "stockfish": "^18.0.8"
+  },
+  "devDependencies": {
+    "vite": "^5.4.21"
+  }
+}
