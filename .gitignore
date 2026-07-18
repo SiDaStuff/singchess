@@ -12,4 +12,7 @@ server/data/puzzles-next/
 server/data/puzzle-build-buckets/
 .env
 dist/
+old/
+.agents/
+.vscode/
 

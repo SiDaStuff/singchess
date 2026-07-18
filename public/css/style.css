@@ -46,6 +46,13 @@
   --shadow-xl: 0 20px 48px rgba(32,39,33,0.12);
   --radius: 8px;
   --radius-sm: 6px;
+  /* Analysis-column panel cards: a single shared radius + padding so every
+   * card in the review/coach/anticheat/puzzle side column has aligned edges
+   * and a consistent inner gutter. Previously these were hardcoded per-card
+   * (radius 8/14/16, padding 0/14/16/18/20/22) which left the stacked column
+   * with jagged corners and misaligned content edges. */
+  --card-radius: 16px;
+  --card-padding: 18px;
   --radius-lg: 12px;
   --board-size: min(620px, calc(100vw - 560px), calc(100vh - 210px));
   --board-size-mobile: min(480px, calc(100vw - 32px), calc(100vh - 280px));
@@ -131,12 +138,11 @@ body.menu-active #app-footer-slot:empty { display: none; }
 
 body.in-app-route { background: var(--bg-page); }
 body.in-app-route #app { max-width: none; margin: 0; padding: 0; }
-body.in-app-route .main-content, body.in-app-route .main-menu, body.in-app-route #boost-page { display: none !important; }
+body.in-app-route .main-content, body.in-app-route .main-menu { display: none !important; }
 body.in-app-route .page-panel { padding-top: clamp(32px, 8vh, 80px); padding-bottom: clamp(32px, 8vh, 80px); animation: fadeIn 0.2s ease; }
 
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 body:not(.menu-active) .main-menu { display: none; }
-#boost-page[hidden] { display: none !important; }
 
 /* ===== Main Menu ===== */
 .main-menu {
@@ -546,17 +552,6 @@ body.in-app-route .site-footer {
 .page-card p { color: var(--text-secondary); font-size: 0.95rem; }
 .page-card-head { display: grid; gap: 10px; }
 
-/* Auth comparison strip — sets the Free/Boost anchor early (contrast principle) */
-.auth-comparison-strip {
-  display: flex; align-items: center; gap: 10px;
-  margin-top: 14px; padding: 10px 14px;
-  background: var(--bg-panel); border: 1px solid var(--border-soft);
-  border-radius: 10px; font-size: 0.82rem; color: var(--text-secondary);
-}
-.auth-comparison-strip a { color: var(--boost-text); font-weight: 600; text-decoration: none; }
-.auth-comparison-strip a:hover { text-decoration: underline; }
-.auth-comparison-divider { width: 1px; height: 16px; background: var(--border-color); }
-
 .eyebrow {
   display: inline-flex; align-items: center;
   padding: 6px 12px;
@@ -705,7 +700,7 @@ body.in-app-route .header { display: flex !important; }
 }
 
 /* ===== Live Eval ===== */
-.live-eval { padding: 20px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 16px; }
+.live-eval { padding: var(--card-padding); background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: var(--card-radius); }
 .live-eval[hidden] { display: none; }
 .live-eval-grid { display: grid; gap: 16px; }
 .live-eval-score { font-size: clamp(2rem, 4vw, 2.6rem); font-weight: 800; color: var(--text-primary); }
@@ -727,7 +722,7 @@ body.in-app-route .header { display: flex !important; }
 }
 
 /* ===== Move Insights ===== */
-.move-insights { padding: 18px; background: var(--bg-muted); border: 1px solid var(--border-soft); border-radius: 14px; }
+.move-insights { padding: var(--card-padding); background: var(--bg-muted); border: 1px solid var(--border-soft); border-radius: var(--card-radius); }
 .insight-empty, .move-list-empty { color: var(--text-muted); font-size: 0.84rem; }
 .insight-content { display: flex; flex-direction: column; gap: 10px; }
 .insight-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -755,6 +750,7 @@ body.in-app-route .header { display: flex !important; }
   border: 1px dashed var(--border-color); border-radius: 10px;
   background: linear-gradient(135deg, rgba(74,144,226,0.06), rgba(124,83,255,0.05));
 }
+.insight-gate[hidden] { display: none; }
 .insight-gate-teaser { display: flex; align-items: center; gap: 8px; filter: blur(0.4px); opacity: 0.85; }
 .insight-gate-copy { margin: 0; font-size: 0.84rem; color: var(--text-secondary); line-height: 1.45; }
 .insight-gate-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -768,7 +764,11 @@ body.in-app-route .header { display: flex !important; }
 .account-loading { padding: 24px 8px; color: var(--text-muted); text-align: center; font-size: 0.9rem; }
 
 /* ===== Move List ===== */
-.move-list-container { min-height: 240px; max-height: 520px; overflow: hidden; }
+/* Outer card and inner scroller heights are kept in step: previously the outer
+ * maxed at 520px while the inner list maxed at 440px, leaving an 80px dead band
+ * of empty bordered background below the scrolling list. Now the inner list is
+ * the sole scroller and the container wraps it tightly. */
+.move-list-container { padding: var(--card-padding); border-radius: var(--card-radius); min-height: 240px; max-height: 480px; overflow: hidden; }
 .move-list {
   display: flex; flex-direction: column; gap: 4px;
   min-height: 150px; max-height: 440px; overflow: auto; padding-right: 4px;
@@ -805,33 +805,181 @@ body.in-app-route .header { display: flex !important; }
 
 /* ===== Analysis Overview ===== */
 .analysis-overview {
-  display: grid; gap: 14px; padding: 18px;
-  background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 16px;
+  display: grid; gap: 14px; padding: var(--card-padding);
+  background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: var(--card-radius);
 }
-.analysis-overview .opening-info, .analysis-overview .game-status { padding: 18px; background: var(--bg-panel); border: 1px solid var(--border-soft); border-radius: 12px; }
-.analysis-overview .opening-info { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; }
+/* opening-info / game-status are rows INSIDE analysis-overview (already padded
+ * 18px). Giving them their own 18px padding + border + bg made a card-in-a-card
+ * with double gutters. Flatten them: light bg, small inset, no heavy border. */
+.analysis-overview .opening-info, .analysis-overview .game-status { padding: 12px 14px; background: var(--bg-muted); border: 1px solid var(--border-soft); border-radius: 10px; }
+.analysis-overview .opening-info { display: grid; grid-template-columns: auto auto 1fr; grid-template-rows: auto auto; align-items: center; gap: 6px 12px; }
+.analysis-overview .opening-icon { grid-row: 1; }
+.analysis-overview .opening-label { grid-row: 1; }
+.analysis-overview .opening-name { grid-row: 1; }
+.analysis-overview .opening-stats { grid-column: 1 / -1; grid-row: 2; }
 .opening-icon { font-size: 1.1rem; color: var(--text-secondary); }
 .opening-label { color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
 .opening-name { font-family: 'IBM Plex Mono', monospace; }
+.opening-name.loading { display: inline-flex; align-items: center; gap: 8px; color: var(--text-muted); font-family: inherit; }
+.opening-name.loading::before { content: 'progress_activity'; font-family: 'Material Symbols Outlined'; font-size: 16px; flex: 0 0 auto; animation: spinner-rotate 0.8s linear infinite; }
+.opening-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 0.76rem; }
+.opening-stat-total { color: var(--text-muted); margin-right: 4px; }
+.opening-stat { display: inline-flex; align-items: baseline; gap: 4px; }
+.opening-stat-val { font-family: 'IBM Plex Mono', monospace; font-weight: 700; }
+.opening-stat.owin .opening-stat-val { color: var(--clr-best, #2e7d32); }
+.opening-stat.odraw .opening-stat-val { color: var(--text-muted); }
+.opening-stat.oloss .opening-stat-val { color: var(--clr-blunder, #c62828); }
+.opening-stat-label { color: var(--text-muted); }
 .analysis-overview .game-status { display: grid; gap: 10px; }
 .game-status-details { font-size: 0.84rem; color: var(--text-primary); }
 
 /* ===== Coach Card ===== */
-.coach-card { padding: 20px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 16px; display: grid; gap: 16px; }
+.coach-card { padding: var(--card-padding); background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: var(--card-radius); display: grid; gap: 16px; }
 .coach-card[hidden] { display: none; }
 .coach-card-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
 .coach-identity { display: flex; align-items: center; gap: 14px; }
 .coach-avatar { width: 54px; height: 54px; border-radius: 14px; background: rgba(74,144,226,0.1); display: grid; place-items: center; overflow: hidden; }
 .coach-avatar img { width: 70%; height: 70%; object-fit: contain; }
 .coach-state { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; background: var(--bg-muted); color: var(--text-primary); font-size: 0.82rem; font-weight: 700; }
+.coach-coming-soon { display: block; font-size: 0.8rem; color: var(--text-muted); font-weight: 600; line-height: 1.2; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
 .coach-dialog { min-height: 54px; padding: 12px; background: var(--bg-muted); border: 1px solid var(--border-soft); border-radius: 8px; font-size: 0.9rem; font-weight: 600; }
 .coach-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; align-items: end; }
 .coach-controls .field { min-width: 0; }
 .coach-elo-field { max-width: 150px; }
 .coach-action { min-height: 44px; }
 
+/* ===== Coach Chat (page-panel: sidebar + main) ===== */
+/* Full-screen route: a left chat-list sidebar + a right conversation pane. */
+.coach-chat-shell { display: grid; grid-template-columns: 240px 1fr; gap: 16px; width: min(1040px, 100%); min-height: min(620px, calc(100vh - 200px)); }
+.coach-chat-shell[hidden] { display: none; }
+.coach-chat-shell.sidebar-collapsed { grid-template-columns: 0 1fr; }
+.coach-chat-shell.sidebar-collapsed .coach-sidebar { display: none; }
+.coach-sidebar { background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: var(--card-radius); padding: 12px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.coach-new-chat-btn { width: 100%; justify-content: center; min-height: 40px; }
+.coach-new-chat-btn .btn-symbol { font-size: 1.1rem; }
+.coach-sidebar-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; min-height: 0; flex: 1; }
+.coach-chat-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer; color: var(--text-secondary); font-size: 0.84rem; border: 1px solid transparent; min-width: 0; }
+.coach-chat-item:hover { background: var(--bg-muted); }
+.coach-chat-item.active { background: var(--bg-muted); color: var(--text-primary); border-color: var(--border-soft); font-weight: 600; }
+.coach-chat-item-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.coach-chat-item-del { border: none; background: transparent; color: var(--text-muted); cursor: pointer; padding: 2px; border-radius: 4px; display: none; flex: 0 0 auto; }
+.coach-chat-item-del .material-symbols-outlined { font-size: 16px; }
+.coach-chat-item:hover .coach-chat-item-del { display: inline-flex; }
+.coach-chat-item-del:hover { color: var(--clr-blunder); background: rgba(177,47,41,0.1); }
+.coach-sidebar-empty { color: var(--text-muted); font-size: 0.8rem; padding: 8px 4px; text-align: center; }
+
+.coach-chat-main { display: grid; grid-template-rows: auto 1fr auto; gap: 12px; padding: var(--card-padding); min-height: 0; width: auto; max-width: none; } /* override .page-card 720px cap so it fills its grid track */
+.coach-chat-header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.coach-icon-btn { min-height: 34px; min-width: 34px; padding: 0 8px; display: none; }
+.coach-chat-shell.sidebar-collapsed ~ * .coach-icon-btn,
+.coach-chat-shell:not(.sidebar-collapsed) .coach-icon-btn { display: inline-flex; }
+@media (max-width: 900px) { .coach-icon-btn { display: inline-flex !important; } }
+.coach-model-toggle { display: inline-flex; background: var(--bg-muted); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 2px; }
+.coach-model-seg { border: none; background: transparent; padding: 5px 12px; border-radius: 4px; font-size: 0.78rem; font-weight: 700; color: var(--text-secondary); cursor: pointer; }
+.coach-model-seg[aria-pressed="true"] { background: var(--bg-strong); color: var(--accent-contrast); }
+.coach-model-seg.locked { opacity: 0.55; cursor: not-allowed; }
+.coach-model-seg.locked::after { content: 'lock'; font-family: 'Material Symbols Outlined'; font-size: 0.82rem; margin-left: 4px; vertical-align: -1px; }
+.coach-model-seg.locked:hover { opacity: 0.75; }
+.coach-chat-locked { display: grid; gap: 10px; justify-items: center; text-align: center; padding: 28px 16px; }
+.coach-chat-locked[hidden] { display: none; }
+.coach-chat-locked .coach-locked-icon { font-size: 2.2rem; color: var(--boost-primary); }
+.coach-chat-locked h3 { margin: 0; }
+.coach-chat-locked p { color: var(--text-secondary); font-size: 0.9rem; max-width: 360px; margin: 0; }
+.coach-chat-body { position: relative; min-height: 0; display: flex; flex-direction: column; }
+.coach-chat-body[hidden] { display: none; }
+.coach-chat-messages { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; flex: 1; min-height: 220px; padding: 4px 2px; scroll-behavior: smooth; }
+.coach-empty { margin: auto; text-align: center; max-width: 420px; padding: 24px 16px; color: var(--text-secondary); display: grid; gap: 10px; justify-items: center; }
+.coach-empty-icon { font-size: 2.6rem; color: var(--boost-primary); }
+.coach-empty h3 { margin: 0; color: var(--text-primary); font-size: 1.15rem; }
+.coach-empty p { margin: 0; font-size: 0.9rem; line-height: 1.5; }
+.coach-empty-suggest { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 6px; }
+.coach-empty-chip { min-height: 34px; padding: 6px 12px; font-size: 0.82rem; }
+.coach-bubble { max-width: 88%; min-width: 0; padding: 10px 14px; border-radius: 14px; font-size: 0.9rem; line-height: 1.5; word-break: break-word; overflow-wrap: anywhere; overflow: hidden; }
+.coach-bubble.user { align-self: flex-end; background: var(--bg-strong); color: var(--accent-contrast); border-bottom-right-radius: 4px; white-space: pre-wrap; }
+.coach-bubble.assistant { align-self: flex-start; background: var(--bg-muted); color: var(--text-primary); border: 1px solid var(--border-soft); border-bottom-left-radius: 4px; }
+.coach-bubble.assistant.streaming::after { content: '▋'; margin-left: 1px; animation: coachCaret 0.9s steps(1) infinite; color: var(--text-muted); }
+.coach-bubble-error { align-self: center; background: rgba(177,47,41,0.08); color: var(--clr-blunder); border: 1px solid rgba(177,47,41,0.26); font-size: 0.84rem; text-align: center; }
+.coach-tool-card { align-self: flex-start; max-width: 88%; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--bg-muted); border: 1px solid var(--border-soft); border-radius: 10px; font-size: 0.78rem; color: var(--text-secondary); }
+.coach-tool-card .material-symbols-outlined { font-size: 16px; color: var(--text-muted); }
+.coach-skeleton-bubble { align-self: flex-start; width: 60%; min-height: 40px; border-radius: 14px; background: var(--bg-muted); position: relative; overflow: hidden; }
+.coach-skeleton-bubble::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent); animation: skeleton-sweep 1.05s linear infinite; }
+.coach-typing { display: none; align-items: center; gap: 8px; padding: 4px 2px; color: var(--text-muted); font-size: 0.78rem; }
+.coach-typing:not([hidden]) { display: inline-flex; }
+.coach-typing-icon { font-size: 1rem; color: var(--text-secondary); animation: coachSpin 0.8s linear infinite; }
+@keyframes coachSpin { to { transform: rotate(360deg); } }
+.coach-chat-input { display: flex; gap: 8px; align-items: flex-end; border-top: 1px solid var(--border-soft); padding-top: 12px; }
+.coach-chat-textarea { flex: 1; min-width: 0; resize: none; max-height: 120px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: var(--radius); background: var(--bg-page); color: var(--text-primary); font: inherit; font-size: 0.9rem; line-height: 1.4; }
+.coach-chat-textarea:focus { outline: none; border-color: var(--text-muted); }
+.coach-send-btn { min-height: 42px; min-width: 42px; padding: 0 12px; }
+.coach-send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.coach-chat-main.busy .coach-chat-textarea { opacity: 0.7; }
+
+/* ask_question tool: inline multiple-choice buttons. */
+.coach-question-card { align-self: flex-start; max-width: 88%; background: var(--bg-muted); border: 1px solid var(--border-soft); border-radius: 14px; padding: 12px 14px; display: grid; gap: 10px; }
+.coach-question-text { font-size: 0.9rem; color: var(--text-primary); font-weight: 600; }
+.coach-question-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.coach-question-option { min-height: 36px; padding: 6px 14px; font-size: 0.84rem; }
+.coach-question-option.selected { background: var(--bg-strong); color: var(--accent-contrast); border-color: var(--bg-strong); }
+.coach-question-option:disabled { cursor: default; opacity: 0.7; }
+.coach-locked-notice { margin-top: 8px; }
+
+/* Chess board embed (show_board tool + ```board fenced blocks). Reuses the
+   real board's classes (.chess-board / .square / .piece / .coord-label), so it
+   inherits --sq-light/--sq-dark theme vars and the piece art. The wrapper just
+   sizes the grid down; the inner .chess-board owns the 8x8 grid. */
+.coach-board-embed { display: block; width: min(240px, 100%); aspect-ratio: 1; border-radius: 6px; overflow: hidden; border: 1px solid var(--border-color); box-shadow: var(--shadow-sm); }
+.coach-board-embed .chess-board { width: 100%; height: 100%; border-radius: 0; }
+.coach-board-embed .square { cursor: default; }
+.coach-board-embed .coord-label { font-size: 0.55rem; }
+.coach-board-error { color: var(--clr-blunder); font-size: 0.8rem; padding: 8px; }
+.coach-board-inline { flex-wrap: wrap; }
+.coach-puzzle-popup .coach-board-embed { width: min(320px, 80vw); margin: 0 auto; }
+
+/* Usage bar (token quota). */
+.coach-usage-bar { display: flex; flex-direction: column; gap: 4px; }
+.coach-usage-bar[hidden] { display: none; }
+.coach-usage-track { height: 6px; background: var(--bg-muted); border-radius: 999px; overflow: hidden; }
+.coach-usage-fill { height: 100%; background: var(--accent, var(--bg-strong)); border-radius: 999px; transition: width 0.3s ease; width: 0; }
+.coach-usage-text { font-size: 0.72rem; color: var(--text-muted); }
+
+/* Stop + Play buttons. */
+.coach-stop-btn { min-height: 42px; min-width: 42px; padding: 0 12px; display: none; }
+.coach-stop-btn:not([hidden]) { display: inline-flex; }
+.coach-stop-btn .btn-symbol { font-size: 1.2rem; color: var(--clr-blunder); }
+.coach-play-btn { min-height: 34px; padding: 6px 12px; font-size: 0.82rem; }
+.coach-play-btn .material-symbols-outlined { font-size: 1.1rem; }
+
+/* Markdown inside assistant bubbles. */
+.coach-markdown .coach-bubble.assistant p { margin: 0 0 8px; }
+.coach-markdown .coach-bubble.assistant p:last-child { margin-bottom: 0; }
+.coach-markdown .coach-bubble.assistant ul,
+.coach-markdown .coach-bubble.assistant ol { margin: 6px 0; padding-left: 20px; }
+.coach-markdown .coach-bubble.assistant li { margin: 2px 0; }
+.coach-markdown .coach-bubble.assistant code { font-family: 'IBM Plex Mono', monospace; font-size: 0.84em; background: var(--bg-page); padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border-soft); }
+.coach-markdown .coach-bubble.assistant pre { background: var(--bg-page); border: 1px solid var(--border-soft); border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
+.coach-markdown .coach-bubble.assistant pre code { background: none; border: none; padding: 0; }
+.coach-markdown .coach-bubble.assistant strong { font-weight: 700; }
+.coach-markdown .coach-bubble.assistant a { color: var(--clr-great); text-decoration: underline; word-break: break-all; }
+.coach-markdown .coach-bubble.assistant h1,
+.coach-markdown .coach-bubble.assistant h2,
+.coach-markdown .coach-bubble.assistant h3 { margin: 10px 0 6px; font-size: 0.98rem; }
+.coach-markdown .coach-bubble.assistant blockquote { border-left: 3px solid var(--border-color); margin: 6px 0; padding: 2px 12px; color: var(--text-secondary); }
+.coach-markdown .coach-bubble.assistant table { border-collapse: collapse; margin: 8px 0; font-size: 0.82rem; }
+.coach-markdown .coach-bubble.assistant th,
+.coach-markdown .coach-bubble.assistant td { border: 1px solid var(--border-soft); padding: 4px 8px; }
+@keyframes coachCaret { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+
+/* Narrow screens: stack the sidebar ABOVE the chat (not overlapping). The
+ * sidebar sits on top only in the normal document-flow sense (a stacked row),
+ * never as an absolute overlay. Default to showing it; it scrolls with content. */
+@media (max-width: 720px) {
+  .coach-chat-shell { grid-template-columns: 1fr; min-height: auto; }
+  .coach-sidebar { max-height: 220px; }
+  .coach-chat-header-actions { gap: 6px; }
+}
+
 /* ===== Puzzle Card ===== */
-.puzzle-card { padding: 20px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 16px; display: grid; gap: 16px; position: relative; }
+.puzzle-card { padding: var(--card-padding); background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: var(--card-radius); display: grid; gap: 16px; position: relative; }
 .puzzle-card[hidden] { display: none; }
 .puzzle-card-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .puzzle-source { display: block; color: var(--text-muted); font-size: 0.76rem; font-weight: 600; }
@@ -841,7 +989,12 @@ body.in-app-route .header { display: flex !important; }
 .puzzle-status { padding: 14px; background: var(--bg-muted); border: 1px solid var(--border-soft); border-radius: 12px; margin-bottom: 16px; color: var(--text-secondary); }
 .puzzle-status.success { color: var(--clr-best); background: rgba(223,242,216,0.22); border-color: rgba(79,125,60,0.26); }
 .puzzle-status.error { color: var(--clr-blunder); background: rgba(255,240,238,0.3); border-color: rgba(177,47,41,0.26); }
-.puzzle-meta-grid { display: grid; grid-template-columns: repeat(4, minmax(104px, 1fr)); gap: 12px; margin-bottom: 16px; }
+/* auto-fit + minmax(0,1fr): 4-across when the column is wide, reflows to 2x2 /
+ * fewer as it narrows. The 0 floor lets tracks shrink so the grid never exceeds
+ * the puzzle-card's width (the old minmax(104px,1fr) floor demanded 452px and
+ * silently clipped the 4th cell at ~1141-1272px viewports). Mobile keeps the
+ * explicit 1fr overrides below (900px/640px). */
+.puzzle-meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
 .puzzle-meta { padding: 14px; background: var(--bg-panel); border: 1px solid var(--border-soft); border-radius: 12px; }
 .puzzle-meta span { display: block; color: var(--text-secondary); font-size: 0.78rem; margin-bottom: 4px; }
 .puzzle-meta strong { font-family: 'IBM Plex Mono', monospace; font-size: 1.05rem; }
@@ -871,21 +1024,93 @@ body.in-app-route .header { display: flex !important; }
 .puzzle-action { min-height: 48px; }
 
 /* ===== Anticheat Card ===== */
-.anticheat-card { padding: 22px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 16px; display: grid; gap: 16px; }
+.anticheat-card { padding: var(--card-padding); background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: var(--card-radius); display: grid; gap: 12px; max-width: 100%; min-width: 0; box-sizing: border-box; }
 .anticheat-card[hidden] { display: none; }
-.anticheat-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.anticheat-card-header h3 { margin-bottom: 4px; font-size: 1.1rem; text-transform: none; letter-spacing: 0; }
+.anticheat-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; min-width: 0; }
+.anticheat-card-header h3 { margin-bottom: 4px; font-size: 1.1rem; text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; }
+.anticheat-card-header > div:first-child { min-width: 0; overflow-wrap: anywhere; }
 .anticheat-source { display: block; color: var(--text-muted); font-size: 0.76rem; font-weight: 600; }
 .anticheat-risk-pill { min-width: 90px; padding: 8px 12px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-primary); text-align: center; font-weight: 700; font-size: 0.9rem; white-space: nowrap; flex-shrink: 0; }
 .anticheat-risk-pill.low { color: var(--clr-best); border-color: rgba(79,125,60,0.32); background: #eff8ec; }
 .anticheat-risk-pill.watch { color: var(--clr-inaccuracy); border-color: rgba(200,139,22,0.32); background: #fff8e8; }
 .anticheat-risk-pill.high { color: var(--clr-blunder); border-color: rgba(177,47,41,0.32); background: #fff0ee; }
-.anticheat-warning { padding: 12px 14px; background: var(--bg-muted); border: 1px solid var(--border-soft); border-radius: 8px; color: var(--text-secondary); font-size: 0.88rem; line-height: 1.4; }
+.anticheat-warning { padding: 10px 12px; background: var(--bg-muted); border: 1px solid var(--border-soft); border-radius: 8px; color: var(--text-secondary); font-size: 0.84rem; line-height: 1.4; }
 .anticheat-warning strong { color: var(--boost-text); }
-.anticheat-form { display: grid; grid-template-columns: 1fr 1.2fr 0.8fr auto; gap: 14px; align-items: end; }
-.anticheat-form .field { min-width: 0; }
-.anticheat-action { min-height: 42px; align-self: end; white-space: nowrap; }
-.anticheat-pgn { width: 100%; min-height: 180px; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; resize: vertical; background: var(--bg-panel); color: var(--text-primary); font-family: 'IBM Plex Mono', monospace; font-size: 0.84rem; }
+/* Collapsible overview: one-line summary, full text revealed on expand. */
+.anticheat-warning-collapsible { padding: 0; }
+.anticheat-warning-collapsible > summary { cursor: pointer; list-style: none; padding: 10px 12px; font-size: 0.82rem; font-weight: 600; color: var(--text-secondary); }
+.anticheat-warning-collapsible > summary::-webkit-details-marker { display: none; }
+.anticheat-warning-collapsible > summary .anticheat-warning-hint { color: var(--text-muted); font-weight: 600; margin-left: 4px; }
+.anticheat-warning-collapsible[open] > summary .anticheat-warning-hint::before { content: 'Hide '; }
+.anticheat-warning-collapsible[open] > summary { border-bottom: 1px solid var(--border-soft); }
+.anticheat-warning-collapsible > p { margin: 0; padding: 10px 12px; }
+/* Anticheat: legacy `.anticheat-form` rules removed — the inline form was
+   replaced by 3 source cards. The .anticheat-popup-* styles below drive the
+   SweetAlert popup. */
+.anticheat-popup { display: grid; gap: 14px; }
+.anticheat-popup-pgn {
+  width: 100%; min-height: 180px; padding: 12px;
+  border: 1px solid var(--border-color); border-radius: 8px;
+  background: var(--bg-panel); color: var(--text-primary);
+  font-family: 'IBM Plex Mono', monospace; font-size: 0.84rem;
+  resize: vertical;
+}
+.anticheat-popup-meta { display: grid; gap: 8px; }
+.anticheat-popup-counts {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* Anticheat source cards — 3 big clickable buttons that drive a SweetAlert
+   popup. Layout: full-width row, 3-up grid that collapses to 1-up on mobile. */
+.anticheat-sources {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+.anticheat-source-card {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  background: var(--bg-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  font: inherit;
+  color: inherit;
+  min-width: 0;
+}
+.anticheat-source-card:hover { border-color: var(--text-muted); }
+.anticheat-source-card:active { transform: translateY(1px); }
+.anticheat-source-card[aria-checked="true"] {
+  background: var(--bg-strong); color: var(--accent-contrast); border-color: var(--bg-strong);
+}
+.anticheat-source-card[aria-checked="true"] .anticheat-source-meta small { color: rgba(255,255,255,0.7); }
+.anticheat-source-icon {
+  flex: 0 0 auto;
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  border-radius: 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+}
+.anticheat-source-card[aria-checked="true"] .anticheat-source-icon {
+  background: rgba(255,255,255,0.12);
+  border-color: rgba(255,255,255,0.2);
+}
+.anticheat-source-icon .material-symbols-outlined { font-size: 24px; color: var(--text-secondary); }
+.anticheat-source-card[aria-checked="true"] .anticheat-source-icon .material-symbols-outlined { color: var(--accent-contrast); }
+.anticheat-source-icon img { width: 26px; height: 26px; object-fit: contain; display: block; }
+.anticheat-source-meta { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.anticheat-source-meta strong { font-size: 0.92rem; font-weight: 700; overflow-wrap: anywhere; word-break: break-word; min-width: 0; }
+.anticheat-source-meta small { font-size: 0.76rem; color: var(--text-muted); overflow-wrap: anywhere; word-break: break-word; min-width: 0; }
+.anticheat-source-card[aria-checked="true"] .anticheat-source-meta small { color: rgba(255,255,255,0.7); }
+@media (max-width: 720px) {
+  .anticheat-sources { grid-template-columns: 1fr; }
+}
 .anticheat-status { min-height: 22px; color: var(--text-secondary); font-size: 0.875rem; font-weight: 600; }
 .anticheat-results { margin-top: 6px; display: grid; gap: 16px; }
 
@@ -950,21 +1175,16 @@ body.in-app-route .header { display: flex !important; }
   .anticheat-ring-score { font-size: 1.6rem; }
 }
 
-/* Anticheat form: drop to 2 columns on medium screens so the inputs aren't
-   cramped, then to a single column on narrow screens. */
-@media (max-width: 1000px) {
-  .anticheat-form { grid-template-columns: 1fr 1fr; }
-  .anticheat-action { grid-column: 1 / -1; }
-}
-@media (max-width: 640px) {
-  .anticheat-form { grid-template-columns: 1fr; }
+/* Anticheat card: stack the header on narrow screens. The source-card row
+   has its own breakpoint in the .anticheat-sources rules above. */
+@media (max-width: 720px) {
   .anticheat-card-header { flex-direction: column; gap: 10px; }
 }
 
 /* ===== Review Summary ===== */
 .review-summary {
-  display: grid; gap: 20px; padding: 22px;
-  background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 16px;
+  display: grid; gap: 20px; padding: var(--card-padding);
+  background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: var(--card-radius);
 }
 .review-summary[style*="display:none"] { display: none; }
 .review-summary h3 { margin: 0; font-size: 1.05rem; color: var(--text-primary); text-transform: none; letter-spacing: 0; }
@@ -1051,7 +1271,7 @@ body.in-app-route .header { display: flex !important; }
 .summary-count-row .count { min-width: 2ch; font-family: 'IBM Plex Mono', monospace; font-weight: 800; text-align: right; }
 .empty-count-row .label { grid-column: 1 / 3; color: var(--text-muted); }
 
-.critical-moments { padding: 16px; display: grid; gap: 12px; }
+.critical-moments { padding: var(--card-padding); display: grid; gap: 12px; border-radius: var(--card-radius); }
 .critical-moments[style*="display:none"] { display: none; }
 .critical-list { display: grid; gap: 8px; }
 .critical-item {
@@ -1104,7 +1324,7 @@ body.in-app-route .header { display: flex !important; }
 .eval-bar-white { background: #ffffff; height: 100%; width: 100%; flex: 0 0 auto; transition: height 0.4s ease; }
 .eval-score { min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 0.82rem; font-weight: 600; text-align: center; writing-mode: vertical-rl; transform: rotate(180deg); }
 #eval-graph { width: 100%; height: 120px; display: block; margin-top: 12px; background: linear-gradient(180deg, #faf8f2, #f5efe3); border: 2px solid var(--border-color); border-radius: var(--radius-sm); }
-.eval-graph-card { padding: 14px; }
+.eval-graph-card { padding: var(--card-padding); border-radius: var(--card-radius); }
 .eval-graph-card h3 { margin-bottom: 10px; }
 
 /* ===== Board ===== */
@@ -1492,18 +1712,19 @@ body.app-dialog-open { overflow: hidden; }
 .legal-body ul { padding-left: 20px; }
 .legal-body li { margin: 4px 0; }
 
-/* Onboarding wizard (multi-step signup) */
-.onboarding-progress {
+/* Onboarding wizard (multi-step signup) — uses bespoke class names so the
+   home banner's `.onboarding-progress` styles don't bleed in. */
+.onboard-wizard-progress {
   width: 100%;
-  height: 8px;
+  height: 12px;
   background: var(--border-color);
   border-radius: 999px;
   overflow: hidden;
-  margin: 4px 0 2px;
+  margin: 6px 0 4px;
 }
-.onboarding-progress-fill {
+.onboard-wizard-progress-fill {
   height: 100%;
-  background: var(--clr-best, #4f7d3c);
+  background: var(--bg-strong, #202721);
   border-radius: 999px;
   transition: width 0.3s ease;
 }
@@ -1845,14 +2066,6 @@ body.modal-open { overflow: hidden; }
 .review-skeleton .summary-counts, .review-skeleton .training-list, .review-skeleton .pattern-list, .review-skeleton .opening-drift, .review-skeleton .phase-breakdown { gap: 10px; }
 .review-skeleton .summary-counts, .review-skeleton .training-list, .review-skeleton .pattern-list, .review-skeleton .opening-drift, .review-skeleton .phase-breakdown { gap: 10px; }
 
-.badge-impact { animation: badgeImpactSettle 860ms cubic-bezier(.16,1,.3,1) forwards; }
-
-@keyframes badgeImpactSettle {
-  0% { background: rgba(var(--badge-rgb),0.16); color: var(--badge-color); border-color: rgba(var(--badge-rgb),0.36); box-shadow: 0 2px 4px rgba(0,0,0,0.08); transform: scale(0.78); }
-  42% { background: rgba(var(--badge-rgb),0.22); color: var(--badge-color); border-color: rgba(var(--badge-rgb),0.48); box-shadow: 0 3px 8px rgba(0,0,0,0.1); transform: scale(1.06); }
-  100% { background: var(--badge-color); color: #fff; border-color: rgba(255,255,255,0.88); box-shadow: 0 4px 12px rgba(0,0,0,0.12); transform: scale(1); }
-}
-
 @keyframes skeleton-sweep { to { background-position: calc(100% + 90px) 0, 0 0; } }
 
 .pulse { animation: pulseCTA 1.5s ease-in-out infinite; }
@@ -1937,6 +2150,13 @@ body.in-app-route .page-panel[hidden] { display: none; }
   .main-content {
     display: flex;
     flex-direction: column;
+    /* Center the board + analysis panel when they hit their 620px max-width
+     * cap (inherited from the 1140px grid block). The 1140 block used
+     * justify-items:center (grid) to center; this flex block had no align-items,
+     * so on ~760px viewports the capped children left-aligned with empty space
+     * on the right. align-items:center restores centering; width:100% on the
+     * children still makes them fill when narrower than the cap. */
+    align-items: center;
     padding: 12px;
     gap: 16px;
   }
@@ -1974,9 +2194,13 @@ body.in-app-route .page-panel[hidden] { display: none; }
     gap: 16px;
   }
 
+  /* width:100% only — do NOT set padding here. This 760px block is for the
+   * board-centric layout (.main-content/.board-* above); setting .page-card
+   * padding here clobbered the in-app-route card rules at 640px (20px) and
+   * 480px (16px) because this block appears later in source and wins by
+   * cascade order, leaving phones with cramped 12px cards. */
   .page-card {
     width: 100%;
-    padding: 12px;
   }
 }
 
@@ -2281,12 +2505,138 @@ body.in-app-route .page-panel[hidden] { display: none; }
 }
 .profile-header-copy { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .profile-header-copy h1 { margin: 0; font-size: 1.4rem; }
+/* auto-fit + minmax(120px,1fr): 4-across on wide profile cards, reflows to 3
+ * then 2 columns as the card narrows (e.g. 521-700px tablets) so labels like
+ * "PUZZLE RATING" no longer wrap mid-word. The 120px floor keeps each cell
+ * legible; min-width:0 lets a cell shrink within its track. */
 .profile-stats-grid {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 16px 0;
 }
-.profile-stats-grid .standalone-stat { text-align: center; }
+.profile-stats-grid .standalone-stat { text-align: center; min-width: 0; }
 .profile-member-since { color: var(--text-muted); font-size: 0.82rem; margin: 4px 0 12px; }
+
+/* ===== Button-row replaces <select> ===== */
+.select-row { display: grid; gap: 8px; }
+.select-row[data-cols="2"] { grid-template-columns: repeat(2, 1fr); }
+.select-row[data-cols="3"] { grid-template-columns: repeat(3, 1fr); }
+.select-row[data-cols="4"] { grid-template-columns: repeat(4, 1fr); }
+.select-row[data-cols="6"] { grid-template-columns: repeat(6, 1fr); }
 @media (max-width: 520px) {
-  .profile-stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .select-row[data-cols="3"],
+  .select-row[data-cols="4"],
+  .select-row[data-cols="6"] { grid-template-columns: repeat(2, 1fr); }
+}
+.select-row-item {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 56px; padding: 8px 8px;
+  background: var(--bg-muted); border: 1px solid var(--border-color);
+  border-radius: 10px; cursor: pointer;
+  font-weight: 600; font-size: 0.82rem; color: var(--text-primary);
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  position: relative;
+  user-select: none;
+}
+.select-row-item:hover { border-color: var(--text-muted); }
+.select-row-item:active { transform: translateY(1px); }
+.select-row-item input { position: absolute; opacity: 0; pointer-events: none; }
+.select-row-item:has(input:checked) {
+  background: var(--bg-strong); color: var(--accent-contrast); border-color: var(--bg-strong);
+}
+.select-row-item:has(input:focus-visible) {
+  outline: 2px solid var(--focus-ring); outline-offset: 2px;
+}
+
+/* Board color chip — two-color split visual */
+.board-color-chip { padding: 0; overflow: hidden; }
+.board-color-split { width: 100%; height: 26px; border-top-left-radius: 9px; border-top-right-radius: 9px; }
+.select-row-item:has(input:checked) .board-color-split {
+  box-shadow: 0 0 0 2px var(--bg-strong) inset;
+}
+.board-color-chip-label {
+  display: block; padding: 4px 6px 6px; font-size: 0.78rem; font-weight: 600; text-align: center;
+}
+.select-row-item:has(input:checked) .board-color-chip-label { color: var(--accent-contrast); }
+
+/* Piece set chip — knight thumbnail */
+.piece-set-chip .piece-set-knight {
+  width: 32px; height: 32px; display: block; image-rendering: -webkit-optimize-contrast;
+}
+.piece-set-chip .piece-set-name { display: block; padding-top: 2px; }
+
+/* Puzzle skill level chip row */
+.puzzle-level-row {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  margin: 12px 0 4px;
+}
+@media (max-width: 520px) {
+  .puzzle-level-row { grid-template-columns: repeat(2, 1fr); }
+}
+.puzzle-level-chip {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  min-height: 60px; padding: 8px 6px;
+  background: var(--bg-muted); border: 1px solid var(--border-color);
+  border-radius: 10px; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  position: relative; user-select: none;
+}
+.puzzle-level-chip:hover { border-color: var(--text-muted); }
+.puzzle-level-chip:active { transform: translateY(1px); }
+.puzzle-level-chip span { font-weight: 600; font-size: 0.88rem; color: var(--text-primary); }
+.puzzle-level-chip small {
+  color: var(--text-muted); font-family: 'IBM Plex Mono', monospace; font-size: 0.74rem;
+}
+.puzzle-level-chip:has(input:checked) {
+  background: var(--bg-strong); color: var(--accent-contrast); border-color: var(--bg-strong);
+}
+.puzzle-level-chip:has(input:checked) span { color: var(--accent-contrast); }
+.puzzle-level-chip:has(input:checked) small { color: rgba(255,255,255,0.7); }
+.puzzle-level-chip input { position: absolute; opacity: 0; pointer-events: none; }
+.puzzle-level-chip:has(input:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* Try-it embed */
+.puzzle-level-embed {
+  display: grid; grid-template-columns: 80px 1fr; gap: 12px; align-items: center;
+  padding: 10px 12px; margin-top: 6px; margin-bottom: 12px;
+  background: var(--bg-muted); border: 1px solid var(--border-soft); border-radius: 10px;
+}
+.puzzle-level-embed-preview {
+  width: 80px; aspect-ratio: 1; display: grid;
+  grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, 1fr);
+  border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden;
+  background: var(--bg-panel);
+}
+.puzzle-level-embed-preview .preview-square.light { background: var(--sq-light); }
+.puzzle-level-embed-preview .preview-square.dark { background: var(--sq-dark); }
+.puzzle-level-embed-preview .preview-square img {
+  width: 100%; height: 100%; object-fit: contain; display: block;
+}
+.puzzle-level-embed-meta { display: grid; gap: 4px; }
+.puzzle-level-embed-meta strong { font-size: 0.92rem; }
+.puzzle-level-embed-meta span { color: var(--text-secondary); font-size: 0.8rem; }
+.puzzle-level-embed-meta .btn { justify-self: start; margin-top: 4px; }
+
+/* Success overlay (animated big check) */
+#puzzle-card { position: relative; overflow: hidden; }
+.puzzle-success-overlay {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  background: rgba(255,255,255,0); pointer-events: none;
+  transition: background 0.3s ease;
+  z-index: 5;
+}
+.puzzle-success-overlay:not([hidden]) {
+  background: rgba(255,255,255,0.55);
+}
+.puzzle-success-check {
+  width: 132px; height: 132px; border-radius: 50%;
+  background: rgba(255,255,255,0.95);
+  display: grid; place-items: center;
+  transform: scale(0);
+  transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: 0 8px 32px rgba(32, 39, 33, 0.22);
+}
+.puzzle-success-overlay:not([hidden]) .puzzle-success-check { transform: scale(1); }
+.puzzle-success-check .material-symbols-outlined {
+  font-size: 88px; color: var(--clr-best, #4f7d3c);
+  font-variation-settings: 'opsz' 88, 'wght' 700, 'FILL' 1;
 }
 

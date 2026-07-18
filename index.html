@@ -46,6 +46,20 @@
         <span class="home-continue-meta" id="home-continue-meta"></span>
       </a>
 
+      <!-- Quick-setup progress banner (3 steps): review a game, save/label a
+           username, solve a puzzle. Driven by _renderOnboardingProgress(). -->
+      <div class="onboarding-progress" id="onboarding-progress" hidden>
+        <div class="onboarding-progress-track">
+          <div class="onboarding-progress-fill" id="onboarding-progress-fill" style="width:8%"></div>
+        </div>
+        <p class="onboarding-progress-label" id="onboarding-progress-label">Quick setup</p>
+        <div class="onboarding-progress-steps">
+          <span class="onboarding-step" data-step="review"><span class="onboarding-step-dot"></span>Review a game</span>
+          <span class="onboarding-step" data-step="save"><span class="onboarding-step-dot"></span>Save a username</span>
+          <span class="onboarding-step" data-step="puzzle"><span class="onboarding-step-dot"></span>Solve a puzzle</span>
+        </div>
+      </div>
+
       <div class="home-stats" id="home-stats" aria-label="Community stats">
         <div class="home-stat-card" data-stat="reviews">
           <span class="material-symbols-outlined home-stat-icon">analytics</span>
@@ -78,77 +92,14 @@
         <a id="btn-menu-anticheat" class="feature-card" href="/anticheat">
           <span class="feature-icon material-symbols-outlined">shield</span>
           <strong>Anticheat</strong>
-          <p>Scan online games for suspicious patterns. 1 free run daily.</p>
+          <p>Scan online games for suspicious patterns. Included with Boost.</p>
         </a>
-        <a id="btn-menu-boost" class="feature-card feature-card-boost" href="/boost">
+        <a id="btn-menu-plans" class="feature-card feature-card-boost" href="/plans">
           <span class="feature-icon material-symbols-outlined">bolt</span>
-          <strong>Boost</strong>
-          <p>Never wait 18h for your next review. Never miss a blunder.</p>
+          <strong>Plans</strong>
+          <p>Unlimited reviews, no daily limits. Never miss a blunder.</p>
         </a>
       </div>
-    </section>
-
-    <section id="boost-page" class="main-menu" aria-label="Boost upgrade page" hidden>
-      <div class="main-menu-brand" aria-hidden="true">
-        <span class="material-symbols-outlined boost-page-icon">bolt</span>
-        <span>Stop waiting. Start winning.</span>
-        <small>Never lose another game to a missed tactic.</small>
-      </div>
-
-      <div class="boost-loss-banner">
-        <span class="material-symbols-outlined">warning</span>
-        <span>You get <strong>3 free reviews a day</strong>. After that, your next review waits up to <strong>18 hours</strong>.</span>
-      </div>
-
-      <div class="boost-tiers">
-        <div class="boost-tier boost-tier-free">
-          <div class="boost-tier-name">Free</div>
-          <div class="boost-tier-price"><span class="amount">$0</span><span class="period">/mo</span></div>
-          <ul class="boost-tier-list">
-            <li><span class="material-symbols-outlined">check</span> 3 server reviews / day</li>
-            <li><span class="material-symbols-outlined">check</span> 1 anticheat run / day</li>
-            <li><span class="material-symbols-outlined">check</span> Browser engine + coach + puzzles</li>
-          </ul>
-        </div>
-
-        <div class="boost-tier boost-tier-monthly">
-          <div class="boost-tier-name">Boost Monthly</div>
-          <div class="boost-tier-price"><span class="amount">$8</span><span class="period">/mo</span></div>
-          <ul class="boost-tier-list">
-            <li><span class="material-symbols-outlined">check</span> Unlimited server reviews</li>
-            <li><span class="material-symbols-outlined">check</span> No 18h waits</li>
-            <li><span class="material-symbols-outlined">check</span> Priority queue</li>
-          </ul>
-        </div>
-
-        <div class="boost-tier boost-tier-annual featured">
-          <span class="boost-tier-badge">Best value</span>
-          <div class="boost-tier-name">Boost Annual</div>
-          <div class="boost-tier-price">
-            <span class="boost-price-strike">$96</span>
-            <span class="amount">$5</span><span class="period">/mo</span>
-          </div>
-          <div class="boost-tier-save">Save 37% — billed yearly</div>
-          <ul class="boost-tier-list">
-            <li><span class="material-symbols-outlined">check</span> Everything in Monthly</li>
-            <li><span class="material-symbols-outlined">check</span> Stronger Depth-18 reviews</li>
-            <li><span class="material-symbols-outlined">check</span> Toggle Stockfish version</li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="boost-pricing">
-        <button id="btn-boost-purchase" class="menu-button menu-button-primary boost-purchase-button">
-          <span class="material-symbols-outlined btn-symbol" style="font-size: 1.4rem;">bolt</span>
-          <span>Unlock unlimited reviews</span>
-        </button>
-        <p class="boost-pricing-note" style="color: var(--text-muted); font-size: 0.9rem; margin-top: 12px;">
-          Or keep losing games to the daily limit — your call.
-        </p>
-      </div>
-      <button id="btn-close-boost" class="menu-button boost-close-button">
-        <span>Close</span>
-      </button>
     </section>
 
     <header class="header" id="app-header">
@@ -163,7 +114,7 @@
         <a href="/coach" data-route="/coach" data-nav="coach"><span class="material-symbols-outlined nav-icon">school</span> Coach</a>
         <a href="/puzzles" data-route="/puzzles" data-nav="puzzles"><span class="material-symbols-outlined nav-icon">extension</span> Puzzles</a>
         <a href="/anticheat" data-route="/anticheat" data-nav="anticheat"><span class="material-symbols-outlined nav-icon">shield</span> Anti-cheat</a>
-        <a href="/boost" data-route="/boost" data-nav="boost"><span class="material-symbols-outlined nav-icon">bolt</span> Boost</a>
+        <a href="/plans" data-route="/plans" data-nav="plans"><span class="material-symbols-outlined nav-icon">bolt</span> Plans</a>
       </nav>
 
       <div class="apple-header-actions">
@@ -171,7 +122,7 @@
           <span class="material-symbols-outlined btn-icon" id="header-account-icon">account_circle</span>
           <span id="header-account-label">Account</span>
         </button>
-        <button id="btn-settings" class="apple-header-btn" title="Settings">
+        <button id="btn-settings" class="apple-header-btn" aria-label="Settings" title="Settings">
           <span class="material-symbols-outlined btn-icon">tune</span>
         </button>
         <button class="apple-nav-toggle" id="apple-nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
@@ -237,8 +188,8 @@
         </div>
 
         <!-- Progress bar: starts above 0% so it feels underway -->
-        <div class="onboarding-progress" aria-hidden="true">
-          <div class="onboarding-progress-fill" id="onboard-progress-fill" style="width:33%"></div>
+        <div class="onboard-wizard-progress" aria-hidden="true">
+          <div class="onboard-wizard-progress-fill" id="onboard-progress-fill" style="width:40%"></div>
         </div>
         <p class="onboarding-step-label" id="onboard-step-label">Step 1 of 3</p>
 
@@ -247,26 +198,66 @@
           <h2 class="onboard-step-title">Pick your board &amp; pieces</h2>
           <p class="onboard-step-sub">Choose how the board looks — you can change it later in Settings.</p>
           <div class="onboard-appearance-grid">
-            <label class="field">
+            <div class="field">
               <span class="field-label">Board Colors</span>
-              <select id="onboard-board-theme" class="input-select">
-                <option value="classic" selected>Classic</option>
-                <option value="green">Tournament Green</option>
-                <option value="blue">Coastal Blue</option>
-                <option value="slate">Slate</option>
-                <option value="walnut">Walnut</option>
-                <option value="rose">Rosewood</option>
-              </select>
-            </label>
-            <label class="field">
+              <div class="select-row" data-cols="3" role="radiogroup" aria-label="Board colors">
+                <label class="select-row-item board-color-chip">
+                  <input type="radio" name="onboard-board-theme" value="classic" checked>
+                  <span class="board-color-split" style="background:linear-gradient(135deg,#f7f1e4 50%,#b88d58 50%)"></span>
+                  <span class="board-color-chip-label">Classic</span>
+                </label>
+                <label class="select-row-item board-color-chip">
+                  <input type="radio" name="onboard-board-theme" value="green">
+                  <span class="board-color-split" style="background:linear-gradient(135deg,#eeeed2 50%,#769656 50%)"></span>
+                  <span class="board-color-chip-label">Tournament Green</span>
+                </label>
+                <label class="select-row-item board-color-chip">
+                  <input type="radio" name="onboard-board-theme" value="blue">
+                  <span class="board-color-split" style="background:linear-gradient(135deg,#d8e2e7 50%,#799db3 50%)"></span>
+                  <span class="board-color-chip-label">Coastal Blue</span>
+                </label>
+                <label class="select-row-item board-color-chip">
+                  <input type="radio" name="onboard-board-theme" value="slate">
+                  <span class="board-color-split" style="background:linear-gradient(135deg,#dfe5ea 50%,#6d7883 50%)"></span>
+                  <span class="board-color-chip-label">Slate</span>
+                </label>
+                <label class="select-row-item board-color-chip">
+                  <input type="radio" name="onboard-board-theme" value="walnut">
+                  <span class="board-color-split" style="background:linear-gradient(135deg,#f1d8ae 50%,#8a5a32 50%)"></span>
+                  <span class="board-color-chip-label">Walnut</span>
+                </label>
+                <label class="select-row-item board-color-chip">
+                  <input type="radio" name="onboard-board-theme" value="rose">
+                  <span class="board-color-split" style="background:linear-gradient(135deg,#f7e2df 50%,#b56a72 50%)"></span>
+                  <span class="board-color-chip-label">Rosewood</span>
+                </label>
+              </div>
+            </div>
+            <div class="field">
               <span class="field-label">Piece Icons</span>
-              <select id="onboard-piece-theme" class="input-select">
-                <option value="classic" selected>Classic</option>
-                <option value="glass">Glass</option>
-                <option value="wood">Wood</option>
-                <option value="neo">Neo</option>
-              </select>
-            </label>
+              <div class="select-row" data-cols="2" role="radiogroup" aria-label="Piece icons">
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="classic" checked>
+                  <img class="piece-set-knight" src="./assets/pieces/classic/wn.png" alt="">
+                  <span class="piece-set-name">Classic</span>
+                </label>
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="glass">
+                  <img class="piece-set-knight" src="./assets/pieces/glass/wn.png" alt="">
+                  <span class="piece-set-name">Glass</span>
+                </label>
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="wood">
+                  <img class="piece-set-knight" src="./assets/pieces/wood/wn.png" alt="">
+                  <span class="piece-set-name">Wood</span>
+                </label>
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="neo">
+                  <img class="piece-set-knight" src="./assets/pieces/neo/wn.png" alt="">
+                  <span class="piece-set-name">Neo</span>
+                </label>
+              </div>
+            </div>
           </div>
           <div class="settings-preview-grid">
             <div class="appearance-preview-board" id="onboard-board-preview" aria-label="Board preview"></div>
@@ -278,36 +269,34 @@
           <button id="btn-onboard-skip-1" class="onboard-skip" type="button">Skip and just create an account</button>
         </div>
 
-        <!-- STEP 2: Skill & Coach -->
+        <!-- STEP 2: Skill level only (Coach difficulty + Play-as live on the Coach popup) -->
         <div class="onboard-step" id="onboard-step-2" hidden>
-          <h2 class="onboard-step-title">Calibrate your training</h2>
-          <p class="onboard-step-sub">We'll match puzzles to your level and set up the coach.</p>
-          <label class="field">
+          <h2 class="onboard-step-title">Pick your skill level</h2>
+          <p class="onboard-step-sub">We'll match puzzles to your level. You can change this anytime in Settings.</p>
+          <div class="field">
             <span class="field-label">Your skill level</span>
-            <select id="onboard-skill" class="input-select">
-              <option value="1000">Beginner — just learning the openings</option>
-              <option value="1500" selected>Intermediate — club player</option>
-              <option value="1900">Advanced — tournament regular</option>
-              <option value="2200">Expert — strong competitive player</option>
-            </select>
-          </label>
-          <div class="onboard-appearance-grid">
-            <label class="field">
-              <span class="field-label">Coach difficulty</span>
-              <select id="onboard-coach-difficulty" class="input-select">
-                <option value="800">Easy</option>
-                <option value="1200" selected>Medium</option>
-                <option value="1600">Hard</option>
-                <option value="2000">Expert</option>
-              </select>
-            </label>
-            <label class="field">
-              <span class="field-label">Play as</span>
-              <select id="onboard-coach-color" class="input-select">
-                <option value="w" selected>White</option>
-                <option value="b">Black</option>
-              </select>
-            </label>
+            <div class="select-row" data-cols="2" role="radiogroup" aria-label="Skill level">
+              <label class="select-row-item">
+                <input type="radio" name="onboard-skill" value="1000">
+                <span>Beginner</span>
+                <small style="font-family:'IBM Plex Mono',monospace;font-size:0.74rem;color:var(--text-muted)">1000</small>
+              </label>
+              <label class="select-row-item">
+                <input type="radio" name="onboard-skill" value="1500" checked>
+                <span>Intermediate</span>
+                <small style="font-family:'IBM Plex Mono',monospace;font-size:0.74rem;color:var(--text-muted)">1500</small>
+              </label>
+              <label class="select-row-item">
+                <input type="radio" name="onboard-skill" value="1900">
+                <span>Advanced</span>
+                <small style="font-family:'IBM Plex Mono',monospace;font-size:0.74rem;color:var(--text-muted)">1900</small>
+              </label>
+              <label class="select-row-item">
+                <input type="radio" name="onboard-skill" value="2200">
+                <span>Expert</span>
+                <small style="font-family:'IBM Plex Mono',monospace;font-size:0.74rem;color:var(--text-muted)">2200</small>
+              </label>
+            </div>
           </div>
           <div class="onboard-nav">
             <button id="btn-onboard-back-2" class="btn btn-secondary" type="button">Back</button>
@@ -347,11 +336,6 @@
           <p class="onboard-legal">By continuing you agree to our <a href="/terms" data-route="/terms">Terms</a> and <a href="/privacy" data-route="/privacy">Privacy Policy</a>.</p>
           <div class="onboard-nav">
             <button id="btn-onboard-back-3" class="btn btn-secondary" type="button">Back</button>
-          </div>
-          <div class="auth-comparison-strip">
-            <span><strong>Free:</strong> 3 reviews/day</span>
-            <span class="auth-comparison-divider"></span>
-            <a href="/boost" data-route="/boost"><strong>Boost:</strong> unlimited</a>
           </div>
           <div class="page-actions">
             <button id="btn-page-to-login" class="btn btn-secondary" type="button">Already have an account</button>
@@ -411,7 +395,7 @@
           </div>
           <p class="account-status" id="spa-account-username-status"></p>
           <div id="spa-account-boost-cta" class="text-center" style="margin: 1rem 0; display: none;">
-            <a id="btn-account-to-boost" class="btn btn-primary" href="/boost" data-route="/boost">Open Boost</a>
+            <a id="btn-account-to-plans" class="btn btn-primary" href="/plans" data-route="/plans">Open Plans</a>
           </div>
           <div class="admin-boost-panel" id="spa-admin-boost-panel" hidden>
             <h3>Plans &amp; subscriptions</h3>
@@ -436,7 +420,7 @@
           <div class="admin-support-panel" id="spa-admin-support-panel" hidden>
             <h3>Support messages</h3>
             <button id="spa-btn-refresh-support" class="btn btn-secondary btn-small" type="button">Refresh</button>
-            <div class="admin-support-list" id="spa-admin-support-list"></div>
+            <div class="admin-support-list" id="spa-admin-support-list"><p class="account-status">Click Refresh to load messages.</p></div>
           </div>
           <div class="standalone-actions">
             <button id="spa-btn-reset-password" class="btn btn-secondary" type="button">Reset Password</button>
@@ -450,33 +434,29 @@
     <section id="page-settings" class="page-panel" hidden>
       <div class="card panel-wide page-card">
         <h1>Settings</h1>
-        <h2 style="font-size:1rem;margin-top:4px">Browser Engine</h2>
+        <!-- Review Strength is fixed at Standard and not user-adjustable. The
+             selects below are kept (hidden + disabled) so the engine-settings
+             save handler in app.js still resolves a value; they hold the
+             locked defaults and are never shown or changed. -->
+        <div id="settings-advanced-engine" hidden aria-hidden="true">
+          <select id="settings-review-strength" class="input-select" disabled>
+            <option value="standard" selected>Standard</option>
+          </select>
+          <input id="settings-advanced-toggle" type="checkbox" disabled>
+          <select id="settings-engine-depth" class="input-select" disabled>
+            <option value="14" selected>Depth 14</option>
+          </select>
+          <select id="settings-engine-timeout" class="input-select" disabled>
+            <option value="4500" selected>4.5 seconds</option>
+          </select>
+        </div>
+        <h2 style="font-size:1rem;margin-top:18px">Browser Engine</h2>
         <p>These settings apply when using browser review, coach, live eval, and local analysis.</p>
         <label class="field">
           <span class="field-label">Engine Type</span>
           <select id="settings-engine-module" class="input-select">
             <option value="lite-single">Stockfish 18 Lite (7 MB, recommended)</option>
             <option value="full-single">Stockfish 18 Full (108 MB)</option>
-          </select>
-        </label>
-        <label class="field">
-          <span class="field-label">Analysis Depth</span>
-          <select id="settings-engine-depth" class="input-select">
-            <option value="depth10">Depth 10 (fast)</option>
-            <option value="depth14" selected>Depth 14 (default)</option>
-            <option value="depth18">Depth 18</option>
-            <option value="depth22">Depth 22</option>
-            <option value="depth26">Depth 26 (slow)</option>
-          </select>
-        </label>
-        <label class="field">
-          <span class="field-label">Move Timeout</span>
-          <select id="settings-engine-timeout" class="input-select">
-            <option value="4000">4 seconds</option>
-            <option value="8000">8 seconds</option>
-            <option value="12000" selected>12 seconds (default)</option>
-            <option value="20000">20 seconds</option>
-            <option value="30000">30 seconds</option>
           </select>
         </label>
         <label class="switch-row app-switch-row">
@@ -505,26 +485,66 @@
         <p class="account-status" id="engine-settings-status"></p>
         <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
         <h2 style="font-size:1rem">Board Appearance</h2>
-        <label class="field">
+        <div class="field">
           <span class="field-label">Board Colors</span>
-          <select id="settings-board-theme" class="input-select">
-            <option value="classic">Classic</option>
-            <option value="green">Tournament Green</option>
-            <option value="blue">Coastal Blue</option>
-            <option value="slate">Slate</option>
-            <option value="walnut">Walnut</option>
-            <option value="rose">Rosewood</option>
-          </select>
-        </label>
-        <label class="field">
+          <div class="select-row" data-cols="3" role="radiogroup" aria-label="Board colors">
+            <label class="select-row-item board-color-chip">
+              <input type="radio" name="settings-board-theme" value="classic">
+              <span class="board-color-split" style="background:linear-gradient(135deg,#f7f1e4 50%,#b88d58 50%)"></span>
+              <span class="board-color-chip-label">Classic</span>
+            </label>
+            <label class="select-row-item board-color-chip">
+              <input type="radio" name="settings-board-theme" value="green">
+              <span class="board-color-split" style="background:linear-gradient(135deg,#eeeed2 50%,#769656 50%)"></span>
+              <span class="board-color-chip-label">Tournament Green</span>
+            </label>
+            <label class="select-row-item board-color-chip">
+              <input type="radio" name="settings-board-theme" value="blue">
+              <span class="board-color-split" style="background:linear-gradient(135deg,#d8e2e7 50%,#799db3 50%)"></span>
+              <span class="board-color-chip-label">Coastal Blue</span>
+            </label>
+            <label class="select-row-item board-color-chip">
+              <input type="radio" name="settings-board-theme" value="slate">
+              <span class="board-color-split" style="background:linear-gradient(135deg,#dfe5ea 50%,#6d7883 50%)"></span>
+              <span class="board-color-chip-label">Slate</span>
+            </label>
+            <label class="select-row-item board-color-chip">
+              <input type="radio" name="settings-board-theme" value="walnut">
+              <span class="board-color-split" style="background:linear-gradient(135deg,#f1d8ae 50%,#8a5a32 50%)"></span>
+              <span class="board-color-chip-label">Walnut</span>
+            </label>
+            <label class="select-row-item board-color-chip">
+              <input type="radio" name="settings-board-theme" value="rose">
+              <span class="board-color-split" style="background:linear-gradient(135deg,#f7e2df 50%,#b56a72 50%)"></span>
+              <span class="board-color-chip-label">Rosewood</span>
+            </label>
+          </div>
+        </div>
+        <div class="field">
           <span class="field-label">Piece Icons</span>
-          <select id="settings-piece-theme" class="input-select">
-            <option value="classic">Classic</option>
-            <option value="glass">Glass</option>
-            <option value="wood">Wood</option>
-            <option value="neo">Neo</option>
-          </select>
-        </label>
+          <div class="select-row" data-cols="2" role="radiogroup" aria-label="Piece icons">
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="classic">
+              <img class="piece-set-knight" src="./assets/pieces/classic/wn.png" alt="">
+              <span class="piece-set-name">Classic</span>
+            </label>
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="glass">
+              <img class="piece-set-knight" src="./assets/pieces/glass/wn.png" alt="">
+              <span class="piece-set-name">Glass</span>
+            </label>
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="wood">
+              <img class="piece-set-knight" src="./assets/pieces/wood/wn.png" alt="">
+              <span class="piece-set-name">Wood</span>
+            </label>
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="neo">
+              <img class="piece-set-knight" src="./assets/pieces/neo/wn.png" alt="">
+              <span class="piece-set-name">Neo</span>
+            </label>
+          </div>
+        </div>
         <div class="settings-preview-grid">
           <div class="appearance-preview-board" id="appearance-board-preview" aria-label="Board preview"></div>
         </div>
@@ -555,9 +575,11 @@
         <p>Clear local settings and puzzle progress stored in this browser.</p>
         <button id="btn-clear-cache" class="btn btn-secondary" type="button">Clear Local Cache</button>
         <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
-        <h2 style="font-size:1rem">Saved Games</h2>
+        <h2 style="font-size:1rem">Saved Games & Chats</h2>
         <p>Remove saved review and coach games stored in this browser.</p>
         <button id="btn-clear-saved-games" class="btn btn-secondary" type="button">Clear Saved Games</button>
+        <p>Remove all saved AI Coach chat conversations from this browser.</p>
+        <button id="btn-clear-coach-chats" class="btn btn-secondary" type="button">Clear Saved Coach Chats</button>
         <p class="account-status" id="page-status"></p>
       </div>
     </section>
@@ -569,7 +591,7 @@
           <div class="boost-status-card" id="spa-boost-status-card">
             <span class="material-symbols-outlined boost-status-icon">check_circle</span>
             <div>
-              <strong id="spa-boost-status-title">Boost Active</strong>
+              <strong id="spa-plans-status-title">Active</strong>
               <p id="spa-boost-status-text">Your premium features are ready. Go dominate the board.</p>
             </div>
           </div>
@@ -592,6 +614,8 @@
                 <div class="plan-tier-price"><span class="amount">$0</span><span class="period">/mo</span></div>
                 <ul class="plan-tier-list">
                   <li><span class="material-symbols-outlined">check</span> 3 server reviews / 24h</li>
+                  <li><span class="material-symbols-outlined">check</span> AI Coach (Fast model)</li>
+                  <li><span class="material-symbols-outlined">close</span> No Strong model</li>
                   <li><span class="material-symbols-outlined">check</span> Unlimited coach games</li>
                   <li><span class="material-symbols-outlined">check</span> Unlimited puzzles</li>
                   <li><span class="material-symbols-outlined">close</span> No anticheat reviews</li>
@@ -602,10 +626,11 @@
               <div class="plan-tier plan-tier-boost featured">
                 <span class="plan-tier-badge">Popular</span>
                 <div class="plan-tier-name">Boost</div>
-                <div class="plan-tier-price"><span class="amount">$8</span><span class="period">/mo</span></div>
+                <div class="plan-tier-price"><span class="amount">$4</span><span class="period">/mo</span></div>
                 <ul class="plan-tier-list">
                   <li><span class="material-symbols-outlined">check</span> Everything in Free</li>
                   <li><span class="material-symbols-outlined">check</span> Unlimited server reviews</li>
+                  <li><span class="material-symbols-outlined">check</span> AI Coach Strong model</li>
                   <li><span class="material-symbols-outlined">check</span> 25 anticheat games / week</li>
                   <li><span class="material-symbols-outlined">check</span> No ads</li>
                   <li><span class="material-symbols-outlined">check</span> Boost flair on profile</li>
@@ -619,9 +644,10 @@
 
               <div class="plan-tier plan-tier-max">
                 <div class="plan-tier-name">Max</div>
-                <div class="plan-tier-price"><span class="amount">$15</span><span class="period">/mo</span></div>
+                <div class="plan-tier-price"><span class="amount">$8</span><span class="period">/mo</span></div>
                 <ul class="plan-tier-list">
                   <li><span class="material-symbols-outlined">check</span> Everything in Boost</li>
+                  <li><span class="material-symbols-outlined">check</span> 5× more AI Coach tokens / day</li>
                   <li><span class="material-symbols-outlined">check</span> 100 anticheat games / week</li>
                   <li><span class="material-symbols-outlined">check</span> Max flair on profile</li>
                 </ul>
@@ -857,6 +883,68 @@
       </div>
     </section>
 
+    <section id="page-coach" class="page-panel" hidden>
+      <div class="coach-chat-shell" id="coach-chat-card">
+        <aside class="coach-sidebar" id="coach-sidebar" aria-label="Chat history">
+          <button type="button" class="btn btn-primary coach-new-chat-btn" id="btn-coach-new-chat">
+            <span class="material-symbols-outlined btn-symbol">add_comment</span>
+            <span>New chat</span>
+          </button>
+          <div class="coach-sidebar-list" id="coach-sidebar-list"></div>
+        </aside>
+        <div class="coach-chat-main card page-card">
+          <div class="coach-card-header">
+            <div class="coach-identity">
+              <div class="coach-avatar" aria-hidden="true">
+                <img src="/assets/logo.png" alt="">
+              </div>
+              <div>
+                <h3>Coach</h3>
+                <span class="coach-coming-soon" id="coach-chat-subtitle">AI coach</span>
+              </div>
+            </div>
+            <div class="coach-chat-header-actions">
+              <div class="coach-model-toggle" role="group" aria-label="Coach model">
+                <button type="button" class="coach-model-seg" data-model="fast" aria-pressed="true">Fast</button>
+                <button type="button" class="coach-model-seg" data-model="strong" aria-pressed="false">Strong</button>
+              </div>
+              <button type="button" class="btn btn-secondary coach-play-btn" id="btn-coach-play-bot" title="Play a game against the Stockfish bot">
+                <span class="material-symbols-outlined">sports_esports</span>
+                <span class="btn-label">Play the bot</span>
+              </button>
+            </div>
+          </div>
+          <div class="coach-chat-locked" id="coach-chat-locked" hidden>
+            <span class="material-symbols-outlined coach-locked-icon">lock</span>
+            <h3>Sign in to use the AI Coach</h3>
+            <p>Chat with an AI chess coach that verifies every claim with Stockfish and web search. Free accounts get a daily token allowance; Boost and Max get more.</p>
+            <a class="btn btn-primary" href="/login" data-route="/login">Sign in</a>
+            <a class="btn btn-secondary" href="/signup?src=coach" data-route="/signup">Create account</a>
+          </div>
+          <div class="coach-usage-bar" id="coach-usage-bar" hidden>
+            <div class="coach-usage-track"><div class="coach-usage-fill"></div></div>
+            <span class="coach-usage-text"></span>
+          </div>
+          <div class="coach-chat-body" id="coach-chat-body" hidden>
+            <div class="coach-chat-messages coach-markdown" id="coach-chat-messages" role="log" aria-live="polite" aria-label="Coach conversation"></div>
+            <div class="coach-typing" id="coach-typing" role="status" aria-live="polite" hidden>
+              <span class="material-symbols-outlined coach-typing-icon">progress_activity</span>
+              <span class="coach-typing-text" id="coach-typing-text">Coach is thinking…</span>
+            </div>
+          </div>
+          <form class="coach-chat-input" id="coach-chat-form">
+            <textarea id="coach-chat-textarea" class="coach-chat-textarea" placeholder="Ask the coach anything about chess…" rows="1" autocomplete="off"></textarea>
+            <button type="submit" id="btn-coach-send" class="btn btn-primary coach-send-btn" aria-label="Send">
+              <span class="material-symbols-outlined btn-symbol">send</span>
+            </button>
+            <button type="button" id="btn-coach-stop" class="btn btn-secondary coach-stop-btn" aria-label="Stop" hidden>
+              <span class="material-symbols-outlined btn-symbol">stop_circle</span>
+            </button>
+          </form>
+        </div>
+      </div>
+    </section>
+
     <main class="main-content">
       <div class="eval-bar-container">
         <div class="eval-bar">
@@ -951,7 +1039,6 @@
             </div>
           </div>
           <div class="move-insights feedback-insights" id="move-insights">
-            <div class="insight-empty" id="insight-empty">Run game review and click a move for detailed coaching.</div>
             <div class="insight-gate" id="insight-gate" hidden>
               <div class="insight-gate-teaser">
                 <span class="insight-move" id="insight-gate-move"></span>
@@ -1077,11 +1164,12 @@
           <canvas id="eval-graph" width="320" height="120"></canvas>
         </div>
 
-        <div class="analysis-overview panel-wide">
+        <div class="analysis-overview card panel-wide">
           <div class="opening-info card panel-compact" id="opening-info" style="display:none">
             <span class="material-symbols-outlined opening-icon">menu_book</span>
             <span class="opening-label">Opening</span>
             <span class="opening-name" id="opening-name"></span>
+            <div class="opening-stats" id="opening-stats" hidden></div>
           </div>
 
           <div class="game-status card panel-compact" id="game-status" style="display:none">
@@ -1092,8 +1180,7 @@
             <p class="game-status-details" id="game-status-details"></p>
           </div>
 
-          <div class="coach-card card panel-wide" id="coach-card" hidden>
-            <div class="coach-card-header">
+          <div class="coach-card card panel-wide" id="coach-card" hidden>            <div class="coach-card-header">
               <div class="coach-identity">
                 <div class="coach-avatar" aria-hidden="true">
                   <img src="/assets/logo.png" alt="">
@@ -1226,6 +1313,46 @@
                   </label>
                 </div>
               </details>
+              <div class="puzzle-level-row" role="radiogroup" aria-label="Skill level">
+                <label class="puzzle-level-chip">
+                  <input type="radio" name="puzzle-level" value="1000">
+                  <span>Beginner</span>
+                  <small>1000</small>
+                </label>
+                <label class="puzzle-level-chip">
+                  <input type="radio" name="puzzle-level" value="1500" checked>
+                  <span>Intermediate</span>
+                  <small>1500</small>
+                </label>
+                <label class="puzzle-level-chip">
+                  <input type="radio" name="puzzle-level" value="1900">
+                  <span>Advanced</span>
+                  <small>1900</small>
+                </label>
+                <label class="puzzle-level-chip">
+                  <input type="radio" name="puzzle-level" value="2200">
+                  <span>Expert</span>
+                  <small>2200</small>
+                </label>
+              </div>
+              <div class="puzzle-level-embed" id="puzzle-level-embed">
+                <div class="puzzle-level-embed-preview" id="puzzle-level-embed-preview" aria-label="Sample position"></div>
+                <div class="puzzle-level-embed-meta">
+                  <strong id="puzzle-level-embed-title">Try it</strong>
+                  <span id="puzzle-level-embed-sub">A short puzzle at this level — give it a go before you commit.</span>
+                  <button id="btn-puzzle-level-try" class="btn btn-secondary" type="button">
+                    <span class="btn-content">
+                      <span class="material-symbols-outlined btn-symbol">play_arrow</span>
+                      <span class="btn-label">Try it</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="puzzle-success-overlay" id="puzzle-success-overlay" hidden aria-hidden="true">
+              <div class="puzzle-success-check">
+                <span class="material-symbols-outlined">check_circle</span>
+              </div>
             </div>
           </div>
 
@@ -1237,54 +1364,55 @@
               </div>
               <span class="anticheat-risk-pill" id="anticheat-risk-pill">Ready</span>
             </div>
-            <div class="anticheat-warning">
-              <strong>Server-side cheat detection.</strong> Anticheat is a Boost (25 games/week) and Max (100 games/week) feature. Each game you scan counts against your weekly budget, which resets Monday. Don't close this tab while checking.
-            </div>
+            <details class="anticheat-warning anticheat-warning-collapsible">
+              <summary>Boost &amp; Max feature — each game counts against your weekly budget. <span class="anticheat-warning-hint">Details</span></summary>
+              <p><strong>Server-side cheat detection.</strong> Anticheat is a Boost (25 games/week) and Max (100 games/week) feature. Each game you scan counts against your weekly budget, which resets Monday. Don't close this tab while checking.</p>
+            </details>
             <div class="anticheat-usage-bar" id="anticheat-usage-bar"></div>
-            <div class="anticheat-form">
-              <label class="field">
-                <span class="field-label">Source</span>
-                <select id="anticheat-source" class="input-select">
-                  <option value="pgn">Paste PGN</option>
-                  <option value="lichess">Lichess username</option>
-                  <option value="chesscom">Chess.com username</option>
-                </select>
-              </label>
-              <label class="field">
-                <span class="field-label">Username</span>
-                <input id="anticheat-username" class="input-select" type="text" placeholder="username">
-              </label>
-              <label class="field">
-                <span class="field-label">Games</span>
-                <select id="anticheat-limit" class="input-select">
-                  <option value="10">Last 10</option>
-                  <option value="5">Last 5</option>
-                  <option value="15">Last 15</option>
-                </select>
-              </label>
-              <button id="btn-anticheat-run" class="btn btn-primary anticheat-action">
-                <span class="btn-content">
-                  <span class="material-symbols-outlined btn-symbol">manage_search</span>
-                  <span class="btn-label">Check Games</span>
+            <div class="anticheat-sources" role="radiogroup" aria-label="Anticheat source">
+              <button type="button" class="anticheat-source-card" data-source="pgn" role="radio" aria-checked="false">
+                <span class="anticheat-source-icon" aria-hidden="true">
+                  <span class="material-symbols-outlined">content_paste</span>
+                </span>
+                <span class="anticheat-source-meta">
+                  <strong>Paste PGN</strong>
+                  <small>Paste one or several games</small>
+                </span>
+              </button>
+              <button type="button" class="anticheat-source-card" data-source="lichess" role="radio" aria-checked="false">
+                <span class="anticheat-source-icon" aria-hidden="true">
+                  <img src="./assets/lichess.png" alt="">
+                </span>
+                <span class="anticheat-source-meta">
+                  <strong>Lichess username</strong>
+                  <small>Pull their last games</small>
+                </span>
+              </button>
+              <button type="button" class="anticheat-source-card" data-source="chesscom" role="radio" aria-checked="false">
+                <span class="anticheat-source-icon" aria-hidden="true">
+                  <img src="./assets/chesscom.png" alt="">
+                </span>
+                <span class="anticheat-source-meta">
+                  <strong>Chess.com username</strong>
+                  <small>Pull their last games</small>
                 </span>
               </button>
             </div>
-            <textarea id="anticheat-pgn" class="anticheat-pgn" placeholder="Paste one PGN or several PGNs here..." rows="8"></textarea>
-            <div class="anticheat-status" id="anticheat-status">Paste a PGN or enter a username to begin.</div>
+            <!-- Hidden inputs retained so the existing _runAnticheatOnServer payload
+                 builder (which reads elAnticheatSource / Username / Limit / Pgn) keeps
+                 working without further changes. Values are populated by the
+                 SweetAlert popup when the user clicks a source card. -->
+            <input type="hidden" id="anticheat-source" value="pgn">
+            <input type="hidden" id="anticheat-username" value="">
+            <input type="hidden" id="anticheat-limit" value="10">
+            <textarea id="anticheat-pgn" class="anticheat-pgn" hidden placeholder="Paste one PGN or several PGNs here..." rows="8"></textarea>
+            <div class="anticheat-status" id="anticheat-status">Pick a source above to start a review.</div>
             <div class="anticheat-results" id="anticheat-results"></div>
           </div>
         </div>
 
 	        <div class="review-summary card panel-wide" id="review-summary" style="display:none" aria-live="polite">
           <h3>Game Review</h3>
-          <div class="save-cta" id="review-save-cta" hidden>
-            <div class="save-cta-text">
-              <strong>Your review is ready — but it lives only in this browser.</strong>
-              <span>Create a free account to save it, track accuracy over time, and pick up where you left off.</span>
-            </div>
-            <a class="btn btn-primary" href="/signup?src=review" data-route="/signup">Save my review</a>
-            <button type="button" class="save-cta-close material-symbols-outlined" id="review-save-cta-close" aria-label="Dismiss">close</button>
-          </div>
           <div class="summary-grid">
             <div class="summary-col">
               <h4>White</h4>
@@ -1654,6 +1782,8 @@
   <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" crossorigin="anonymous"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js" crossorigin="anonymous"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js" crossorigin="anonymous"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js" crossorigin="anonymous"></script>

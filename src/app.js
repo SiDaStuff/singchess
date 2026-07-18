@@ -6,18 +6,37 @@ class ChessReviewApp {
     this.analyzer = new MoveAnalyzer();
     this.chess = new Chess();
 		const _savedEngineSettings = (() => { try { const r = window.localStorage?.getItem('sidastuff.engineSettings'); return r ? JSON.parse(r) : {}; } catch (_) { return {}; } })();
+		// Back-compat: users saved before the strength tier existed have only
+		// legacy depthProfile/maxTimeMs. Migrate those onto the tier model so the
+		// new primary control has a sensible value on first load.
+		const _legacyProfileToTier = { depth10: 'quick', depth14: 'standard', depth18: 'thorough', depth22: 'thorough', depth26: 'thorough' };
+		const _migratedStrength = _savedEngineSettings.reviewStrength
+			|| _legacyProfileToTier[_savedEngineSettings.depthProfile]
+			|| _legacyProfileToTier[_savedEngineSettings.strength]
+			|| 'standard';
 		this.engineSettings = {
 				source: _savedEngineSettings.source || 'browser',
 				module: _savedEngineSettings.module || 'lite-single',
-						strength: _savedEngineSettings.strength || 'depth18',
-						// depthProfile mirrors the /settings page "Analysis Depth" select
-						// (depth10/14/18/22/26). Drives _getReviewProfile; default depth14.
-						depthProfile: _savedEngineSettings.depthProfile || 'depth14',
+						// Primary review-strength control (Quick/Standard/Thorough).
+						reviewStrength: _migratedStrength,
+						// Advanced overrides (active only when advancedEngine === true).
+						advancedEngine: _savedEngineSettings.advancedEngine === true,
+						customDepth: Number(_savedEngineSettings.customDepth) || Number(_savedEngineSettings.depthProfile?.replace(/\D/g, '')) || 16,
+						customTimeMs: Number(_savedEngineSettings.customTimeMs) || Number(_savedEngineSettings.maxTimeMs) || 8000,
+						// Set true ONLY when the user picks a value from the in-review
+						// "Maximum Time" dropdown. The dropdown writes customTimeMs, but
+						// _getReviewProfile must not apply that value for users who never
+						// touched the dropdown (customTimeMs defaults to 8000, which would
+						// silently slow every Standard-tier review from 4.5s to 8s/move).
+						// This flag is the explicit "the user chose a max time" signal.
+						maxTimeOverride: _savedEngineSettings.maxTimeOverride === true,
+						// strength/depthProfile are kept in sync for the live-deepening ladder.
+						strength: { quick: 'depth10', standard: 'depth14', thorough: 'depth18' }[_migratedStrength] || 'depth14',
+						depthProfile: { quick: 'depth10', standard: 'depth14', thorough: 'depth18' }[_migratedStrength] || 'depth14',
 						// Whether live per-move analysis keeps climbing to deeper
 						// depths while you sit on a move. Off = use forcedDepth once.
 						liveDeepening: _savedEngineSettings.liveDeepening !== undefined ? !!_savedEngineSettings.liveDeepening : true,
 						forcedDepth: Number(_savedEngineSettings.forcedDepth) || 16,
-						maxTimeMs: Number(_savedEngineSettings.maxTimeMs) || 12000,
 						analysisLocation: _savedEngineSettings.analysisLocation || 'server',
 						serverStrongReview: _savedEngineSettings.serverStrongReview !== undefined ? !!_savedEngineSettings.serverStrongReview : true,
 			};
@@ -76,6 +95,17 @@ class ChessReviewApp {
 	      hintLevel: 0,
 	      hintFen: '',
 	      hintMove: '',
+	    };
+	    // AI coach chat state. model: 'fast'|'strong'; history hydrated from
+	    // server on enter. streaming=assistant reply in flight; abortController
+	    // cancels the fetch on leave/new message.
+	    this.coachChat = {
+	      active: false,
+	      streaming: false,
+	      model: 'fast',
+	      history: [],
+	      abortController: null,
+	      streamedDuringTurn: false,
 	    };
 	    this.puzzleMode = {
 	      active: false,
@@ -162,6 +192,22 @@ class ChessReviewApp {
 			    this._initLinkUsernameRow();
 			    window.addEventListener('resize', () => this._updateEvalBar(this.currentEvalScore), { passive: true });
 			    window.addEventListener('resize', () => this._syncHeaderLabelVisibility(), { passive: true });
+			    // Refresh plan + usage on tab focus / visibility change so the
+			    // anticheat page reflects the user's current Boost/Max status
+			    // without them having to navigate away and back.
+			    const refreshPlanAndUsage = () => {
+			      if (!this.authState?.user) return;
+			      this._refreshMe()
+			        .then(() => {
+			          this._syncAccountUi();
+			          if (this.anticheatMode?.active) this._renderAnticheatUsageBar();
+			        })
+			        .catch(() => {});
+			    };
+			    document.addEventListener('visibilitychange', () => {
+			      if (document.visibilityState === 'visible') refreshPlanAndUsage();
+			    });
+			    window.addEventListener('focus', refreshPlanAndUsage);
 		  }
 
 	  _bindElements() {
@@ -174,8 +220,11 @@ class ChessReviewApp {
 	    this.elBtnMenuCoach = document.getElementById('btn-menu-coach');
 		    this.elBtnMenuPuzzles = document.getElementById('btn-menu-puzzles');
 		    this.elBtnMenuAnticheat = document.getElementById('btn-menu-anticheat');
-		    this.elBtnMenuBoost = document.getElementById('btn-menu-boost');
-    this.elBoostPage = document.getElementById('boost-page');
+		    // HTML uses `btn-menu-plans` (Plans page replaced Boost page). The
+		    // home feature card is the only place this lives; keep an alias
+		    // so legacy code that referenced `btn-menu-boost` keeps working.
+		    this.elBtnMenuPlans = document.getElementById('btn-menu-plans');
+		    this.elBtnMenuBoost = this.elBtnMenuPlans || document.getElementById('btn-menu-boost');
 	this.elHeaderBrandLink = document.querySelector('.apple-brand-link');
 	this.elHeaderAccountBtn = document.getElementById('header-account');
 	this.elHeaderAccountIcon = document.getElementById('header-account-icon');
@@ -183,8 +232,6 @@ class ChessReviewApp {
     this.elAppleNav = document.getElementById('apple-nav');
     this.elAppleNavToggle = document.getElementById('apple-nav-toggle');
     this.elNavScrim = document.getElementById('nav-scrim');
-    this.elBtnBoostPurchase = document.getElementById('btn-boost-purchase');
-    this.elBtnCloseBoost = document.getElementById('btn-close-boost');
     this.elBtnBackMenu = document.getElementById('btn-back-menu');
     // The engine-choice modal was removed (it was wired but never displayed;
     // the recommended module is applied silently). elEngineChoiceModal is kept
@@ -237,12 +284,15 @@ class ChessReviewApp {
     this.elSettingsLiveDeepening = document.getElementById('settings-live-deepening');
     this.elSettingsForcedDepth = document.getElementById('settings-forced-depth');
     this.elSettingsForcedDepthField = document.getElementById('settings-forced-depth-field');
+    this.elSettingsReviewStrength = document.getElementById('settings-review-strength');
+    this.elSettingsAdvancedToggle = document.getElementById('settings-advanced-toggle');
+    this.elSettingsAdvancedEngine = document.getElementById('settings-advanced-engine');
     this.elBtnSaveEngineSettings = document.getElementById('btn-save-engine-settings');
     this.elBtnSaveAppearanceSettings = document.getElementById('btn-save-appearance-settings');
     this.elEngineSettingsStatus = document.getElementById('engine-settings-status');
     this.elAppearanceSettingsStatus = document.getElementById('appearance-settings-status');
-    this.elBoardTheme = document.getElementById('settings-board-theme');
-    this.elPieceTheme = document.getElementById('settings-piece-theme');
+    this.elBoardTheme = document.querySelector('input[name="settings-board-theme"]:checked');
+    this.elPieceTheme = document.querySelector('input[name="settings-piece-theme"]:checked');
     this.elArrowColor = document.getElementById('settings-arrow-color');
     this.elHighlightColor = document.getElementById('settings-highlight-color');
     this.elPieceAnimations = document.getElementById('settings-piece-animations');
@@ -277,6 +327,8 @@ class ChessReviewApp {
 	this.elPlayerBottomClock = document.getElementById('player-bottom-clock');
     this.elOpeningInfo = document.getElementById('opening-info');
     this.elOpeningName = document.getElementById('opening-name');
+    this.elOpeningStats = document.getElementById('opening-stats');
+    this._openingCache = new Map(); // uci-sequence -> {opening, stats} | null
     this.elGameStatus = document.getElementById('game-status');
     this.elGameStatusTitle = document.getElementById('game-status-title');
     this.elGameStatusReason = document.getElementById('game-status-reason');
@@ -327,6 +379,18 @@ class ChessReviewApp {
 	    this.elCoachSetupAiAdjust = document.getElementById('coach-setup-ai-adjust');
 	    this.elCoachSetupAdjustStyle = document.getElementById('coach-setup-adjust-style');
 	    this.elBtnCoachSetupStart = document.getElementById('btn-coach-setup-start');
+		// Coach chat (AI) elements
+		this.elCoachPage = document.getElementById('page-coach');
+		this.elCoachChatCard = document.getElementById('coach-chat-card');
+		this.elCoachChatLocked = document.getElementById('coach-chat-locked');
+		this.elCoachChatBody = document.getElementById('coach-chat-body');
+		this.elCoachMessages = document.getElementById('coach-chat-messages');
+		this.elCoachTyping = document.getElementById('coach-typing');
+		this.elCoachTypingText = document.getElementById('coach-typing-text');
+		this.elCoachChatForm = document.getElementById('coach-chat-form');
+		this.elCoachTextarea = document.getElementById('coach-chat-textarea');
+		this.elBtnCoachSend = document.getElementById('btn-coach-send');
+		this.elCoachModelToggles = document.querySelectorAll('.coach-model-seg');
 
 	    this.elPuzzleCard = document.getElementById('puzzle-card');
 	    this.elPuzzleSource = document.getElementById('puzzle-source');
@@ -345,6 +409,15 @@ class ChessReviewApp {
 		    this.elBtnPuzzleRetry = document.getElementById('btn-puzzle-retry');
 		    this.elBtnPuzzleHint = document.getElementById('btn-puzzle-hint');
 		    this.elBtnPuzzleReview = document.getElementById('btn-puzzle-review');
+		    // Skill-level chips + Try-it embed (added in onboarding/settings rework)
+		    this.elPuzzleSuccessOverlay = document.getElementById('puzzle-success-overlay');
+		    this.elPuzzleLevelEmbedPreview = document.getElementById('puzzle-level-embed-preview');
+		    this.elPuzzleLevelEmbedTitle = document.getElementById('puzzle-level-embed-title');
+		    this.elPuzzleLevelEmbedSub = document.getElementById('puzzle-level-embed-sub');
+		    this.elBtnPuzzleLevelTry = document.getElementById('btn-puzzle-level-try');
+		    // Cache per-level sample puzzle so we don't refetch when re-selecting.
+		    this._puzzleLevelSamples = {};
+		    this._selectedPuzzleLevel = 1500;
 		    this.elBtnExportPgn = document.getElementById('btn-export-pgn');
 		    this.elBtnExportFen = document.getElementById('btn-export-fen');
 		    this.elAnticheatCard = document.getElementById('anticheat-card');
@@ -425,11 +498,10 @@ class ChessReviewApp {
 		      document.getElementById('onboard-step-2'),
 		      document.getElementById('onboard-step-3'),
 		    ];
-		    this.elOnboardBoardTheme = document.getElementById('onboard-board-theme');
-		    this.elOnboardPieceTheme = document.getElementById('onboard-piece-theme');
-		    this.elOnboardSkill = document.getElementById('onboard-skill');
-		    this.elOnboardCoachDifficulty = document.getElementById('onboard-coach-difficulty');
-		    this.elOnboardCoachColor = document.getElementById('onboard-coach-color');
+		    this.elOnboardBoardTheme = document.querySelector('input[name="onboard-board-theme"]');
+		    this.elOnboardPieceTheme = document.querySelector('input[name="onboard-piece-theme"]');
+		    this.elOnboardSkill = document.querySelector('input[name="onboard-skill"]');
+		    // Coach difficulty + Play-as removed from onboarding. Coach setup is invoked from the /coach popup instead.
 		    this.onboardingStep = 1;
 		    this.elPageToSignup = document.getElementById('btn-page-to-signup');
 		    this.elPageToLogin = document.getElementById('btn-page-to-login');
@@ -469,7 +541,8 @@ class ChessReviewApp {
 		    this.elSpaSpaResetPassword = document.getElementById('spa-btn-reset-password');
 		    // SPA Boost page bindings (prefixed to avoid duplicate IDs with the menu)
 		    this.elSpaBoostStatusContainer = document.getElementById('spa-boost-status-container');
-		    this.elSpaBoostStatusTitle = document.getElementById('spa-boost-status-title');
+		    // HTML renamed this id to `spa-plans-status-title`; alias to the old name too.
+		    this.elSpaBoostStatusTitle = document.getElementById('spa-plans-status-title') || document.getElementById('spa-boost-status-title');
 		    this.elSpaBoostStatusText = document.getElementById('spa-boost-status-text');
 		    this.elSpaBoostAuthRequired = document.getElementById('spa-boost-auth-required');
 		    this.elSpaBoostContent = document.getElementById('spa-boost-content');
@@ -496,18 +569,32 @@ class ChessReviewApp {
 	    if (this.elServerStrongReview) this.elServerStrongReview.checked = !!this.engineSettings.serverStrongReview;
 	    // Populate the /settings page engine form with the saved values.
 	    if (this.elSettingsEngineModule) this.elSettingsEngineModule.value = this.engineSettings.module;
-	    if (this.elSettingsEngineDepth) this.elSettingsEngineDepth.value = this.engineSettings.depthProfile || 'depth14';
-	    if (this.elSettingsEngineTimeout) this.elSettingsEngineTimeout.value = String(this.engineSettings.maxTimeMs);
+	    if (this.elSettingsReviewStrength) this.elSettingsReviewStrength.value = this.engineSettings.reviewStrength || 'standard';
+	    if (this.elSettingsAdvancedToggle) this.elSettingsAdvancedToggle.checked = this.engineSettings.advancedEngine === true;
+	    if (this.elSettingsEngineDepth) this.elSettingsEngineDepth.value = String(this.engineSettings.customDepth || 16);
+	    if (this.elSettingsEngineTimeout) this.elSettingsEngineTimeout.value = String(this.engineSettings.customTimeMs || 8000);
 	    if (this.elSettingsLiveDeepening) this.elSettingsLiveDeepening.checked = this.engineSettings.liveDeepening !== false;
 	    if (this.elSettingsForcedDepth) this.elSettingsForcedDepth.value = String(this.engineSettings.forcedDepth || 16);
 	    this._syncForcedDepthVisibility();
-	    // Wire the toggle so the forced-depth row shows/hides live.
+	    this._syncAdvancedEngineVisibility();
+	    // Wire the toggles so dependent rows show/hide live.
 	    if (this.elSettingsLiveDeepening && !this.elSettingsLiveDeepening.dataset.bound) {
 	      this.elSettingsLiveDeepening.addEventListener('change', () => this._syncForcedDepthVisibility());
 	      this.elSettingsLiveDeepening.dataset.bound = '1';
 	    }
+	    if (this.elSettingsAdvancedToggle && !this.elSettingsAdvancedToggle.dataset.bound) {
+	      this.elSettingsAdvancedToggle.addEventListener('change', () => this._syncAdvancedEngineVisibility());
+	      this.elSettingsAdvancedToggle.dataset.bound = '1';
+	    }
 	    this._populateEngineModules();
 	  }
+
+  // Show the advanced depth/time fields only when "Advanced" is enabled.
+  _syncAdvancedEngineVisibility() {
+    if (!this.elSettingsAdvancedEngine) return;
+    const advanced = this.elSettingsAdvancedToggle ? this.elSettingsAdvancedToggle.checked : false;
+    this.elSettingsAdvancedEngine.hidden = !advanced;
+  }
 
   // Show the "Forced Depth" row only when live deepening is OFF.
   _syncForcedDepthVisibility() {
@@ -517,12 +604,41 @@ class ChessReviewApp {
   }
 
 	  _getReviewProfile() {
-	    // Prefer the /settings page depth profile (depth10/14/18/22/26); fall
-	    // back to the legacy `strength` key for backward compatibility.
-	    const profileKey = this.engineSettings.depthProfile || this.engineSettings.strength || 'depth14';
-	    const profile = { ...getReviewProfileConfig(profileKey) };
-	    profile.timeoutMs = Math.max(1000, Number(this.engineSettings.maxTimeMs) || profile.timeoutMs);
-	    return profile;
+	    // Primary control: review strength tier (Quick/Standard/Thorough), each a
+	    // (depth, time cap) pair. Advanced users can pin a custom depth and/or
+	    // custom per-move time that override the tier. Depth guarantees cross-move
+	    // consistency; the time cap bounds worst-case latency. Drives full reviews
+	    // + server analysis + anticheat only (live/coach deepening uses
+	    // REVIEW_PROFILES via _getAnalysisDepthLadder and is NOT capped here).
+	    const tiers = (window.REVIEW_STRENGTH_TIERS || REVIEW_STRENGTH_TIERS);
+	    const resolveTier = window.getReviewStrengthTier || getReviewStrengthTier;
+	    const tier = resolveTier(this.engineSettings.reviewStrength || 'standard');
+	    const advanced = this.engineSettings.advancedEngine === true;
+	    const clampDepth = (d) => Math.max(8, Math.min(Number(d) || tier.depth, 26));
+	    const clampTime = (t) => Math.max(500, Math.min(Number(t) || tier.timeoutMs, 30000));
+	    const depth = advanced && this.engineSettings.customDepth
+	      ? clampDepth(this.engineSettings.customDepth)
+	      : tier.depth;
+	    // The per-move time cap is overridable from two places: the /settings
+	    // Advanced mode (advancedEngine + customTimeMs) and the in-review
+	    // "Maximum Time" dropdown (maxTimeOverride + customTimeMs). Depth is NOT
+	    // affected by the in-review dropdown — only Advanced mode overrides
+	    // depth — so toggling max time from a review can't silently change the
+	    // search depth. maxTimeOverride is set ONLY by the in-review dropdown, so
+	    // users who never touched it keep the tier's default time cap.
+	    const overrideTime = (advanced || this.engineSettings.maxTimeOverride === true)
+	      && this.engineSettings.customTimeMs;
+	    const timeoutMs = overrideTime
+	      ? clampTime(this.engineSettings.customTimeMs)
+	      : tier.timeoutMs;
+	    return {
+	      key: tier.key,
+	      label: tier.label,
+	      depth,
+	      multiPv: tier.multiPv,
+	      timeoutMs,
+	      battleDepth: Math.max(8, depth - 2),
+	    };
 	  }
 
 		  _showPopup(options = {}) {
@@ -575,36 +691,45 @@ class ChessReviewApp {
 
 		  _recordSiteVisit() {
 		    if (sessionStorage.getItem('sidastuff.visitRecorded')) return;
-		    fetch('/api/site/visit', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+		    apiFetch('/api/site/visit', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
 		    sessionStorage.setItem('sidastuff.visitRecorded', '1');
 		  }
 
 		
 
   _saveEngineSettings() {
-    // The /settings page engine form is the source of truth: module (lite/full),
-    // depth profile (depth10/14/18/22/26), and per-move timeout. analysisLocation
-    // and serverStrongReview come from their own (in-review) controls.
-    const previousModule = this.engineSettings.module;
+    // The /settings page engine form is the source of truth: engine module,
+    // review strength tier (Quick/Standard/Thorough) OR advanced custom depth +
+    // per-move time. analysisLocation and serverStrongReview come from their own
+    // (in-review) controls.
     const module = (this.elSettingsEngineModule?.value || this.engineSettings.module || 'lite-single');
-    const depthProfile = (this.elSettingsEngineDepth?.value || this.engineSettings.depthProfile || 'depth14');
-    const maxTimeMs = Math.max(2000, Math.min(Number(this.elSettingsEngineTimeout?.value) || this.engineSettings.maxTimeMs, 60000));
+    const reviewStrength = (this.elSettingsReviewStrength?.value || this.engineSettings.reviewStrength || 'standard');
+    const advancedEngine = this.elSettingsAdvancedToggle ? this.elSettingsAdvancedToggle.checked : (this.engineSettings.advancedEngine === true);
+    const customDepth = Math.max(8, Math.min(Number(this.elSettingsEngineDepth?.value) || 16, 26));
+    const customTimeMs = Math.max(500, Math.min(Number(this.elSettingsEngineTimeout?.value) || 8000, 30000));
     const liveDeepening = this.elSettingsLiveDeepening ? this.elSettingsLiveDeepening.checked : (this.engineSettings.liveDeepening !== false);
     const forcedDepth = Math.max(8, Math.min(Number(this.elSettingsForcedDepth?.value) || 16, 30));
+    // Map the strength tier onto a legacy `strength` profile key so the live/
+    // coach deepening ladder (_getAnalysisDepthLadder, which reads REVIEW_PROFILES)
+    // still resolves a sensible base rung.
+    const strengthForLive = { quick: 'depth10', standard: 'depth14', thorough: 'depth18' }[reviewStrength] || 'depth14';
     const settings = {
       source: this.engineSettings.source,
       module,
-      depthProfile,
-      // Keep `strength` in sync so any legacy code path still resolves a profile.
-      strength: depthProfile,
+      reviewStrength,
+      advancedEngine,
+      customDepth,
+      customTimeMs,
+      // Legacy keys kept for back-compat (live-deepening ladder reads `strength`).
+      strength: strengthForLive,
+      depthProfile: strengthForLive,
       liveDeepening,
       forcedDepth,
-      maxTimeMs,
       analysisLocation: this.elAnalysisLocation?.value || this.engineSettings.analysisLocation,
       serverStrongReview: this.elServerStrongReview?.checked ?? this.engineSettings.serverStrongReview,
     };
-    localStorage.setItem('sidastuff.engineSettings', JSON.stringify(settings));
     this.engineSettings = { ...this.engineSettings, ...settings };
+    this._persistEngineSettings();
     if (this.elEngineSettingsStatus) {
       this.elEngineSettingsStatus.textContent = 'Engine settings saved!';
       this.elEngineSettingsStatus.className = 'account-status success';
@@ -626,9 +751,13 @@ class ChessReviewApp {
 
   _saveAppearanceSettings() {
     // Save appearance settings to localStorage
+    const boardTheme = document.querySelector('input[name="settings-board-theme"]:checked')?.value
+      || this.elBoardTheme?.value || 'classic';
+    const pieceTheme = document.querySelector('input[name="settings-piece-theme"]:checked')?.value
+      || this.elPieceTheme?.value || 'classic';
     const settings = {
-      boardTheme: this.elBoardTheme?.value || 'classic',
-      pieceTheme: this.elPieceTheme?.value || 'classic',
+      boardTheme,
+      pieceTheme,
       arrowColor: this.elArrowColor?.value || '#d88a1d',
       highlightColor: this.elHighlightColor?.value || '#d22626',
       pieceAnimations: this.elPieceAnimations?.checked || false
@@ -643,7 +772,7 @@ class ChessReviewApp {
   }
 
   // Populate the settings-page appearance form with the values currently
-  // saved in localStorage so the dropdowns/colors reflect what's applied
+  // saved in localStorage so the radio chips / colors reflect what's applied
   // (previously the form always showed the HTML defaults).
   _loadAppearanceSettingsIntoUi() {
     let saved = {};
@@ -651,8 +780,14 @@ class ChessReviewApp {
       const raw = localStorage.getItem('sidastuff.appearanceSettings');
       saved = raw ? JSON.parse(raw) : {};
     } catch (_) { saved = {}; }
-    if (this.elBoardTheme && saved.boardTheme) this.elBoardTheme.value = saved.boardTheme;
-    if (this.elPieceTheme && saved.pieceTheme) this.elPieceTheme.value = saved.pieceTheme;
+    // Radios: set `checked` on the matching chip.
+    const checkRadio = (name, value) => {
+      if (!value) return;
+      const el = document.querySelector(`input[name="${name}"][value="${value}"]`);
+      if (el) el.checked = true;
+    };
+    checkRadio('settings-board-theme', saved.boardTheme);
+    checkRadio('settings-piece-theme', saved.pieceTheme);
     if (this.elArrowColor && saved.arrowColor) this.elArrowColor.value = saved.arrowColor;
     if (this.elHighlightColor && saved.highlightColor) this.elHighlightColor.value = saved.highlightColor;
     if (this.elPieceAnimations && typeof saved.pieceAnimations === 'boolean') {
@@ -801,7 +936,8 @@ class ChessReviewApp {
 		      '/account': '/account',
 		      '/settings': '/settings',
 		      '/auth': '/auth',
-		      '/boost': '/boost',
+		      '/boost': '/plans',
+		      '/plans': '/plans',
 		      '/review': '/review',
 	      '/coach': '/coach',
 	      '/puzzles': '/puzzles',
@@ -822,7 +958,9 @@ class ChessReviewApp {
 		    const route = this._normalizeRoute(path || '/index');
 		    const target = this._routeUrl(route);
 		    const current = this._normalizeRoute(window.location.pathname || '/index');
-		    const passOpts = { skipHistory: true, disableRestore: options.disableRestore };
+		    // Forward skipImport so callers (the coach's game_review tool) can
+		    // suppress the "Import Games" popup when loading a PGN directly.
+		    const passOpts = { skipHistory: true, disableRestore: options.disableRestore, skipImport: options.skipImport };
 		    if (current === route) {
 		      this._applyRoute(route, passOpts);
 		      return;
@@ -853,7 +991,7 @@ _installLinkInterceptor() {
 			  const route = this._normalizeRoute(url.pathname);
 			  const knownRoutes = [
 			    '/index', '/login', '/signup', '/account', '/settings', '/auth',
-			    '/boost', '/review', '/coach', '/puzzles', '/anticheat',
+			    '/plans', '/boost', '/review', '/coach', '/puzzles', '/anticheat',
 			    '/privacy', '/terms', '/contact',
 			  ];
 			  if (!knownRoutes.includes(route) && !route.startsWith('/profile/')) return;
@@ -868,6 +1006,7 @@ _installLinkInterceptor() {
 		    if (this.elAccountPage) this.elAccountPage.hidden = true;
 		    if (this.elSettingsPage) this.elSettingsPage.hidden = true;
 		    if (this.elBoostPagePanel) this.elBoostPagePanel.hidden = true;
+		    if (this.elCoachPage) this.elCoachPage.hidden = true;
 		    if (this.elAuthPagePanel) this.elAuthPagePanel.hidden = true;
 if (this.elPrivacyPage) this.elPrivacyPage.hidden = true;
 if (this.elProfilePage) this.elProfilePage.hidden = true;
@@ -928,6 +1067,9 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    } else if (name === 'boost' && this.elBoostPagePanel) {
 		      this.elBoostPagePanel.hidden = false;
 		      this._bindSpaBoostPageEvents();
+		    } else if (name === 'coach' && this.elCoachPage) {
+		      this.elCoachPage.hidden = false;
+		      if (this.coachChat.active) this._renderCoachGate();
 		    } else if (name === 'auth' && this.elAuthPagePanel) {
 		      this.elAuthPagePanel.hidden = false;
 		      this._bindSpaAuthPageEvents();
@@ -947,24 +1089,38 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		  }
 
 	  // ── Onboarding wizard (multi-step signup) ─────────────────────────
-	  // 3 steps: appearance → skill & coach → email/password. The progress bar
-	  // starts at 33% (step 1) so the user already feels underway — research
-	  // shows a head-start measurably boosts completion.
+	  // 3 steps: appearance → skill → email/password. The progress bar starts
+	  // visibly underway (40% on step 1, 70% on step 2) so the user feels they've
+	  // already begun — research shows a head-start measurably boosts completion.
 	  _initOnboarding() {
 	    // Reset to step 1 whenever the signup route is (re)shown.
 	    this.onboardingStep = 1;
 	    this._setOnboardingStep(1);
 
 	    // Live preview: apply the chosen theme immediately so the preview board
-	    // updates and the board theme takes effect the moment it's picked.
+	    // updates and the board theme takes effect the moment a chip is picked.
 	    const applyLive = () => {
 	      const settings = this._onboardingAppearance();
 	      try { localStorage.setItem('sidastuff.appearanceSettings', JSON.stringify(settings)); } catch (_) {}
 	      this._applyAppearanceSettings(settings);
 	      this._renderBoardPreview('onboard-board-preview');
 	    };
-	    this.elOnboardBoardTheme?.addEventListener('change', applyLive);
-	    this.elOnboardPieceTheme?.addEventListener('change', applyLive);
+	    // Re-resolve the cached "currently checked" radios on every change so
+	    // _onboardingAppearance() always reads the freshly-picked value.
+	    const refreshRefs = () => {
+	      this.elOnboardBoardTheme = document.querySelector('input[name="onboard-board-theme"]:checked');
+	      this.elOnboardPieceTheme = document.querySelector('input[name="onboard-piece-theme"]:checked');
+	    };
+	    const onBoardChange = (e) => { refreshRefs(); applyLive(); };
+	    document.querySelectorAll('input[name="onboard-board-theme"]').forEach((el) => el.addEventListener('change', onBoardChange));
+	    document.querySelectorAll('input[name="onboard-piece-theme"]').forEach((el) => el.addEventListener('change', onBoardChange));
+
+	    // Skill chip — live-update puzzleMode.rating so the live preview / state mirrors the choice.
+	    document.querySelectorAll('input[name="onboard-skill"]').forEach((el) => el.addEventListener('change', () => {
+	      this.elOnboardSkill = document.querySelector('input[name="onboard-skill"]:checked');
+	      const elo = parseInt(this.elOnboardSkill?.value, 10);
+	      if (Number.isFinite(elo)) this.puzzleMode.rating = elo;
+	    }));
 
 	    document.getElementById('btn-onboard-next-1')?.addEventListener('click', () => this._setOnboardingStep(2));
 	    document.getElementById('btn-onboard-next-2')?.addEventListener('click', () => this._setOnboardingStep(3));
@@ -979,9 +1135,11 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	  }
 
 	  _onboardingAppearance() {
+	    const checkedBoard = document.querySelector('input[name="onboard-board-theme"]:checked');
+	    const checkedPiece = document.querySelector('input[name="onboard-piece-theme"]:checked');
 	    return {
-	      boardTheme: this.elOnboardBoardTheme?.value || 'classic',
-	      pieceTheme: this.elOnboardPieceTheme?.value || 'classic',
+	      boardTheme: checkedBoard?.value || this.elOnboardBoardTheme?.value || 'classic',
+	      pieceTheme: checkedPiece?.value || this.elOnboardPieceTheme?.value || 'classic',
 	      arrowColor: '#d88a1d',
 	      highlightColor: '#d22626',
 	      pieceAnimations: true,
@@ -992,7 +1150,8 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    this.onboardingStep = n;
 	    const steps = this.elOnboardSteps || [];
 	    steps.forEach((el, idx) => { if (el) el.hidden = (idx + 1) !== n; });
-	    const pct = n === 1 ? 33 : n === 2 ? 66 : 100;
+	    // Step 1 paints 40% (visibly underway), step 2 paints 70%, step 3 = done.
+	    const pct = n === 1 ? 40 : n === 2 ? 70 : 100;
 	    if (this.elOnboardProgressFill) this.elOnboardProgressFill.style.width = `${pct}%`;
 	    if (this.elOnboardStepLabel) this.elOnboardStepLabel.textContent = `Step ${n} of 3`;
 	    // Focus the first input of the newly shown step for keyboard users.
@@ -1013,22 +1172,14 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    // Skill → starting puzzle ELO. _handleEmailAuth's signup payload reads
 	    // this.puzzleMode.rating, so seeding it here flows the chosen ELO into
 	    // the new profile.
-	    const skillElo = parseInt(this.elOnboardSkill?.value, 10);
+	    const checkedSkill = document.querySelector('input[name="onboard-skill"]:checked');
+	    const skillElo = parseInt(checkedSkill?.value, 10);
 	    if (Number.isFinite(skillElo)) this.puzzleMode.rating = skillElo;
 
-	    // Coach profile defaults for the next /coach session + persisted server-side.
-	    const coachElo = parseInt(this.elOnboardCoachDifficulty?.value, 10);
-	    const humanColor = this.elOnboardCoachColor?.value === 'b' ? 'b' : 'w';
-	    if (Number.isFinite(coachElo)) {
-	      this.coachMode.elo = coachElo;
-	      this.coachMode.humanColor = humanColor;
-	      this.coachMode.aiAdjust = true;
-	      this.coachMode.adjustStyle = 'better';
-	    }
-	    // Surface coach defaults into the coach-card inputs so the very first
-	    // /coach session reflects them.
-	    if (this.elCoachElo && Number.isFinite(coachElo)) this.elCoachElo.value = String(coachElo);
-	    if (this.elCoachColor) this.elCoachColor.value = humanColor;
+	    // Coach difficulty + Play-as no longer live in onboarding. The live
+	    // /coach popup collects them per-session; we leave coachMode defaults
+	    // (elo=1200, humanColor='w', aiAdjust=true, adjustStyle='better')
+	    // untouched so the popup's prefill matches a fresh user.
 	  }
 
 	  // A returning user who signed in without completing onboarding finishes it
@@ -1059,7 +1210,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	  }
 
 	  _isInAppPage(route) {
-		    return ['/login', '/signup', '/account', '/settings', '/boost', '/auth', '/404', '/incompatible-browser'].includes(route);
+		    return ['/login', '/signup', '/account', '/settings', '/plans', '/boost', '/auth', '/404', '/incompatible-browser'].includes(route);
 		  }
 
   // IKEA effect + onboarding-not-at-0%: when a guest arrives at signup from the
@@ -1089,7 +1240,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    show('profile-loading', true); show('profile-not-found', false); show('profile-content', false);
 	    if (!username) { show('profile-loading', false); show('profile-not-found', true); return; }
 	    try {
-	      const resp = await fetch(`/api/profile/${encodeURIComponent(username)}`, { cache: 'no-store' });
+	      const resp = await apiFetch(`/api/profile/${encodeURIComponent(username)}`, { cache: 'no-store' });
 	      if (!resp.ok) { show('profile-loading', false); show('profile-not-found', true); return; }
 	      const data = await resp.json();
 	      this._renderPublicProfile(data.profile || {});
@@ -1152,6 +1303,8 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	  }
 
 	  _planBadgeLabel(plan) {
+	    // Tier product names: the paid tier is "Boost" (the nav/page is "Plans",
+	    // but the badge labels the tier itself, so it must say Boost).
 	    return plan === 'boost' ? 'Boost' : plan === 'max' ? 'Max' : 'Free';
 	  }
 
@@ -1181,7 +1334,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    if (!message || message.length < 5) { set('Please write a short message.', 'error'); return; }
 	    set('Sending…', '');
 	    try {
-	      const res = await fetch('/api/contact', {
+	      const res = await apiFetch('/api/contact', {
 	        method: 'POST', headers: { 'Content-Type': 'application/json' },
 	        body: JSON.stringify({ email, reason, message }),
 	      });
@@ -1270,7 +1423,9 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    if (usernameInput && document.activeElement !== usernameInput) {
 		      usernameInput.value = profile.username || '';
 		    }
-		    if (this.elSpaAccountBoostCta) this.elSpaAccountBoostCta.style.display = plan.plan === 'free' ? 'block' : 'none';
+		    // Apply the 7-day username-change cooldown (disable Save, show remaining).
+		    this._syncAccountUsernameCooldown();
+		    if (this.elSpaAccountBoostCta) this.elSpaAccountBoostCta.style.display = this._isPaidOrAbove('boost') ? 'none' : 'block';
 		    // Admin controls reuse the same IDs as the account modal (admin-boost-panel etc.).
 		    this._syncAdminControlsVisibility();
 		  }
@@ -1291,10 +1446,18 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    // Anticheat games: Free none; Boost X/25; Max X/100 (weekly).
 	    const acLimit = limits.anticheatGamesPerWeek;
 	    if (plan.plan === 'free' || !acLimit) {
-	      bars.push(this._usageBarHtml('Anticheat games', 'Boost feature', 0, 0, 'week', { upgrade: true }));
+	      bars.push(this._usageBarHtml('Anticheat games', 'Plans feature', 0, 0, 'week', { upgrade: true }));
 	    } else {
 	      const used = Math.max(0, Number(usage.anticheatGames) || 0);
 	      bars.push(this._usageBarHtml('Anticheat games', `${used} / ${acLimit}`, used, acLimit, 'week'));
+	    }
+	    // Coach tokens (AI chat): Free 5k / Boost 20k / Max 100k per day.
+	    const ctLimit = Number(usage.coachTokenLimit) || Number(limits.coachTokensPerDay) || 0;
+	    if (!ctLimit) {
+	      bars.push(this._usageBarHtml('Coach tokens', 'Unavailable', 0, 0, 'day', { upgrade: true }));
+	    } else {
+	      const ctUsed = Math.max(0, Number(usage.coachTokens) || 0);
+	      bars.push(this._usageBarHtml('Coach tokens', `${ctUsed.toLocaleString()} / ${ctLimit.toLocaleString()}`, ctUsed, ctLimit, 'day'));
 	    }
 	    host.innerHTML = bars.join('');
 	  }
@@ -1305,7 +1468,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	      : Math.max(0, Math.min(100, Math.round((used / limit) * 100)));
 	    const tone = pct >= 100 ? 'full' : pct >= 75 ? 'high' : 'ok';
 	    const note = opts.upgrade
-	      ? `<a class="usage-bar-upgrade" href="/boost" data-route="/boost">Upgrade</a>`
+	      ? `<a class="usage-bar-upgrade" href="/plans" data-route="/plans">Upgrade</a>`
 	      : `resets ${period === 'week' ? 'Monday' : 'in ~24h'}`;
 	    return `<div class="usage-bar">
 	      <div class="usage-bar-top"><span>${this._escapeHtml(label)}</span><strong>${this._escapeHtml(String(summary))}</strong></div>
@@ -1500,7 +1663,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    if (!email) { set('Enter an email.', 'error'); return; }
 	    set(`Gifting ${plan}…`, '');
 	    try {
-	      const res = await fetch('/api/admin/gift-boost', {
+	      const res = await apiFetch('/api/admin/gift-boost', {
 	        method: 'POST', headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
 	        body: JSON.stringify({ email, days, plan }),
 	      });
@@ -1518,7 +1681,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    if (!window.confirm(`Remove subscription for ${email}?`)) return;
 	    set('Removing…', '');
 	    try {
-	      const res = await fetch('/api/admin/remove-subscription', {
+	      const res = await apiFetch('/api/admin/remove-subscription', {
 	        method: 'POST', headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
 	        body: JSON.stringify({ email }),
 	      });
@@ -1534,7 +1697,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    if (!email) return;
 	    if (ban && !reason) { window.alert('Reason required to ban.'); return; }
 	    try {
-	      await fetch('/api/admin/ban-user', {
+	      await apiFetch('/api/admin/ban-user', {
 	        method: 'POST', headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
 	        body: JSON.stringify({ action: ban ? 'ban' : 'unban', email, reason }),
 	      });
@@ -1546,7 +1709,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    if (!list) return;
 	    list.innerHTML = '<p class="account-status">Loading…</p>';
 	    try {
-	      const res = await fetch('/api/admin/support', { headers: await this._authHeaders({}) });
+	      const res = await apiFetch('/api/admin/support', { headers: await this._authHeaders({}) });
 	      const data = await res.json().catch(() => ({}));
 	      const messages = Array.isArray(data.messages) ? data.messages : [];
 	      if (!messages.length) { list.innerHTML = '<p class="account-status">No messages yet.</p>'; return; }
@@ -1566,7 +1729,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	  async _deleteAdminSupport(id) {
 	    if (!id || !window.confirm('Delete this message?')) return;
 	    try {
-	      await fetch('/api/admin/support/delete', {
+	      await apiFetch('/api/admin/support/delete', {
 	        method: 'POST', headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
 	        body: JSON.stringify({ id }),
 	      });
@@ -1589,13 +1752,40 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    }
 	    set('Saving…', '');
 	    try {
-	      await this._saveUserProfile({ ...this.authState.profile, username: raw });
+	      await this._saveUserProfile({ ...this.authState.profile, username: raw }, { rethrow: true });
 	      set('Username saved — your profile is live.', 'success');
 	      this._setAccountProfileLink(raw);
-	    } catch (_err) {
-	      set('Could not save username. It may be taken — try another.', 'error');
+	      this._syncAccountUsernameCooldown();
+	    } catch (err) {
+	      if (err?.code === 'username_cooldown') {
+	        set(err.message || 'You can change your username again later.', 'error');
+	      } else {
+	        set('Could not save username. It may be taken — try another.', 'error');
+	      }
 	    }
 	  }
+
+  // Disable the username Save button and show remaining time while the 7-day
+  // change cooldown is active (server-enforced). First-ever username set has no
+  // cooldown (canChangeAt is null). Re-evaluated whenever the account page
+  // renders or a username save resolves.
+  _syncAccountUsernameCooldown() {
+    // HTML uses `spa-btn-save-username`; alias the old id for safety.
+    const saveBtn = document.getElementById('spa-btn-save-username')
+      || document.getElementById('spa-account-username-save');
+    const status = document.getElementById('spa-account-username-status');
+    const cooldown = this.authState.usernameCooldown || {};
+    const now = Date.now();
+    const canChangeAt = Number(cooldown.canChangeAt) || 0;
+    const onCooldown = canChangeAt && canChangeAt > now;
+    if (saveBtn) saveBtn.disabled = onCooldown;
+    if (onCooldown && status) {
+      const daysLeft = Math.max(1, Math.ceil((canChangeAt - now) / (24 * 60 * 60 * 1000)));
+      status.textContent = `You can change your username again in ${daysLeft} day${daysLeft === 1 ? '' : 's'}.`;
+      status.className = 'account-status error';
+    }
+    return onCooldown;
+  }
 
 
 	
@@ -1629,8 +1819,9 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      const el = document.getElementById(id);
 		      if (el) el.hidden = !isAdmin;
 		    });
-		    // Auto-load support messages when the admin lands on the account page.
-		    if (isAdmin) this._loadAdminSupport();
+		    // Support messages are NOT auto-loaded — the list would refetch on
+		    // every auth tick / re-render (this method runs frequently), spamming
+		    // the server. The admin loads them on demand with the Refresh button.
 		  }
 
 		  _syncSettingsPage() {
@@ -1678,9 +1869,32 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		  _injectClearSavedGamesButton() {
 		    // The Clear Saved Games button now lives in Settings, not the header.
 		    const btn = document.getElementById('btn-clear-saved-games');
-		    if (!btn || btn.dataset.bound) return;
-		    btn.addEventListener('click', () => this._clearSavedGames());
-		    btn.dataset.bound = '1';
+		    if (btn && !btn.dataset.bound) {
+		      btn.addEventListener('click', () => this._clearSavedGames());
+		      btn.dataset.bound = '1';
+		    }
+		    // Clear saved coach chats (localStorage keys per-uid).
+		    const chatBtn = document.getElementById('btn-clear-coach-chats');
+		    if (chatBtn && !chatBtn.dataset.bound) {
+		      chatBtn.addEventListener('click', () => {
+		        // Remove all sidastuff.coachChats.* + sidastuff.coachActiveChat.* keys.
+		        try {
+		          const keys = [];
+		          for (let i = 0; i < localStorage.length; i++) {
+		            const k = localStorage.key(i);
+		            if (k && (k.startsWith('sidastuff.coachChats.') || k.startsWith('sidastuff.coachActiveChat.'))) keys.push(k);
+		          }
+		          keys.forEach((k) => localStorage.removeItem(k));
+		        } catch (_) {}
+		        // Reset the in-memory chat state + re-render.
+		        if (window.CoachChat && this.coachChat?.active) {
+		          window.CoachChat.mount(this); // re-mounts → loadForUid → createChat (fresh)
+		        }
+		        const status = document.getElementById('page-status');
+		        if (status) { status.textContent = 'Coach chats cleared.'; status.className = 'account-status success'; }
+		      });
+		      chatBtn.dataset.bound = '1';
+		    }
 		  }
 
 		  async _handlePageEmailAuth(mode) {
@@ -1802,10 +2016,10 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      return;
 		    }
 
-		    if (route === '/boost') {
+		    if (route === '/plans' || route === '/boost') {
 		      this._enterInAppLayout();
 		      this._showRoutePage('boost');
-		      document.title = 'Boost | SiDaStuff Chess';
+		      document.title = 'Plans | SiDaStuff Chess';
 		      if (window.SidaBoost?.render) window.SidaBoost.render();
 		      this._updateNavActiveState();
 		      return;
@@ -1833,18 +2047,9 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 
 			    if (route === '/coach') {
 			      this._hideRoutePages();
-				      this._hideSettingsModal();
-				      this._hideAccountModal();
-				      if (!options.disableRestore) {
-				        const savedCoach = this._loadSavedGameState('coach');
-				        if (savedCoach) {
-				          this._promptSavedGameRestore('coach', savedCoach);
-				          document.title = 'Coach | SiDaStuff Chess';
-				          this._updateNavActiveState();
-				          return;
-				        }
-				      }
-			        this._showEngineChoiceModal('coach');
+			      this._hideSettingsModal();
+			      this._hideAccountModal();
+			      this._enterCoachChat();
 		      document.title = 'Coach | SiDaStuff Chess';
 		      this._updateNavActiveState();
 		      return;
@@ -1863,7 +2068,10 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 			          return;
 			        }
 			      }
-		      this._showEngineChoiceModal('import');
+		      // When the coach's game_review tool loads a PGN, it passes skipImport
+		      // so the PGN import modal doesn't appear on top of the loaded game.
+		      if (!options.skipImport) this._showEngineChoiceModal('import');
+		      else this._enterReviewMode();
 		      document.title = 'Review | SiDaStuff Chess';
 		      this._updateNavActiveState();
 		      return;
@@ -1915,7 +2123,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
     if (typeof route === 'string' && route.startsWith('/profile/')) return true;
     return [
       '/index', '/', '/login', '/signup', '/account', '/settings', '/auth',
-      '/boost', '/review', '/coach', '/puzzles', '/anticheat', '/404',
+      '/plans', '/boost', '/review', '/coach', '/puzzles', '/anticheat', '/404',
       '/incompatible-browser', '/privacy', '/terms', '/contact',
     ].includes(route);
   }
@@ -2030,6 +2238,9 @@ return window.firebase;
               // whose authState.user was still null at render time).
               this._refreshInsightsForAuth();
               this._maybeShowReviewSaveCta();
+              // Coach chat: re-evaluate the Max gate after auth resolves (src/coach-chat.js
+              // owns model pref + history hydration on mount).
+              if (this.coachChat.active && window.CoachChat) window.CoachChat.onAuth(this);
               // Part 1c: a signed-in user who hasn't completed onboarding is
               // sent to the wizard — but never mid-session (don't yank them out
               // of an active review/coach/puzzle/anticheat run).
@@ -2068,7 +2279,7 @@ return window.firebase;
 			  async _lookupBanReason(email) {
 			    if (!email) return '';
 			    try {
-			      const response = await fetch('/api/auth/ban-status', {
+			      const response = await apiFetch('/api/auth/ban-status', {
 			        method: 'POST',
 			        headers: { 'Content-Type': 'application/json' },
 			        cache: 'no-store',
@@ -2094,7 +2305,7 @@ return window.firebase;
 			    try {
 		      const controller = new AbortController();
 		      timeout = setTimeout(() => controller.abort(), 10000);
-			      const response = await fetch('/api/users/me', {
+			      const response = await apiFetch('/api/users/me', {
 			        headers: await this._authHeaders(),
 			        cache: 'no-store',
 			        signal: controller.signal,
@@ -2113,6 +2324,7 @@ return window.firebase;
 		      this.authState.usage = me.usage || {};
 		      this.authState.limits = me.limits || {};
 		      this.authState.isAdmin = !!me.isAdmin;
+		      this.authState.usernameCooldown = me.usernameCooldown || null;
 		      const profile = me.profile || {};
 		      const hasServerProfile = Object.keys(profile).length > 0;
 		      const localProfile = hasServerProfile ? null : this._localPuzzleProfile();
@@ -2154,7 +2366,7 @@ return window.firebase;
 			  async _refreshMe() {
 			    const user = this.authState.user;
 			    if (!user) return null;
-			    const response = await fetch('/api/users/me', {
+			    const response = await apiFetch('/api/users/me', {
 			      headers: await this._authHeaders(),
 			      cache: 'no-store',
 			    });
@@ -2172,6 +2384,7 @@ return window.firebase;
 		    this.authState.usage = me.usage || {};
 		    this.authState.limits = me.limits || {};
 		    this.authState.isAdmin = !!me.isAdmin;
+		    this.authState.usernameCooldown = me.usernameCooldown || null;
 		    this._applyProfileToPuzzleMode(this.authState.profile);
 		    this._syncAccountUi();
 		    this._syncPuzzlePanel();
@@ -2240,6 +2453,31 @@ return window.firebase;
 	    return false;
 	  }
 
+  // Client-side tier gating. Max ranks above Boost so Max inherits every Boost
+  // perk; feature gates must use _isPaidOrAbove('boost'), NOT an exact
+  // `plan === 'boost'` equality (which wrongly excludes Max). Mirrors the
+  // server-side isPaidOrAbove() in user-service.js.
+  _planRank(plan) {
+    return { free: 0, boost: 1, max: 2 }[String(plan || '').toLowerCase()] ?? 0;
+  }
+  _isPaidOrAbove(floor) {
+    return this._planRank(this.authState.plan?.plan) >= this._planRank(floor);
+  }
+
+  // Single source of truth for upsell-gate visibility. Auth is resolved
+  // client-side by Firebase onAuthStateChanged, which is async — a returning
+  // signed-in user has authState.user === null until the callback fires. Gates
+  // must stay HIDDEN while auth is 'resolving' so a logged-in user never sees a
+  // "create an account" prompt. Returns:
+  //   'resolving' — authState not yet resolved (hide the gate AND locked content)
+  //   'signedIn'  — hide all upsell gates
+  //   'guest'     — show upsell gates (subject to dismissal)
+  _authGateState() {
+    return this.authState.initialized === false || this.authState.initialized === undefined
+      ? 'resolving'
+      : (this.authState.user ? 'signedIn' : 'guest');
+  }
+
 		  async _refreshUsageBeforeAction() {
 		    if (!this.authState.user) return;
 		    try {
@@ -2258,7 +2496,7 @@ return window.firebase;
 	    // Free anticheat: it's not a limit reached — it's not included at all.
 	    const freeNoAnticheat = kind === 'anticheat' && (plan === 'free' || !limit);
 	    const title = freeNoAnticheat
-	      ? 'Anticheat is a Boost feature'
+	      ? 'Anticheat is a Plans feature'
 	      : isReview
 	        ? `You've used ${used} of ${limit} free server reviews today`
 	        : `You've used ${used} of ${limit} anticheat games this week`;
@@ -2278,8 +2516,8 @@ return window.firebase;
 	      cancelButtonText: 'Cancel',
 	    });
 	    if (result.isDenied) {
-	      this._navigateTo('/boost');
-	      return 'boost';
+	      this._navigateTo('/plans');
+	      return 'plans';
 	    }
 	    return isReview && result.isConfirmed ? 'browser' : 'cancel';
 	  }
@@ -2316,7 +2554,7 @@ return window.firebase;
 	  // full profile triggered patchProfile "blocked forbidden key" warnings.
 	  _PROFILE_PATCH_KEYS = ['username', 'puzzleRating', 'puzzleStats', 'savedUsernames', 'appearanceSettings', 'engineSettings', 'coachMode', 'puzzleMode', 'onboardingComplete'];
 
-	  async _saveUserProfile(profile = this.authState.profile) {
+	  async _saveUserProfile(profile = this.authState.profile, { rethrow = false } = {}) {
 	    const user = this.authState.user;
 	    if (!user || !profile) return;
 	    // Keep a rich local copy (includes uid/email/subscription for the UI)…
@@ -2332,7 +2570,7 @@ return window.firebase;
 	      if (profile[key] !== undefined) patch[key] = profile[key];
 	    }
 	    try {
-	      const response = await fetch('/api/users/me', {
+	      const response = await apiFetch('/api/users/me', {
 	        method: 'POST',
 	        headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
 	        cache: 'no-store',
@@ -2340,12 +2578,16 @@ return window.firebase;
 	      });
 	      if (!response.ok) {
 	        const result = await response.json().catch(() => null);
-	        throw new Error(result?.error || `Profile save failed with ${response.status}`);
+	        const err = new Error(result?.error || `Profile save failed with ${response.status}`);
+	        if (result?.code) err.code = result.code;
+	        if (typeof result?.cooldownDays === 'number') err.cooldownDays = result.cooldownDays;
+	        throw err;
 	      }
 	      const data = await response.json().catch(() => null);
 	      if (data?.profile) this.authState.profile = { ...this.authState.profile, ...data.profile };
 	      if (data?.me) this.authState.me = data;
-	    } catch (_err) {
+	    } catch (err) {
+	      if (rethrow) throw err;
 	      // Auth remains useful even if profile sync fails temporarily.
 	    }
 	  }
@@ -2708,14 +2950,17 @@ _syncAccountUi() {
 		    if (this.elAccountPlan) {
 		      const expires = plan.expiresAt ? ` until ${new Date(plan.expiresAt).toLocaleDateString()}` : '';
 		      this.elAccountPlan.textContent = `${plan.name || 'Free'}${expires}`;
-		      this.elAccountPlan.classList.toggle('boost-plan', plan.plan === 'boost');
+		      // Style the badge for ANY paid plan (Boost OR Max). Exact equality
+		      // would skip Max — Max users would see a Free-styled badge while
+		      // being charged the same as Boost. Use the tier rank helper.
+		      this.elAccountPlan.classList.toggle('boost-plan', this._isPaidOrAbove('boost'));
 		    }
 		    if (this.elAccountUsage) {
 		      if (plan.plan === 'boost' || plan.plan === 'max') {
 		        this.elAccountUsage.textContent = `${plan.name} includes unlimited server reviews and ${limits.anticheatGamesPerWeek || 0} anticheat games/week.`;
 		      } else {
 		        const reviews = Math.max(0, Number(usage.serverReviews) || 0);
-		        this.elAccountUsage.textContent = `${reviews}/${limits.serverReviewsPerDay || 3} server reviews today. Anticheat is a Boost feature. Extra reviews run in the browser until reset.`;
+		        this.elAccountUsage.textContent = `${reviews}/${limits.serverReviewsPerDay || 3} server reviews today. Anticheat is a Plans feature. Extra reviews run in the browser until reset.`;
 		      }
 			    }
 			    this._syncServerStrongToggle();
@@ -2779,7 +3024,7 @@ _syncAccountUi() {
 		    const paid = plan.plan === 'boost' || plan.plan === 'max';
 		    const usageText = paid
 		      ? `${plan.name} includes unlimited server reviews and ${limits.anticheatGamesPerWeek || 0} anticheat games/week.`
-		      : `${Math.max(0, Number(usage.serverReviews) || 0)}/${limits.serverReviewsPerDay || 3} server reviews today. Anticheat is a Boost feature.`;
+		      : `${Math.max(0, Number(usage.serverReviews) || 0)}/${limits.serverReviewsPerDay || 3} server reviews today. Anticheat is a Plans feature.`;
 		    const adminHtml = this.authState.isAdmin ? `
 	          <div class="admin-boost-panel">
 	            <h3>Gift Boost</h3>
@@ -2888,7 +3133,7 @@ _syncAccountUi() {
 		      return;
 		    }
 		    try {
-		      const response = await fetch('/api/admin/gift-boost', {
+		      const response = await apiFetch('/api/admin/gift-boost', {
 		        method: 'POST',
 		        headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
 		        body: JSON.stringify({ email, days }),
@@ -3063,7 +3308,7 @@ _syncAccountUi() {
 		    }
 		    if (this.elGiftBoostStatus) this.elGiftBoostStatus.textContent = 'Gifting Boost...';
 		    try {
-		      const response = await fetch('/api/admin/gift-boost', {
+		      const response = await apiFetch('/api/admin/gift-boost', {
 		        method: 'POST',
 		        headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
 		        cache: 'no-store',
@@ -3090,57 +3335,27 @@ _syncAccountUi() {
 		  }
 
 		  _syncServerStrongToggle() {
-    const isBoost = this.authState.plan?.plan === 'boost';
+    // Boost OR Max (Max inherits all Boost perks). Use the tier helper, not an
+    // exact `=== 'boost'` check, so Max can use the stronger server review too.
+    const hasBoost = this._isPaidOrAbove('boost');
     const showInReview = this.engineSettings.analysisLocation === 'server' && document.body.dataset.mode === 'review';
 	    if (this.elServerBoostToggle) {
-	      this.elServerBoostToggle.classList.toggle('boost-locked', !isBoost);
+	      this.elServerBoostToggle.classList.toggle('boost-locked', !hasBoost);
 	      this.elServerBoostToggle.style.display = showInReview ? '' : 'none';
-	      this.elServerBoostToggle.title = isBoost ? '' : 'Boost unlocks stronger server review.';
+	      this.elServerBoostToggle.title = hasBoost ? '' : 'Plans unlocks stronger server review.';
 	    }
-    const strongOn = isBoost && !!this.elServerStrongReview?.checked;
+    const strongOn = hasBoost && !!this.elServerStrongReview?.checked;
     if (this.elServerStrongNote) this.elServerStrongNote.hidden = !strongOn;
     const lockIcon = document.getElementById('boost-lock-icon');
-    if (lockIcon) lockIcon.style.display = isBoost ? 'none' : '';
-    if (!isBoost && this.elServerStrongReview) {
+    if (lockIcon) lockIcon.style.display = hasBoost ? 'none' : '';
+    if (!hasBoost && this.elServerStrongReview) {
       this.elServerStrongReview.checked = false;
       this.elServerStrongReview.disabled = true;
-      this.engineSettings.serverStrongReview = false;
-    } else if (isBoost && this.elServerStrongReview) {
+	      this.engineSettings.serverStrongReview = false;
+    } else if (hasBoost && this.elServerStrongReview) {
       this.elServerStrongReview.disabled = false;
     }
   }
-
-			  _enterBoostPage() {
-			    document.body.classList.add('menu-active');
-			    document.body.dataset.mode = 'boost';
-			    if (this.elMainMenu) this.elMainMenu.hidden = true;
-			    if (this.elMainContent) this.elMainContent.hidden = true;
-		    this.puzzleMode.active = false;
-		    this.anticheatMode.active = false;
-		    if (this.coachMode.active) {
-		      this.coachMode.active = false;
-		      this.coachMode.thinking = false;
-		      this._syncCoachControls();
-		    }
-		    if (this.elLiveEval) this.elLiveEval.hidden = true;
-		    if (this.elReviewSummary) this.elReviewSummary.style.display = 'none';
-		    this._syncPuzzleVisibility();
-		    this._syncAnticheatVisibility();
-		    this._syncBoostPageVisibility();
-			    this._syncServerStrongToggle();
-			  }
-
-			  _closeBoostPage() {
-			    this._navigateTo('/index');
-			  }
-
-			  _handleBoostPurchase() {
-			    // Route to the dedicated Boost page, which shows the waitlist/
-			    // value pitch for free users and the active status for boost users.
-			    // Guests land on the same page; the Boost page prompts sign-in only
-			    // if they want to activate (no hard gate before seeing the value).
-			    this._navigateTo('/boost');
-			  }
 
 		  _enterAnticheatMode() {
 	    this._activateGameLayout();
@@ -3180,7 +3395,7 @@ this._syncAnticheatForm();
 	    const limits = this.authState.limits || {};
 	    const acLimit = limits.anticheatGamesPerWeek;
 	    if (plan.plan === 'free' || !acLimit) {
-	      host.innerHTML = this._usageBarHtml('Anticheat games', 'Boost feature', 0, 0, 'week', { upgrade: true });
+	      host.innerHTML = this._usageBarHtml('Anticheat games', 'Plans feature', 0, 0, 'week', { upgrade: true });
 	    } else {
 	      const used = Math.max(0, Number(usage.anticheatGames) || 0);
 	      host.innerHTML = this._usageBarHtml('Anticheat games this week', `${used} / ${acLimit}`, used, acLimit, 'week');
@@ -3280,10 +3495,7 @@ this._syncAnticheatForm();
 	    this.elBtnMenuCoach?.addEventListener('click', () => this._navigateTo('/coach', { disableRestore: true }));
 	    this.elBtnMenuPuzzles?.addEventListener('click', () => this._navigateTo('/puzzles', { disableRestore: true }));
 	    this.elBtnMenuAnticheat?.addEventListener('click', () => this._navigateTo('/anticheat', { disableRestore: true }));
-    this.elBtnMenuBoost?.addEventListener('click', () => this._navigateTo('/boost', { disableRestore: true }));
-    this.elBtnCloseBoost?.addEventListener('click', () => this._closeBoostPage());
-	    this.elBtnBoostPurchase?.addEventListener('click', () => this._handleBoostPurchase());
-		    this.elBtnBoostAccount?.addEventListener('click', () => this._navigateTo(this.authState.user ? '/account' : '/signup'));
+    this.elBtnMenuBoost?.addEventListener('click', () => this._navigateTo('/plans', { disableRestore: true }));
     // (engine-choice modal handlers removed — modal was dead UI, never displayed)
 	    this.elBtnEngineChoiceConfirm?.addEventListener('click', () => this._confirmEngineChoice());
 	    this.elEngineChoiceModule?.addEventListener('change', () => {
@@ -3346,16 +3558,20 @@ this._syncAnticheatForm();
 
     this.elBtnSaveEngineSettings?.addEventListener('click', () => this._saveEngineSettings());
     this.elBtnSaveAppearanceSettings?.addEventListener('click', () => this._saveAppearanceSettings());
-    // Live-update the appearance preview as the user picks a theme, without
-    // waiting for Save (Save still persists it). Also applies to the live board
-    // so they can see the effect immediately.
-    this.elBoardTheme?.addEventListener('change', () => {
-      document.body.dataset.boardTheme = this.elBoardTheme.value;
-      this._renderBoardPreview?.();
+    // Live-update the appearance preview as the user picks a theme. Bind to ALL
+    // radios with these names (not just the initially-checked one, whose ref
+    // goes stale when the user picks a different option).
+    document.querySelectorAll('input[name="settings-board-theme"]').forEach((radio) => {
+      radio.addEventListener('change', () => {
+        document.body.dataset.boardTheme = radio.value;
+        this._renderBoardPreview?.();
+      });
     });
-    this.elPieceTheme?.addEventListener('change', () => {
-      document.body.dataset.pieceTheme = this.elPieceTheme.value;
-      this._renderBoardPreview?.();
+    document.querySelectorAll('input[name="settings-piece-theme"]').forEach((radio) => {
+      radio.addEventListener('change', () => {
+        document.body.dataset.pieceTheme = radio.value;
+        this._renderBoardPreview?.();
+      });
     });
 	    this.elHeaderBrandLink?.addEventListener('click', () => this._navigateTo('/index', { disableRestore: true }));
 	    this.elHeaderAccountBtn?.addEventListener('click', () => this._navigateTo(this.authState.user ? '/account' : '/login'));
@@ -3385,6 +3601,8 @@ this._syncAnticheatForm();
 	      }
 	    });
 	    this.elBtnCoachSetupStart?.addEventListener('click', () => this._startCoachFromSetup());
+		// Coach chat wiring is owned by src/coach-chat.js (window.CoachChat),
+		// which binds its own events on mount — nothing to wire here.
 	    this.elBtnPuzzleNext?.addEventListener('click', () => this._loadNextPuzzle());
 	    this.elBtnPuzzleDaily?.addEventListener('click', () => this._loadDailyPuzzle());
 		    this.elBtnPuzzleRetry?.addEventListener('click', () => this._retryCurrentPuzzle());
@@ -3392,8 +3610,13 @@ this._syncAnticheatForm();
 		    this.elBtnPuzzleReview?.addEventListener('click', () => this._reviewCurrentPuzzleLine());
 		    this.elBtnExportPgn?.addEventListener('click', () => this._exportCurrentPgn());
 		    this.elBtnExportFen?.addEventListener('click', () => this._exportCurrentFen());
-		    this.elAnticheatSource?.addEventListener('change', () => this._syncAnticheatForm());
-	    this.elBtnAnticheatRun?.addEventListener('click', () => this._startAnticheatCheck());
+		    // Anticheat source: card click opens a SweetAlert popup that collects the
+// PGN or username and game count, then runs the streaming review.
+document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
+  btn.addEventListener('click', () => this._openAnticheatSourcePopup(btn.dataset.source));
+});
+// (Legacy elBtnAnticheatRun binding removed; the source cards above + popup
+//  drive the run. The legacy `btn-anticheat-run` button no longer exists.)
 	    this.elBtnReview.addEventListener('click', () => this._startReview());
 	    this.elBtnLineExplorer?.addEventListener('click', () => this._exploreLineFromCurrentMove());
 	    this.elBtnReturnExplorer?.addEventListener('click', () => this._returnFromLineExplorer());
@@ -3408,11 +3631,11 @@ this._syncAnticheatForm();
 	      this._renderIdleEngineInfo();
 	    });
 		    this.elServerStrongReview?.addEventListener('change', () => {
-		      if (this.authState.plan?.plan !== 'boost') {
+		      if (!this._isPaidOrAbove('boost')) {
 		        this.elServerStrongReview.checked = false;
 		        this.engineSettings.serverStrongReview = false;
 		        this._syncServerStrongToggle();
-		        this._navigateTo('/boost');
+		        this._navigateTo('/plans');
 		        return;
 		      }
 		      this.engineSettings.serverStrongReview = this.elServerStrongReview.checked;
@@ -3726,7 +3949,7 @@ this._syncAnticheatForm();
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 4000);
-      const res = await fetch('/api/public-stats', { cache: 'no-store', signal: controller.signal });
+      const res = await apiFetch('/api/public-stats', { cache: 'no-store', signal: controller.signal });
       clearTimeout(timer);
       if (!res.ok) throw new Error('stats unavailable');
       const s = (await res.json())?.stats || {};
@@ -4231,14 +4454,51 @@ this._syncAnticheatForm();
 	    if (initialized) this._invalidateAnalysisResults();
   }
 
+	  // Persist the in-memory engineSettings into localStorage so changes via the
+  // in-review panel (Analysis Depth / Maximum Time) survive a reload. The
+  // /settings page Save button calls the same helper explicitly.
+  _persistEngineSettings() {
+	    try {
+	      localStorage.setItem('sidastuff.engineSettings', JSON.stringify(this.engineSettings));
+	    } catch (_) { /* localStorage unavailable — silently skip */ }
+	  }
+
 	  async _handleEngineStrengthChange() {
-	    this.engineSettings.strength = this.elEngineStrength.value;
+	    // The in-review "Analysis Depth" select still surfaces the legacy
+	    // depthProfile key (depth10/14/18/22/26). Map it onto the new tier
+	    // model so changing it actually changes the review profile depth —
+	    // previously this only updated `engineSettings.strength` (the legacy
+	    // ladder key), which the live-deepening ladder reads but the actual
+	    // review profile does not. Without this remap the dropdown was a
+	    // no-op for the review's depth and the user couldn't change it.
+	    const depthToStrength = { depth10: 'quick', depth14: 'standard', depth18: 'thorough', depth22: 'thorough', depth26: 'thorough' };
+	    const value = this.elEngineStrength?.value || 'depth14';
+	    this.engineSettings.strength = value;
+	    this.engineSettings.depthProfile = value;
+	    const newTier = depthToStrength[value];
+	    if (newTier) this.engineSettings.reviewStrength = newTier;
+	    // Selecting a depth/tier from the in-review panel adopts that tier's default
+	    // time cap: clear any prior in-review max-time override so the tier change
+	    // isn't silently masked by a leftover custom time.
+	    this.engineSettings.maxTimeOverride = false;
+	    this._persistEngineSettings();
 	    this._renderIdleEngineInfo();
 	    this._invalidateAnalysisResults();
 	  }
 
 	  async _handleEngineMaxTimeChange() {
-	    this.engineSettings.maxTimeMs = Math.max(1000, Number(this.elEngineMaxTime?.value) || 12000);
+	    // Apply the in-review "Maximum Time" selection to the review profile by
+	    // writing customTimeMs AND setting maxTimeOverride, the explicit signal
+	    // _getReviewProfile needs to honor it. Without maxTimeOverride the value
+	    // was gated behind advancedEngine (which this panel never sets), so the
+	    // dropdown was a no-op. We do NOT set advancedEngine here — that would
+	    // also force the customDepth override and silently change search depth.
+	    const raw = Number(this.elEngineMaxTime?.value) || 8000;
+	    const clamped = Math.max(500, Math.min(raw, 30000));
+	    this.engineSettings.maxTimeMs = clamped;
+	    this.engineSettings.customTimeMs = clamped;
+	    this.engineSettings.maxTimeOverride = true;
+	    this._persistEngineSettings();
 	    this._renderIdleEngineInfo();
 	    this._invalidateAnalysisResults();
 	  }
@@ -4461,6 +4721,128 @@ this._syncAnticheatForm();
 	    this._enterCoachMode(setup);
 	  }
 
+// Skill-level chips + Try-it: clicking a chip updates the embed preview;
+// clicking "Try it" loads a fresh puzzle of that level on the main board.
+// Per-level sample FENs are fetched lazily and cached in this._puzzleLevelSamples.
+_initPuzzleLevelRow() {
+  if (this._puzzleLevelRowInit) return;
+  this._puzzleLevelRowInit = true;
+  document.querySelectorAll('input[name="puzzle-level"]').forEach((el) => {
+    el.addEventListener('change', () => {
+      const checked = document.querySelector('input[name="puzzle-level"]:checked');
+      const elo = parseInt(checked?.value, 10);
+      if (Number.isFinite(elo)) {
+        this._selectedPuzzleLevel = elo;
+        this._renderPuzzleLevelEmbed(elo);
+      }
+    });
+  });
+  this.elBtnPuzzleLevelTry?.addEventListener('click', () => {
+    const elo = Number(this._selectedPuzzleLevel) || 1500;
+    this._loadNextPuzzle({ target: elo, difficulty: 'normal' });
+  });
+  // First-paint: render the embed for the currently-checked level (default 1500).
+  this._renderPuzzleLevelEmbed(this._selectedPuzzleLevel);
+}
+
+_renderPuzzleLevelEmbed(elo) {
+  if (!this.elPuzzleLevelEmbedPreview) return;
+  const sample = this._puzzleLevelSamples?.[elo];
+  // Until the sample loads, show the empty start position with the level title.
+  // Once we have a sample FEN, render that.
+  const fen = sample?.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  if (this.elPuzzleLevelEmbedTitle) this.elPuzzleLevelEmbedTitle.textContent = `Try it — ${this._puzzleLevelTitle(elo)}`;
+  if (this.elPuzzleLevelEmbedSub) {
+    this.elPuzzleLevelEmbedSub.textContent = sample?.rating
+      ? `A short puzzle near ${sample.rating}. Drag a piece to play.`
+      : `Loading a sample at rating ${elo}…`;
+  }
+  this.elPuzzleLevelEmbedPreview.innerHTML = this._renderBoardHtmlFromFen(fen);
+  // Lazily fetch the sample if we don't have one for this level yet.
+  if (!sample) this._fetchPuzzleLevelSample(elo);
+}
+
+_puzzleLevelTitle(elo) {
+  if (elo <= 1000) return 'Beginner';
+  if (elo <= 1500) return 'Intermediate';
+  if (elo <= 1900) return 'Advanced';
+  return 'Expert';
+}
+
+// Render a small 4×4 thumbnail of the first 2 ranks from a FEN, mirroring
+// _renderBoardPreview's pattern. Used for the try-it embed.
+_renderBoardHtmlFromFen(fen) {
+  const placement = String(fen || '').split(' ')[0] || '';
+  const ranks = placement.split('/');
+  if (ranks.length < 8) return '';
+  // Render a 4×4 thumbnail of the four middle ranks (2..5) where most puzzle
+  // action lives — same 4×4 grid as the existing _renderBoardPreview pattern.
+  const squares = [];
+  for (let r = 2; r < 6; r += 1) {
+    let file = 0;
+    for (const ch of ranks[r]) {
+      if (/[1-8]/.test(ch)) {
+        const empty = parseInt(ch, 10);
+        for (let i = 0; i < empty; i += 1) {
+          if (file >= 4) break;
+          const isLight = (r + file) % 2 === 0;
+          squares.push(`<div class="preview-square ${isLight ? 'light' : 'dark'}"></div>`);
+          file += 1;
+        }
+      } else {
+        if (file >= 4) break;
+        const isLight = (r + file) % 2 === 0;
+        const pieceCode = `${ch.toLowerCase() === ch ? 'b' : 'w'}${ch.toUpperCase()}`;
+        const img = window.getPieceSvgUri
+          ? `<img src="${window.getPieceSvgUri(pieceCode)}" alt="${pieceCode}" loading="lazy">`
+          : '';
+        squares.push(`<div class="preview-square ${isLight ? 'light' : 'dark'}">${img}</div>`);
+        file += 1;
+      }
+    }
+  }
+  return squares.join('');
+}
+
+async _fetchPuzzleLevelSample(elo) {
+  if (this._puzzleLevelSamples?.[elo]) return;
+  try {
+    const params = new URLSearchParams({
+      type: 'next', theme: 'mix', difficulty: 'normal',
+      target: String(elo), nonce: String(Date.now()),
+    });
+    const response = await apiFetch(`/api/puzzle?${params}`, {
+      headers: await this._authHeaders(), cache: 'no-store',
+    });
+    if (!response.ok) return;
+    const loaded = await response.json();
+    const puzzle = loaded?.data?.puzzle;
+    const fen = loaded?.data?.fen;
+    if (!puzzle || !fen) return;
+    this._puzzleLevelSamples = this._puzzleLevelSamples || {};
+    this._puzzleLevelSamples[elo] = {
+      fen, rating: puzzle.rating,
+    };
+    // Re-render only if the user is still viewing this level.
+    if (Number(this._selectedPuzzleLevel) === Number(elo)) {
+      this._renderPuzzleLevelEmbed(elo);
+    }
+  } catch (_) { /* non-fatal — embed keeps showing the empty board */ }
+}
+
+// Show / hide the big-check success overlay.
+_showPuzzleSuccessOverlay() {
+  if (!this.elPuzzleSuccessOverlay) return;
+  this.elPuzzleSuccessOverlay.hidden = false;
+  this.elPuzzleSuccessOverlay.setAttribute('aria-hidden', 'false');
+  clearTimeout(this._puzzleSuccessOverlayTimer);
+  this._puzzleSuccessOverlayTimer = setTimeout(() => {
+    if (!this.elPuzzleSuccessOverlay) return;
+    this.elPuzzleSuccessOverlay.hidden = true;
+    this.elPuzzleSuccessOverlay.setAttribute('aria-hidden', 'true');
+  }, 1600);
+}
+
 				  async _enterPuzzleMode() {
 				    this._activateGameLayout();
 				    document.body.dataset.mode = 'puzzle';
@@ -4479,6 +4861,7 @@ this._syncAnticheatForm();
 	    this._stopAnticheatRun();
 		    this.puzzleMode.active = true;
 		    this.anticheatMode.active = false;
+			    this._initPuzzleLevelRow();
 			    this._syncPuzzleVisibility();
 			    this._syncAnticheatVisibility();
 			    this._syncBoostPageVisibility();
@@ -4532,7 +4915,7 @@ this._syncAnticheatForm();
 
 			  async _loadDailyPuzzle() {
 			    await this._loadPuzzleFromSource(async () => {
-					const response = await fetch('/api/puzzle?type=daily', {
+					const response = await apiFetch('/api/puzzle?type=daily', {
 			          headers: await this._authHeaders(),
 		          cache: 'no-store',
 		        });
@@ -4562,7 +4945,7 @@ this._syncAnticheatForm();
 	          exclude: excludeId,
 	          nonce: String(Date.now()),
 	        });
-				const response = await fetch(`/api/puzzle?${params}`, {
+				const response = await apiFetch(`/api/puzzle?${params}`, {
 		          headers: await this._authHeaders(),
 		          cache: 'no-store',
 		        });
@@ -4859,10 +5242,13 @@ this._syncAnticheatForm();
 		        ringColor: '#CA3431',
 		      }));
 		      await this._recordPuzzleAttempt(false);
-			      this._setPuzzleStatus('Incorrect. Resetting this puzzle for another try...', 'error');
+			      this._setPuzzleStatus('Incorrect. Tap Retry or wait — resetting this puzzle for another try...', 'error');
 			      this._syncPuzzlePanel();
 			      this._syncActionButtons();
 			      this._updateGameStatus();
+			      // Make the Retry button surface explicitly on mistake (the
+			      // 900ms auto-retry still happens if the user doesn't click).
+			      if (this.elBtnPuzzleRetry) this.elBtnPuzzleRetry.disabled = false;
 			      window.setTimeout(() => {
 			        if (this.puzzleMode.active && this.puzzleMode.failed && this.puzzleMode.current) {
 			          this._retryCurrentPuzzle({ automatic: true });
@@ -4883,6 +5269,7 @@ this._syncAnticheatForm();
 				      if (this.elLiveEval) this.elLiveEval.hidden = false;
 				      const rated = !this.puzzleMode.failed ? await this._recordPuzzleAttempt(true) : false;
 				      this._celebrate();
+				      this._showPuzzleSuccessOverlay();
 				      if (this.puzzleMode.step >= this.puzzleMode.solution.length) this._playNamedSound('end');
 					      this._setPuzzleStatus(checkmateSolved && !isExpected
 					        ? 'Solved by checkmate.'
@@ -5104,7 +5491,7 @@ this._syncAnticheatForm();
 		    if (!user) return null;
 	    
 	    try {
-				const response = await fetch('/api/puzzle/solve', {
+				const response = await apiFetch('/api/puzzle/solve', {
 		        method: 'POST',
 		        headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
 	        cache: 'no-store',
@@ -5346,6 +5733,29 @@ this._syncAnticheatForm();
     if (this.elCoachDialog) this.elCoachDialog.textContent = message;
     if (this.elCoachState && state) this.elCoachState.textContent = state;
   }
+
+  // ── AI Coach chat ───────────────────────────────────────────────────
+  // /coach is now a streaming chat with a Cerebras-backed LLM that can call
+  // tools (stockfish runs in THIS browser via this.engine.evaluate; web_search
+  // + coach_games run server-side). Max-users-only. History persists server-side.
+
+  _enterCoachChat() {
+    // /coach is its own full-screen page-panel route. The chat experience
+    // (localStorage multi-chat + sidebar + markdown + streaming) lives in
+    // src/coach-chat.js (window.CoachChat); this just activates the route and
+    // mounts the controller.
+    this.coachChat.active = true;
+    this.coachMode.active = false;
+    this.puzzleMode.active = false;
+    this.anticheatMode.active = false;
+    this._enterInAppLayout();
+    this._showRoutePage('coach');
+    if (window.CoachChat) window.CoachChat.mount(this);
+  }
+
+  // Delegate the gate re-render to the chat controller (called on auth resolve).
+  _renderCoachGate() { if (window.CoachChat) window.CoachChat.renderGate(); }
+
 
   _syncCoachControls() {
     this._syncCoachVisibility();
@@ -5770,22 +6180,38 @@ this._syncAnticheatForm();
 	      this._updateGameStatus();
 	      this._saveGameState();
 	      this._playMoveSound(move, this.currentMoveIndex);
+	      // Detect a coach checkmate FIRST so we can skip the (expensive, noisy)
+	      // live eval pass on a position that's already decided. The coach's
+	      // own score is the right one to surface — a checkmate is always the
+	      // best move, so we don't need a fresh MultiPV pass to "confirm" it.
+	      const coachDeliveredMate = this.chess.in_checkmate();
 	      // Immediately reflect the coach's move on the eval bar using the eval
-	      // the coach already computed to choose its move (White-absolute cp),
-	      // rather than waiting for the async post-move eval — and so the bar
-	      // still updates even if the engine isn't ready for the live eval.
-	      // _requestLiveEvaluation refines this to the true post-move eval next
-	      // and pushes the point onto the eval graph history.
+	      // the coach already computed to choose its move. chosen.cp is Stockfish's
+	      // score from the perspective of the side to move at the position the
+	      // engine actually evaluated — that's fenBefore, the position BEFORE the
+	      // coach moved (the coach picks from engine lines for the to-move side).
+	      // The eval bar reads White-absolute, so we need whiteAbsCp() against the
+	      // FEN that produced that score. Using fenAfter here would render the
+	      // wrong color when the coach plays Black and is winning — the engine's
+	      // pre-move eval is from Black's POV (positive = Black winning), but
+	      // fenAfter shows White to move, so the naive convert skips the flip and
+	      // "Black winning" gets displayed as "White winning".
 	      if (typeof chosen.cp === 'number') {
-	        this._updateEvalBar(chosen.cp);
+	        const whiteAbsCp = this.analyzer.whiteAbsCp(chosen.cp, fenBefore);
+	        this._updateEvalBar(whiteAbsCp);
 	      }
-	      this._requestLiveEvaluation(`Coach played ${move.san}`, {
-	        fenBefore,
-	        fenAfter: this.chess.fen(),
-	        moveObj: move,
-	        moveIndex: this.currentMoveIndex,
-	        isCoachMove: true,
-	      });
+	      if (!coachDeliveredMate) {
+	        // A checkmate is always the best move — skip the live eval pass that
+	        // would just re-derive a mate score and risk flickering the bar as
+	        // the engine refines the mate distance.
+	        this._requestLiveEvaluation(`Coach played ${move.san}`, {
+	          fenBefore,
+	          fenAfter: this.chess.fen(),
+	          moveObj: move,
+	          moveIndex: this.currentMoveIndex,
+	          isCoachMove: true,
+	        });
+	      }
 	      // After coach move, switch clock to human if clocks are active
 	      if (this.clockState.active) {
 	        const nextSide = this.chess.turn() === 'w' ? 'white' : 'black';
@@ -5810,37 +6236,41 @@ this._syncAnticheatForm();
 	    if (!this.coachMode.active) return;
 	
 			    const key = result?.classificationKey || '';
-			    const adjustNote = this._adjustCoachSkillFromResult(result);
-			    if (key === 'BRILLIANT') this._recordBrilliantMove(result);
-				    if (['BLUNDER', 'MISTAKE', 'MISS', 'INACCURACY'].includes(key)) {
-				      const reply = result.opponentBestMoveSan || result.opponentBestMove || '';
-				      const baseText = (result.coachText || '').trim();
-              const mentionsReply = !reply || baseText.includes(reply);
-              // Assemble the feedback as one natural paragraph instead of
-              // stapling label-like sentences together. Lead with the coach's
-              // assessment, then fold in the reply and the take-back option
-              // conversationally so it reads like an LLM, not a status readout.
-              const parts = [];
-              if (baseText) parts.push(baseText);
-              if (!mentionsReply && reply) {
-                parts.push(`In reply, the coach plays ${reply} — take your move back and try again if you'd like another look.`);
-              } else if (reply) {
-                parts.push(`You can take your move back and try again if you'd like another look.`);
-              } else {
-                parts.push(`Take your move back if you'd like to try something else.`);
-              }
-              let feedback = parts.join(' ');
-					      if (adjustNote) feedback += adjustNote;
-					      this._setCoachDialog(feedback, key);
-					      this._renderMoveInsights(result);
-					      if (this.elInsightCoach) this.elInsightCoach.textContent = feedback;
-			      if (result.opponentBestMove) this.board.setBestMoveArrow(result.opponentBestMove, { color: '#CA3431' });
-			      this.coachMode.lastAdviceMoveIndex = result.moveIndex;
-				    } else if (key === 'BRILLIANT') {
-				      this._setCoachDialog(`${move.san} — a brilliant find. That's the engine's top choice and a genuinely tough move to spot.${adjustNote}`, 'Brilliant');
-	    } else if (key) {
-	      this._setCoachDialog(`${move.san} — ${result.classification.name.toLowerCase()}. Solid stuff; keep going.${adjustNote}`, 'Coaching');
-	    }
+		    const adjustNote = this._adjustCoachSkillFromResult(result);
+		    if (key === 'BRILLIANT') this._recordBrilliantMove(result);
+		    // Error moves (Blunder/Mistake/Inaccuracy/Miss) get the rich feedback
+		    // panel with a suggested reply + take-back nudge. Brilliant gets
+		    // a short celebratory line. Everything else (Best/Excellent/Good)
+		    // gets a one-line nudge so the coach doesn't chatter on every move.
+		    if (['BLUNDER', 'MISTAKE', 'MISS', 'INACCURACY'].includes(key)) {
+		      const reply = result.opponentBestMoveSan || result.opponentBestMove || '';
+		      const baseText = (result.coachText || '').trim();
+		      const mentionsReply = !reply || baseText.includes(reply);
+		      // Assemble the feedback as one natural paragraph instead of
+		      // stapling label-like sentences together. Lead with the coach's
+		      // assessment, then fold in the reply and the take-back option
+		      // conversationally so it reads like an LLM, not a status readout.
+		      const parts = [];
+		      if (baseText) parts.push(baseText);
+		      if (!mentionsReply && reply) {
+		        parts.push(`In reply, the coach plays ${reply} — take your move back and try again if you'd like another look.`);
+		      } else if (reply) {
+		        parts.push(`You can take your move back and try again if you'd like another look.`);
+		      } else {
+		        parts.push(`Take your move back if you'd like to try something else.`);
+		      }
+		      let feedback = parts.join(' ');
+		      if (adjustNote) feedback += adjustNote;
+		      this._setCoachDialog(feedback, key);
+		      this._renderMoveInsights(result);
+		      if (this.elInsightCoach) this.elInsightCoach.textContent = feedback;
+		      if (result.opponentBestMove) this.board.setBestMoveArrow(result.opponentBestMove, { color: '#CA3431' });
+		      this.coachMode.lastAdviceMoveIndex = result.moveIndex;
+		    } else if (key === 'BRILLIANT') {
+		      this._setCoachDialog(`${move.san} — a brilliant find. That's the engine's top choice and a genuinely tough move to spot.${adjustNote}`, 'Brilliant');
+		    } else if (key) {
+		      this._setCoachDialog(`${move.san} — ${result.classification.name.toLowerCase()}. Solid stuff; keep going.${adjustNote}`, 'Coaching');
+		    }
 	
 		    if (!this._checkCoachGameOver()) {
 		      setTimeout(() => this._makeCoachMove(), 700);
@@ -6058,12 +6488,14 @@ this._syncAnticheatForm();
 	    this._renderLinkUsernameRow();
 	  }
 
+	  // The inline anticheat form (source dropdown + username + limit) was replaced
+// by the 3 source cards + SweetAlert popup. These hidden inputs are kept only
+// to feed values into _startAnticheatCheck from the popup. This helper is now
+// a no-op (no form to sync), but kept as a stub so the call site doesn't crash
+// during the transition. Source cards + the popup now drive the form values.
 	  _syncAnticheatForm() {
-	    if (!this.elAnticheatSource) return;
-	    const isPgn = this.elAnticheatSource.value === 'pgn';
-	    if (this.elAnticheatUsername) this.elAnticheatUsername.disabled = isPgn;
-	    if (this.elAnticheatLimit) this.elAnticheatLimit.disabled = isPgn;
-	    if (this.elAnticheatPgn) this.elAnticheatPgn.style.display = isPgn ? 'block' : 'none';
+	    // no-op: inline form replaced by source cards + popup
+	    return;
 	  }
 
 	  _setAnticheatStatus(message, kind = '') {
@@ -6095,17 +6527,100 @@ this._syncAnticheatForm();
 	    }
 	  }
 
+		  async _openAnticheatSourcePopup(source) {
+		    const validSources = ['pgn', 'lichess', 'chesscom'];
+		    if (!validSources.includes(source)) return;
+		    document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
+		      btn.setAttribute('aria-checked', btn.dataset.source === source ? 'true' : 'false');
+		    });
+		    const titleBySource = {
+		      pgn: 'Paste PGN games',
+		      lichess: 'Lichess username',
+		      chesscom: 'Chess.com username',
+		    };
+		    const isPgn = source === 'pgn';
+		    const limitInitial = parseInt(this.elAnticheatLimit?.value || '10', 10) || 10;
+		    const previousUsername = this.elAnticheatUsername?.value || '';
+		    const previousPgn = this.elAnticheatPgn?.value || '';
+		    const html = `
+		      <div class="anticheat-popup">
+		        ${isPgn ? `
+		          <label class="field">
+		            <span class="field-label">PGN</span>
+		            <textarea id="swal-anticheat-pgn" class="anticheat-pgn anticheat-popup-pgn" rows="8" placeholder="Paste one PGN or several PGNs here…">${this._escapeHtml(previousPgn)}</textarea>
+		          </label>
+		        ` : `
+		          <label class="field">
+		            <span class="field-label">${source === 'lichess' ? 'Lichess username' : 'Chess.com username'}</span>
+		            <input id="swal-anticheat-username" class="input-select" type="text" placeholder="username" value="${this._escapeHtml(previousUsername)}" autocomplete="off">
+		          </label>
+		        `}
+		        <div class="anticheat-popup-meta">
+		          <span class="field-label">How many games?</span>
+		          <div class="anticheat-popup-counts" role="radiogroup" aria-label="Game count">
+		            <label class="select-row-item"><input type="radio" name="swal-anticheat-limit" value="5"><span>5</span></label>
+		            <label class="select-row-item"><input type="radio" name="swal-anticheat-limit" value="10" checked><span>10</span></label>
+		            <label class="select-row-item"><input type="radio" name="swal-anticheat-limit" value="15"><span>15</span></label>
+		          </div>
+		        </div>
+		      </div>
+		    `;
+		    const result = await this._showPopup({
+		      title: titleBySource[source],
+		      html,
+		      showCancelButton: true,
+		      cancelButtonText: 'Cancel',
+		      confirmButtonText: 'Start Review',
+		      width: 560,
+		      didOpen: () => {
+		        const root = this._swalContentRoot();
+		        if (!root) return;
+		        const checked = root.querySelector(`input[name="swal-anticheat-limit"][value="${limitInitial}"]`);
+		        if (checked) checked.checked = true;
+		        const focusEl = root.querySelector(isPgn ? '#swal-anticheat-pgn' : '#swal-anticheat-username');
+		        try { focusEl?.focus({ preventScroll: true }); } catch (_) {}
+		      },
+		      preConfirm: () => {
+		        const root = this._swalContentRoot();
+		        if (!root) return false;
+		        const limitRadio = root.querySelector('input[name="swal-anticheat-limit"]:checked');
+		        const limit = parseInt(limitRadio?.value || '10', 10) || 10;
+		        if (isPgn) {
+		          const pgn = (root.querySelector('#swal-anticheat-pgn')?.value || '').trim();
+		          if (!pgn) {
+		            window.Swal?.showValidationMessage?.('Paste at least one PGN first.');
+		            return false;
+		          }
+		          return { source: 'pgn', pgn, limit };
+		        }
+		        const username = (root.querySelector('#swal-anticheat-username')?.value || '').trim();
+		        if (!username) {
+		          window.Swal?.showValidationMessage?.('Enter a username first.');
+		          return false;
+		        }
+		        return { source, username, limit };
+		      },
+		    });
+		    if (!result?.isConfirmed || !result.value) return;
+		    // Copy the popup's values into the hidden inputs so _startAnticheatCheck
+		    // picks them up unchanged.
+		    if (this.elAnticheatSource) this.elAnticheatSource.value = result.value.source;
+		    if (this.elAnticheatLimit) this.elAnticheatLimit.value = String(result.value.limit);
+		    if (this.elAnticheatUsername) this.elAnticheatUsername.value = result.value.username || '';
+		    if (this.elAnticheatPgn) this.elAnticheatPgn.value = result.value.pgn || '';
+		    await this._startAnticheatCheck();
+		  }
+
 		  async _startAnticheatCheck() {
-		    if (this.anticheatMode.checking) return;
 		    if (!this.authState.user) {
 		      // Anticheat is server-only (no browser fallback), so it genuinely
 		      // needs an account. Explain WHY before bouncing — never a silent
 		      // redirect that leaves the user confused.
-		      this._setAnticheatStatus('Anticheat needs our server — free accounts get 1 run per day.', 'error');
+		      this._setAnticheatStatus('Anticheat needs our server — included with Boost.', 'error');
 		      const result = await this._showPopup({
 		        icon: 'info',
 		        title: 'Anticheat needs an account',
-		        text: "Anticheat analysis runs only on our server (it can't run in your browser). Create a free account to get 1 run per day — Boost removes the limit.",
+		        text: "Anticheat analysis runs only on our server (it can't run in your browser). Create a free account, then unlock server-side anticheat with Boost (25 games/week).",
 		        confirmButtonText: 'Create account',
 		        showCancelButton: true,
 		        cancelButtonText: 'Not now',
@@ -6116,17 +6631,17 @@ this._syncAnticheatForm();
 	    // Free plan: anticheat isn't included. Upgrade-prompt instead of hitting
 	    // the server (which hard-blocks with 'upgrade_required' anyway).
 	    if (this.authState.plan?.plan === 'free') {
-	      this._setAnticheatStatus('Anticheat is a Boost feature.', 'error');
+	      this._setAnticheatStatus('Anticheat is a Plans feature.', 'error');
 	      const result = await this._showPopup({
 	        icon: 'info',
-	        title: 'Anticheat is a Boost feature',
+	        title: 'Anticheat is a Plans feature',
 	        text: 'Server-side cheat detection comes with Boost (25 games/week) and Max (100 games/week). Coach and puzzles stay free.',
 	        denyButtonText: 'See plans',
 	        showDenyButton: true,
 	        showCancelButton: true,
 	        cancelButtonText: 'Not now',
 	      });
-	      if (result.isDenied) this._navigateTo('/boost');
+	      if (result.isDenied) this._navigateTo('/plans');
 	      return;
 	    }
 	    const source = this.elAnticheatSource?.value || 'pgn';
@@ -6144,7 +6659,7 @@ this._syncAnticheatForm();
 		    await this._refreshUsageBeforeAction();
 		    if (this._isOutOfUsage('anticheat')) {
 		      const choice = await this._showUsageLimitPopup('anticheat');
-		      if (choice !== 'boost') {
+		      if (choice !== 'plans') {
 		        this._setAnticheatStatus('Weekly anticheat limit reached. It resets Monday — or upgrade to Max for 100 games/week.', 'error');
 		      }
 		      return;
@@ -6170,7 +6685,7 @@ this._syncAnticheatForm();
 			} catch (err) {
 				console.error('Anticheat failed:', err);
 				if (err?.code === 'upgrade_required') {
-				  this._setAnticheatStatus('Anticheat is a Boost feature. Upgrade to run server-side cheat detection.', 'error');
+				  this._setAnticheatStatus('Anticheat is a Plans feature. Upgrade to run server-side cheat detection.', 'error');
 				  return;
 				}
 				if (err?.code === 'quota_exceeded') {
@@ -6192,21 +6707,29 @@ this._syncAnticheatForm();
 		    this.anticheatMode.abortController = controller;
 		    const timeout = setTimeout(() => controller.abort(), 600000);
 		    try {
-		      const response = await fetch('/api/anticheat', {
+		      const response = await apiFetch('/api/anticheat/stream', {
 		        method: 'POST',
 		        headers: await this._authHeaders({
 		          'Content-Type': 'application/json',
-		          
+
 		        }),
 		        signal: controller.signal,
 		        cache: 'no-store',
 		        body: JSON.stringify(payload),
 		      });
 		      if (!response.ok) {
+		        // Parse JSON for a friendly quota_exceeded message; fall back
+		        // to raw text if the body isn't JSON.
 		        const text = await response.text().catch(() => '');
-		        throw new Error(text || `Anticheat failed with ${response.status}`);
+		        let parsed = null;
+		        try { parsed = text ? JSON.parse(text) : null; } catch (_e) { parsed = null; }
+		        const wrapped = new Error(parsed?.error || text || `Anticheat failed with ${response.status}`);
+		        if (parsed?.code) wrapped.code = parsed.code;
+		        if (parsed?.quota) wrapped.quota = parsed.quota;
+		        if (parsed?.plan) wrapped.plan = parsed.plan;
+		        throw wrapped;
 		      }
-		      return await response.json();
+		      return await this._readAnticheatStream(response);
 		    } catch (err) {
 		      if (err.name === 'AbortError') throw new Error('Anticheat check timed out.');
 		      throw err;
@@ -6306,7 +6829,10 @@ this._syncAnticheatForm();
 		    const allMetrics = [];
 		    const aggregatedGames = [];
 		    let skipped = 0;
-		    const browserProfile = this._getReviewProfile();
+		    // Anticheat always uses the Thorough tier (depth 18 / ~2s) regardless of
+		    // the user's selected review strength: cheat detection needs to be
+		    // thorough, and the user is waiting for the result anyway.
+		    const browserProfile = (window.getReviewStrengthTier ? window.getReviewStrengthTier('thorough') : getReviewStrengthTier('thorough'));
 		    this.analyzer.setReviewProfile(browserProfile);
 		    for (let i = 0; i < pgnGames.length; i += 1) {
 		      this._setAnticheatStatus(`Daily server anticheat is used. Browser checking game ${i + 1}/${pgnGames.length}...`, 'loading');
@@ -6737,7 +7263,7 @@ this._syncAnticheatForm();
   async _fetchRecentGamesViaServer(source, username, limit) {
     try {
       const params = new URLSearchParams({ source, username, limit: String(limit) });
-	const response = await fetch(`/api/recent-games?${params.toString()}`);
+	const response = await apiFetch(`/api/recent-games?${params.toString()}`);
       if (!response.ok) return null;
       const data = await response.json();
       if (!Array.isArray(data.games)) return null;
@@ -6841,7 +7367,8 @@ this._syncAnticheatForm();
     this._invalidateAnalysisResults({ skipBoardRefresh: true });
     this._renderMoveList();
     this._saveGameState();
-    this._showOpeningInfo(this.analyzer.detectOpening(this.gameMoves));
+    // detectOpening() is a no-op now (Lichess lookup is async). Don't clobber
+    // the opening card on each live move — leave the async-driven card as-is.
     this._updateGameStatus();
     this._playMoveSound(move, this.currentMoveIndex);
     this._syncActionButtons();
@@ -6925,6 +7452,10 @@ this._syncAnticheatForm();
       || Math.abs(priorOpponentResult.swing || 0) >= 120
     );
 
+    // During live play a move is "in book" only if every move so far (this one
+    // included) still matches a known opening line. Mirrors analyzeGame's
+    // `opening && i < opening.ply` gate so live classification matches a review.
+    const liveOpening = this.analyzer.detectOpening(this.gameMoves.slice(0, moveIndex + 1));
     const classification = this.analyzer.classifyMove({
       movePly,
       moveSan: moveObj.san,
@@ -6944,6 +7475,7 @@ this._syncAnticheatForm();
       playerRating,
       timeControl,
       opponentJustBlundered,
+      isInBook: !!(liveOpening && moveIndex + 1 <= liveOpening.ply),
     });
 
     const alternatives = lines.slice(0, this._getReviewProfile().multiPv).map((line, idx) => ({
@@ -7041,23 +7573,17 @@ this._syncAnticheatForm();
    */
   _getAnalysisDepthLadder() {
     const profiles = (window.REVIEW_PROFILES || REVIEW_PROFILES);
-    const keys = ['depth10', 'depth14', 'depth18', 'depth22', 'depth26'];
     const baseKey = this.engineSettings?.strength || 'depth14';
-    const baseIdx = Math.max(0, keys.indexOf(baseKey));
-    // Always include the base depth as the first rung, then climb.
-    const ladder = keys.slice(baseIdx).map((k) => profiles[k].depth);
-    // Cap at a hard ceiling so very slow positions still terminate.
-    const MAX_LADDER_DEPTH = 26;
+    const baseDepth = (profiles[baseKey] || profiles.depth14).depth;
+    // Bounded ladder: start at the review depth and climb at most two +2 rungs.
+    // The earlier ladder climbed base→26 in +2 steps (up to 6 rungs, each
+    // re-searching BOTH the before and after position), which could spend tens
+    // of seconds re-analyzing one parked move. Depth ≥22 in a browser worker is
+    // slow and rarely changes a move classification vs. depth 18-20, so cap at 20.
+    const MAX_LADDER_DEPTH = 20;
     const rungs = [];
-    for (const d of ladder) {
-      if (d > MAX_LADDER_DEPTH) break;
-      // Walk up in +2 increments between profile depths for finer feedback
-      // steps, so the user sees depth tick up on each refinement pass.
-      let cur = rungs.length ? rungs[rungs.length - 1] : d - 2;
-      while (cur < d) {
-        cur = Math.min(cur + 2, d);
-        if (!rungs.includes(cur)) rungs.push(cur);
-      }
+    for (let d = baseDepth; d <= MAX_LADDER_DEPTH; d += 2) {
+      rungs.push(d);
     }
     if (!rungs.length) rungs.push(profiles.depth14.depth);
     return rungs;
@@ -7168,7 +7694,10 @@ this._syncAnticheatForm();
         meta: `Refining toward depth ${maxDepth}…`,
       });
       try {
-        const liveResult = await this._analyzeMoveAtDepth(baseContext, depth, reviewProfile.multiPv, Math.max(8000, reviewProfile.timeoutMs));
+        // Use the tier's own (now-sane) per-move cap. The previous
+        // Math.max(8000, timeoutMs) forced EVERY deepening rung to ≥8s, which
+        // with a 6-rung ladder meant tens of seconds re-analyzing one move.
+        const liveResult = await this._analyzeMoveAtDepth(baseContext, depth, reviewProfile.multiPv, reviewProfile.timeoutMs);
         if (token !== this.liveDepthToken) return;
         if (this.currentMoveIndex !== moveIndex) return;
         if (!liveResult || liveResult.isCoachMove) return;
@@ -7231,7 +7760,7 @@ this._syncAnticheatForm();
     const best = orderedLines[0] || { cp: 0, move: '' };
     const bestMove = best.move || '';
     const bestMoveSan = bestMove ? this.analyzer.uciToSan(prevFen, bestMove) : '--';
-    const bestScore = best.cp || 0;
+    const bestScore = typeof best.cp === 'number' && Number.isFinite(best.cp) ? best.cp : 0;
     const playedUci = `${context.moveObj.from}${context.moveObj.to}${context.moveObj.promotion || ''}`;
 
     // scoreAfter is the eval of the position AFTER the played move. Evaluate
@@ -7258,10 +7787,12 @@ this._syncAnticheatForm();
       })
       .filter((line) => !!line.move);
     const orderedNext = this.analyzer._orderLinesForSide(nextLines, isWhiteToMoveAfter);
-    const nextBest = orderedNext[0] || { cp: bestScore, move: '' };
-    scoreAfter = nextBest.cp || bestScore;
-    opponentBestMove = nextBest.move || '';
-    afterDepth = nextBest.depth || depth;
+    const nextBest = orderedNext[0] || null;
+    scoreAfter = nextBest && typeof nextBest.cp === 'number' && Number.isFinite(nextBest.cp)
+      ? nextBest.cp
+      : bestScore;
+    opponentBestMove = nextBest?.move || '';
+    afterDepth = nextBest?.depth || depth;
 
     return this._buildLiveMoveResult({
       fenBefore: prevFen,
@@ -7438,7 +7969,7 @@ this._syncAnticheatForm();
     this._updateEvalBar(0);
     this.liveEvalHistory = [];
     this._drawEvalGraph();
-    this._showOpeningInfo(this.analyzer.detectOpening(this.gameMoves));
+    // Opening card is driven by the async Lichess lookup (_loadGame), not reset.
     this._updateLiveEvalPanel({
       busy: false,
       score: null,
@@ -7537,8 +8068,9 @@ this._syncAnticheatForm();
       meta: '',
     });
 
-    const opening = this.analyzer.detectOpening(this.gameMoves);
-    this._showOpeningInfo(opening);
+    // Opening name + W/D/B stats now come from the Lichess Masters explorer
+    // (async). Show a loading state, then render. (detectOpening() is a no-op.)
+    this._refreshOpeningCard();
 
 	    this._updateBoard();
 	    this._updateCurrentMoveIndicator();
@@ -7773,7 +8305,9 @@ this._syncAnticheatForm();
 	      this._showReviewSummary();
 	      this._renderCriticalMoments();
 	      this._renderPostReviewEvalPanel?.();
-	      this._showOpeningInfo(snapshot.opening || this.analyzer.detectOpening(this.gameMoves));
+	      // Only (re)render the opening card from a saved snapshot that actually
+	      // carries one; otherwise leave the async Lichess-driven card in place.
+	      if (snapshot && snapshot.opening) this._showOpeningInfo(snapshot.opening);
 	    }
 	    if (Number.isInteger(state.currentMoveIndex)) this._goToMove(state.currentMoveIndex);
 	    this._enterReviewMode();
@@ -8118,6 +8652,16 @@ this._syncAnticheatForm();
       return;
     }
 
+    // Brilliant & Great are reward badges — hide them entirely for guests
+    // (not signed in). Guests still see every other classification on the
+    // board. While auth resolves, treat as guest so a returning logged-in
+    // user doesn't briefly lose the badge (re-rendered on auth resolve).
+    const _badgeKey = this.analyzer.getClassificationKey(classification);
+    if ((_badgeKey === 'BRILLIANT' || _badgeKey === 'GREAT') && this._authGateState() !== 'signedIn') {
+      this.elMoveBadge.style.display = 'none';
+      return;
+    }
+
     if (targetSquare && this.board.container) {
       const sqEl = this.board.container.querySelector(`[data-square="${targetSquare}"]`);
       if (sqEl && this.board.wrapper) {
@@ -8147,14 +8691,10 @@ this._syncAnticheatForm();
     this.elBadgeIcon.textContent = classification.icon;
     this.elBadgeText.textContent = '';
 
-    const key = this.analyzer.getClassificationKey(classification);
-    // The celebratory impact animation (bounce/glow) for Brilliant/Great/Blunder
-    // is reserved for signed-in users; guests still see the colored classification
-    // badge, just without the special treatment.
-    const hasImpactBadge = ['BRILLIANT', 'GREAT', 'BLUNDER'].includes(key) && !!this.authState.user;
-    this.elMoveBadge.classList.toggle('badge-impact', hasImpactBadge);
-    this.elMoveBadge.style.animation = 'none';
-    void this.elMoveBadge.offsetHeight;
+    // No special animation or treatment for Brilliant/Great/Blunder — every
+    // classification badge renders identically, in the standard square-corner
+    // position, with no bounce/glow.
+    this.elMoveBadge.classList.remove('badge-impact');
     this.elMoveBadge.style.animation = '';
 
     if (!options.suppressFlash) {
@@ -8277,7 +8817,14 @@ this._syncAnticheatForm();
 
 	    const shownMoveBadges = new Set(['BRILLIANT', 'GREAT', 'MISS', 'MISTAKE', 'INACCURACY', 'BLUNDER']);
 	    const classificationKey = result?.classificationKey || this.analyzer.getClassificationKey(result?.classification);
-	    if (result && !result.isCoachMove && shownMoveBadges.has(classificationKey)) {
+	    // Brilliant & Great are reward badges — only for signed-in users. Guests
+	    // still see Best/Excellent/Good and the error classes (Inaccuracy/
+	    // Mistake/Blunder/Miss); they just don't get the celebratory rewards.
+	    // While auth is resolving, treat as guest so a returning logged-in user
+	    // never briefly loses the badge (the list re-renders on auth resolve).
+	    const signedInForBadges = this._authGateState() === 'signedIn';
+	    const badgeHiddenForGuest = (classificationKey === 'BRILLIANT' || classificationKey === 'GREAT') && !signedInForBadges;
+	    if (result && !result.isCoachMove && shownMoveBadges.has(classificationKey) && !badgeHiddenForGuest) {
 	      const cls = result.classification;
 	      const icon = document.createElement('span');
 	      icon.className = this._classificationIconClass(cls, 'move-icon');
@@ -8596,7 +9143,9 @@ this._syncAnticheatForm();
 			        );
 	      }
 
-				      this._showOpeningInfo(this.analysisResults.opening || this.analyzer.detectOpening(this.gameMoves));
+				      // Re-render the opening card only if a server analysis result
+				      // carried one; otherwise the async Lichess lookup owns the card.
+				      if (this.analysisResults && this.analysisResults.opening) this._showOpeningInfo(this.analysisResults.opening);
 				      await this._sprintReviewPlaybackTo(this.gameMoves.length - 1, { minDelay: 6, maxDelay: 22 });
 			      this._showReviewSummary();
 	      this._renderMoveList();
@@ -8638,7 +9187,7 @@ this._syncAnticheatForm();
 			    // here would race with it.
 		
 			    try {
-				      const response = await fetch('/api/analyze/stream', {
+				      const response = await apiFetch('/api/analyze/stream', {
 				        method: 'POST',
 				        headers: await this._authHeaders({ 'Content-Type': 'application/json', Accept: 'text/event-stream' }),
 			        signal: controller.signal,
@@ -8647,14 +9196,25 @@ this._syncAnticheatForm();
 			          moves: this.gameMoves,
 			          headers: this.gameHeaders || {},
 			          initialFen: this.initialFen,
-				          profile: {
-				            key: reviewProfile.key,
-				            strength: this.engineSettings.serverStrongReview ? 'strong' : 'standard',
-				            depth: this.engineSettings.serverStrongReview ? 16 : 14,
-				            multiPv: this.engineSettings.serverStrongReview ? 3 : 2,
-				            timeoutMs: this.engineSettings.serverStrongReview ? 5000 : 3000,
-				            serverEngine: this.engineSettings.serverStrongReview ? 'full' : 'lite',
-				          },
+				          profile: (() => {
+				            // Boost "stronger" review always uses the Thorough tier
+				            // (depth 18 / ~2s), regardless of the user's selected
+				            // review strength. Otherwise send the resolved profile
+				            // (tier or advanced override). The server clamps + maps
+				            // these onto its review profile (analyze.js).
+				            const strong = !!this.engineSettings.serverStrongReview && this._isPaidOrAbove('boost');
+				            const tier = strong
+				              ? (window.getReviewStrengthTier ? window.getReviewStrengthTier('thorough') : getReviewStrengthTier('thorough'))
+				              : reviewProfile;
+				            return {
+				              key: strong ? 'thorough' : reviewProfile.key,
+				              strength: strong ? 'strong' : 'standard',
+				              depth: tier.depth,
+				              multiPv: tier.multiPv,
+				              timeoutMs: tier.timeoutMs,
+				              serverEngine: strong ? 'full' : 'lite',
+				            };
+				          })()
 			        }),
 			      });
 			      if (!response.ok) {
@@ -8781,11 +9341,108 @@ this._syncAnticheatForm();
     if (!opening) {
       this.elOpeningInfo.style.display = 'none';
       this.elOpeningName.textContent = '';
+      this.elOpeningName.classList.remove('loading');
+      this.elOpeningStats.hidden = true;
+      this.elOpeningStats.innerHTML = '';
       return;
     }
 
     this.elOpeningInfo.style.display = 'flex';
     this.elOpeningName.textContent = `${opening.name}${opening.eco ? ` (${opening.eco})` : ''}`;
+    // Stats (White/Draw/Black from Lichess) if present.
+    if (opening.stats) {
+      this.elOpeningStats.innerHTML = this._openingStatsHtml(opening.stats);
+      this.elOpeningStats.hidden = false;
+    } else {
+      this.elOpeningStats.hidden = true;
+      this.elOpeningStats.innerHTML = '';
+    }
+  }
+
+  // Show the opening card in a loading state while the Lichess lookup is in
+  // flight. The spinner lives on the name via the .loading pseudo-element.
+  _showOpeningLoading() {
+    this.elOpeningInfo.style.display = 'flex';
+    this.elOpeningName.classList.add('loading');
+    this.elOpeningName.textContent = 'Looking up opening…';
+    this.elOpeningStats.hidden = true;
+    this.elOpeningStats.innerHTML = '';
+  }
+
+  _openingStatsHtml(stats) {
+    const cell = (label, pct, cls) => `<span class="opening-stat ${cls}"><span class="opening-stat-val">${pct}%</span><span class="opening-stat-label">${label}</span></span>`;
+    return `<span class="opening-stat-total">${(stats.total || 0).toLocaleString()} master games</span>`
+      + cell('White', stats.whitePct ?? 0, 'owin')
+      + cell('Draw', stats.drawsPct ?? 0, 'odraw')
+      + cell('Black', stats.blackPct ?? 0, 'oloss');
+  }
+
+  // Convert the game's SAN move list (up to `ply`) to a comma-separated UCI
+  // sequence for the Lichess explorer `play` param, by replaying into chess.js.
+  _sanMovesToUciPlay(sanMoves, ply) {
+    const moves = (sanMoves || []).slice(0, ply);
+    if (!moves.length) return '';
+    const chess = new Chess();
+    let uci = '';
+    for (const san of moves) {
+      const m = chess.move(san, { sloppy: true });
+      if (!m) break;
+      const t = m.from + m.to + (m.promotion || '');
+      uci += (uci ? ',' : '') + t;
+    }
+    return uci;
+  }
+
+  // Look up the opening name + W/D/B stats from the Lichess Masters explorer
+  // (via our /api/opening-explorer proxy). Cached per UCI sequence. Returns an
+  // opening object shaped for _showOpeningInfo ({name, eco, stats}) or null.
+  async _fetchOpeningFromLichess(sanMoves, ply) {
+    const play = this._sanMovesToUciPlay(sanMoves, ply);
+    if (!play) return null;
+    if (this._openingCache.has(play)) return this._openingCache.get(play);
+    try {
+      const res = await apiFetch(`/api/opening-explorer?play=${encodeURIComponent(play)}`, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      if (!res.ok) { this._openingCache.set(play, null); return null; }
+      const data = await res.json();
+      if (!data || data.error || !data.opening) { this._openingCache.set(play, null); return null; }
+      const opening = {
+        name: data.opening.name,
+        eco: data.opening.eco,
+        ply,
+        stats: { total: data.total, whitePct: data.whitePct, drawsPct: data.drawsPct, blackPct: data.blackPct },
+      };
+      this._openingCache.set(play, opening);
+      return opening;
+    } catch (_) {
+      this._openingCache.set(play, null);
+      return null;
+    }
+  }
+
+  // Drive the opening card for the currently loaded game: show a loading state,
+  // fetch from Lichess, then render. Called after a game loads and after
+  // analysis completes. The Masters explorer is an OPENING tool — it names the
+  // opening from the first ~10-16 plies, so we cap the lookup there. Sending a
+  // full 90-ply game (a) is pointless (the name doesn't change past the opening)
+  // and (b) makes Lichess reject the query. 16 plies covers any main-line name.
+  async _refreshOpeningCard() {
+    const OPENING_PLY = 16;
+    const moves = this.gameMoves || [];
+    if (!moves.length) { this._showOpeningInfo(null); return; }
+    const ply = Math.min(OPENING_PLY, moves.length);
+    // Guard against stale lookups racing a new game load.
+    const token = (this._openingToken = (this._openingToken || 0) + 1);
+    const play = this._sanMovesToUciPlay(moves, ply);
+    const cached = play ? this._openingCache.get(play) : null;
+    if (cached) { if (token === this._openingToken) this._showOpeningInfo(cached); return; }
+    this._showOpeningLoading();
+    const opening = await this._fetchOpeningFromLichess(moves, ply);
+    if (token !== this._openingToken) return; // a newer load superseded us
+    if (opening) this._showOpeningInfo(opening);
+    else {
+      this.elOpeningName.classList.remove('loading');
+      this.elOpeningInfo.style.display = 'none';
+    }
   }
 
   _renderSkeletonLines(count = 3, className = '') {
@@ -8929,10 +9586,11 @@ this._syncAnticheatForm();
   // just did (loss aversion). Never shown to logged-in users; never modal.
   _maybeShowReviewSaveCta() {
     if (!this.elReviewSaveCta) return;
-    // Hide for signed-in users. Also hide while auth is still resolving so a
+    // Hide for signed-in users AND while auth is still resolving, so a
     // signed-in user never flashes the "save your review" CTA before
     // onAuthStateChanged fires (we re-evaluate on resolve).
-    if (this.authState.user || this.authState.initialized === false) {
+    const gateState = this._authGateState();
+    if (gateState !== 'guest') {
       this.elReviewSaveCta.hidden = true;
       return;
     }
@@ -8976,7 +9634,7 @@ this._syncAnticheatForm();
 
 	  _resetInsightPanel() {
 	    if (this.elMoveInsights) this.elMoveInsights.hidden = !this.explorerReturnState;
-	    this.elInsightEmpty.style.display = 'block';
+	    if (this.elInsightEmpty) this.elInsightEmpty.style.display = 'block';
     this.elInsightContent.style.display = 'none';
     this.elInsightMove.textContent = '';
     this.elInsightClass.textContent = '';
@@ -9027,7 +9685,7 @@ this._syncAnticheatForm();
     }
 
     if (this.elMoveInsights) this.elMoveInsights.hidden = false;
-    this.elInsightEmpty.style.display = 'none';
+    if (this.elInsightEmpty) this.elInsightEmpty.style.display = 'none';
 
     // Feature gate: guests see only a teaser (move + classification) with a
     // sign-up prompt; the detailed rows, coach text, Explore Line, and Top
@@ -9035,9 +9693,8 @@ this._syncAnticheatForm();
     // dismissal so it doesn't nag. NEVER show the gate while auth is still
     // resolving — a signed-in user's authState.user can be null on first paint
     // (Firebase onAuthStateChanged is async), and we re-render on resolve.
-    const signedIn = !!this.authState.user;
-    const authReady = this.authState.initialized !== false;
-    if (!signedIn && authReady) {
+    const gateState = this._authGateState();
+    if (gateState === 'guest') {
       let dismissed = false;
       try { dismissed = window.localStorage.getItem('sidastuff.insightGateDismissed') === '1'; } catch (_) {}
       if (this.elInsightContent) this.elInsightContent.style.display = 'none';
@@ -9057,7 +9714,7 @@ this._syncAnticheatForm();
       }
       return;
     }
-    if (!authReady) {
+    if (gateState === 'resolving') {
       // Auth still resolving: show neither the gate nor the locked content yet.
       if (this.elInsightGate) this.elInsightGate.hidden = true;
       return;

@@ -1,4 +1,4 @@
-const { initAdmin, ADMIN_EMAIL, requireUser, json } = require('./user-service');
+const { initAdmin, requireUser, json } = require('./user-service');
 
 const PRESENCE_STALE_MS = 90 * 1000;
 
@@ -88,7 +88,7 @@ async function getPendingWarning(uid) {
 
 async function requireAdmin(event) {
   const user = await requireUser(event);
-  if (user.email !== ADMIN_EMAIL) {
+  if (!user.admin) {
     const error = new Error('Admin only.');
     error.statusCode = 403;
     throw error;

@@ -30,10 +30,33 @@ const ENGINE_CATALOG = Object.freeze({
 
 const REVIEW_PROFILES = Object.freeze({
   depth10: { key: 'depth10', label: 'Depth 10', depth: 10, multiPv: 2, timeoutMs: 8000, battleDepth: 8 },
-  depth14: { key: 'depth14', label: 'Depth 14', depth: 16, multiPv: 3, timeoutMs: 15000, battleDepth: 12 },
-  depth18: { key: 'depth18', label: 'Depth 18', depth: 20, multiPv: 4, timeoutMs: 20000, battleDepth: 14 },
-  depth22: { key: 'depth22', label: 'Depth 22', depth: 24, multiPv: 5, timeoutMs: 25000, battleDepth: 16 },
-  depth26: { key: 'depth26', label: 'Depth 26', depth: 28, multiPv: 5, timeoutMs: 30000, battleDepth: 18 },
+  depth14: { key: 'depth14', label: 'Depth 14', depth: 14, multiPv: 3, timeoutMs: 12000, battleDepth: 10 },
+  depth18: { key: 'depth18', label: 'Depth 18', depth: 18, multiPv: 3, timeoutMs: 15000, battleDepth: 12 },
+  depth22: { key: 'depth22', label: 'Depth 22', depth: 22, multiPv: 4, timeoutMs: 18000, battleDepth: 14 },
+  depth26: { key: 'depth26', label: 'Depth 26', depth: 26, multiPv: 5, timeoutMs: 22000, battleDepth: 16 },
+});
+
+// Review strength tiers — the primary user-facing strength control. Each tier
+// is a (depth, time cap) pair: depth guarantees cross-move consistency (so
+// cpLoss/eval swings/accuracy stay meaningful and reviews are reproducible),
+// while the time cap bounds worst-case latency. The cap must be generous enough
+// for the lite engine to actually reach the listed depth on tactical positions
+// — a too-tight cap times out mid-search and returns shallower, noisier scores
+// (which reads as "wrong" cp). Measured on lite-single: depth 12 ≈0.2s, depth
+// 14 ≈0.3s, depth 18 ≈0.9s on typical positions, but tactical ones take several
+// times longer, hence the headroom below.
+//
+//   Quick     — fast feedback (≈3s/move cap)
+//   Standard  — good depth, acceptable wait (≈4.5s/move cap) — DEFAULT
+//   Thorough  — deeper, for paying users + anticheat (≈8s/move cap)
+//
+// Advanced users can override depth/time per-review (see _getReviewProfile in
+// app.js). These tiers drive full reviews + server analysis + anticheat ONLY;
+// the live/coach iterative-deepening eval is unaffected (it uses REVIEW_PROFILES).
+const REVIEW_STRENGTH_TIERS = Object.freeze({
+  quick: { key: 'quick', label: 'Quick (≈3s/move)', depth: 12, timeoutMs: 3000, multiPv: 2 },
+  standard: { key: 'standard', label: 'Standard (≈4.5s/move)', depth: 14, timeoutMs: 4500, multiPv: 3 },
+  thorough: { key: 'thorough', label: 'Thorough (≈8s/move)', depth: 18, timeoutMs: 8000, multiPv: 4 },
 });
 
 function getEngineModules(source) {
@@ -47,6 +70,10 @@ function getEngineModuleConfig(source, moduleKey) {
 
 function getReviewProfileConfig(profileKey) {
   return REVIEW_PROFILES[profileKey] || REVIEW_PROFILES.depth14;
+}
+
+function getReviewStrengthTier(tierKey) {
+  return REVIEW_STRENGTH_TIERS[tierKey] || REVIEW_STRENGTH_TIERS.standard;
 }
 
 class UciEngine {
@@ -518,9 +545,11 @@ function createEngineController({ source, module }) {
 
 window.ENGINE_CATALOG = ENGINE_CATALOG;
 window.REVIEW_PROFILES = REVIEW_PROFILES;
+window.REVIEW_STRENGTH_TIERS = REVIEW_STRENGTH_TIERS;
 window.getEngineModules = getEngineModules;
 window.getEngineModuleConfig = getEngineModuleConfig;
 window.getReviewProfileConfig = getReviewProfileConfig;
+window.getReviewStrengthTier = getReviewStrengthTier;
 window.UciEngine = UciEngine;
 window.BrowserStockfishEngine = BrowserStockfishEngine;
 window.createEngineController = createEngineController;

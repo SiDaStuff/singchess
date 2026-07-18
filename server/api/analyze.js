@@ -3,7 +3,7 @@ const { loadAnalyzer, loadChess } = require('./_lib/analysis-loader');
 const {
   incrementPublicStats,
 } = require('./_lib/firebase-stats');
-const { requireQuota } = require('./_lib/user-service');
+const { requireQuota, isPaidOrAbove } = require('./_lib/user-service');
 const crypto = require('crypto');
 
 const SERVER_POSITION_BATCH_LIMIT = 12;
@@ -222,13 +222,15 @@ exports.handler = async (event, context = {}) => {
         const { MoveAnalyzer } = loadAnalyzer();
 	      const analyzer = new MoveAnalyzer();
 	      const profile = payload.profile || {};
-      const preferFullServer = quotaState.plan?.plan === 'boost' && profile.serverEngine === 'full';
+      const preferFullServer = isPaidOrAbove(quotaState.plan?.plan, 'boost') && profile.serverEngine === 'full';
       const isStrong = preferFullServer && profile.strength === 'strong';
       const baseProfile = isStrong ? SERVER_STRONG_REVIEW_PROFILE : SERVER_REVIEW_PROFILE;
       analyzer.setReviewProfile({
         depth: Math.max(baseProfile.depth, Math.min(Number(profile.depth) || baseProfile.depth, isStrong ? 20 : 18)),
         multiPv: Math.max(1, Math.min(Number(profile.multiPv) || baseProfile.multiPv, isStrong ? 4 : 3)),
-        timeoutMs: Math.max(2000, Math.min(Number(profile.timeoutMs) || baseProfile.timeoutMs, baseProfile.timeoutMs)),
+        // Per-move cap from the client strength tier (Quick 1s / Standard 1.5s /
+        // Thorough 2s). Floor at 1s so the tier latency actually takes effect.
+        timeoutMs: Math.max(1000, Math.min(Number(profile.timeoutMs) || baseProfile.timeoutMs, baseProfile.timeoutMs)),
       });
 
   const initialFen = payload.initialFen || payload.headers?.FEN || undefined;
@@ -375,13 +377,18 @@ exports.streamHandler = async (req, res) => {
       const { MoveAnalyzer } = loadAnalyzer();
 	      const analyzer = new MoveAnalyzer();
 	      const profile = payload.profile || {};
-      const preferFullServer = quotaState.plan?.plan === 'boost' && profile.serverEngine === 'full';
+      const preferFullServer = isPaidOrAbove(quotaState.plan?.plan, 'boost') && profile.serverEngine === 'full';
       const isStrong = preferFullServer && profile.strength === 'strong';
       const baseSseProfile = isStrong ? SERVER_STRONG_REVIEW_PROFILE : SERVER_REVIEW_PROFILE;
       analyzer.setReviewProfile({
-        depth: baseSseProfile.depth,
+        // Honor the client's strength-tier depth when provided (Quick 12 /
+        // Standard 14 / Thorough 18, or a custom advanced depth), clamped to a
+        // sensible server range. Falls back to the base profile otherwise.
+        depth: Math.max(8, Math.min(Number(profile.depth) || baseSseProfile.depth, isStrong ? 20 : 18)),
         multiPv: Math.max(1, Math.min(Number(profile.multiPv) || baseSseProfile.multiPv, baseSseProfile.multiPv)),
-        timeoutMs: Math.max(2000, Math.min(Number(profile.timeoutMs) || baseSseProfile.timeoutMs, baseSseProfile.timeoutMs)),
+        // Per-move cap from the client strength tier (Quick 1s / Standard 1.5s /
+        // Thorough 2s). Floor at 1s so the tier latency actually takes effect.
+        timeoutMs: Math.max(1000, Math.min(Number(profile.timeoutMs) || baseSseProfile.timeoutMs, baseSseProfile.timeoutMs)),
       });
 
       const initialFen = payload.initialFen || payload.headers?.FEN || undefined;

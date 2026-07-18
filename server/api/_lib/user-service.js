@@ -18,17 +18,24 @@ const ADMIN_EMAIL = 'sidamailbox@gmail.com';
 const PLAN_TIERS = Object.freeze({
   free: {
     plan: 'free', name: 'Free', theme: 'default',
-    limits: { serverReviewsPerDay: 3, anticheatGamesPerWeek: 0 },
+    limits: { serverReviewsPerDay: 3, anticheatGamesPerWeek: 0, coachTokensPerDay: 5000 },
   },
   boost: {
     plan: 'boost', name: 'Boost', theme: 'purple',
-    limits: { serverReviewsPerDay: null, anticheatGamesPerWeek: 25 },
+    limits: { serverReviewsPerDay: null, anticheatGamesPerWeek: 25, coachTokensPerDay: 20000 },
   },
   max: {
     plan: 'max', name: 'Max', theme: 'gold',
-    limits: { serverReviewsPerDay: null, anticheatGamesPerWeek: 100 },
+    limits: { serverReviewsPerDay: null, anticheatGamesPerWeek: 100, coachTokensPerDay: 100000 },
   },
 });
+
+// Tier ordering for feature gating. Max ranks above Boost so Max inherits every
+// Boost perk — feature gates must use isPaidOrAbove(plan, 'boost'), NOT an exact
+// `plan === 'boost'` equality (which wrongly excludes Max).
+const PLAN_RANK = { free: 0, boost: 1, max: 2 };
+function planRank(plan) { return PLAN_RANK[String(plan || '').toLowerCase()] ?? 0; }
+function isPaidOrAbove(plan, floor) { return planRank(plan) >= planRank(floor); }
 // Back-compat alias for any code that still references FREE_LIMITS.
 const FREE_LIMITS = Object.freeze({
   anticheatRunsPerDay: 1,
@@ -137,6 +144,10 @@ async function requireUser(event) {
     email: String(decoded.email || '').toLowerCase(),
     name: decoded.name || decoded.email || 'Player',
     disabled: false,
+    // Admin is determined solely by the Firebase custom claim (admin: true),
+    // set with scripts/set-admin-claim.cjs. The legacy ADMIN_EMAIL constant is
+    // retired — remove it when convenient.
+    admin: !!(decoded.admin === true),
     _profileSnap: profileSnap,
     _profile: profile,
   };
@@ -188,23 +199,6 @@ function activePlan(profile = {}) {
   };
   if (active && tier !== PLAN_TIERS.free) result.expiresAt = Number(sub.expiresAt);
   return result;
-}
-
-async function maybeRefreshPatreon(uid, profile) {
-  const provider = String(profile?.subscription?.provider || '').toLowerCase();
-  const hasPatreon = !!profile?.patreon;
-  if (provider !== 'patreon' && !hasPatreon) return { refreshed: false };
-
-  const lastCheckedAt = Number(profile?.patreon?.lastCheckedAt) || 0;
-  const maxAgeMs = 24 * 60 * 60 * 1000;
-  if (lastCheckedAt && (Date.now() - lastCheckedAt) < maxAgeMs) return { refreshed: false };
-
-  try {
-    const { ensurePatreonFresh } = require('./patreon-service');
-    return await ensurePatreonFresh(uid, profile, { maxAgeMs });
-  } catch (err) {
-    return { refreshed: false, error: err.message || 'patreon_refresh_failed' };
-  }
 }
 
 function usageDay(now = new Date()) {
@@ -315,7 +309,14 @@ const FORBIDDEN_PROFILE_KEYS = new Set([
   'oauth',
   'email',
   'uid',
+  'lastUsernameChangeAt',
 ]);
+
+// Minimum time between username changes. Prevents username churn (and the
+// public-profile-index churn it causes). A user's FIRST set of a username
+// (no prior lastUsernameChangeAt) is exempt — only subsequent changes are
+// rate-limited.
+const USERNAME_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
 async function patchProfile(uid, update) {
   const { admin: firebaseAdmin, db: database } = initAdmin();
@@ -332,6 +333,50 @@ async function patchProfile(uid, update) {
     }
     sanitized[key] = value;
   }
+
+  // A username can never be cleared — a profile must always carry a non-empty
+  // name. Reject empty/whitespace writes explicitly. This also closes a cooldown
+  // bypass: without it, a user could POST {username:""} (empty skips the
+  // cooldown block below, which guards on `.trim()`, but still gets written),
+  // then re-set a new name and be treated as a fresh first-set (exempt), fully
+  // defeating the 7-day rate limit.
+  if ('username' in sanitized && !String(sanitized.username).trim()) {
+    const err = new Error('Username cannot be empty.');
+    err.statusCode = 400;
+    err.code = 'invalid_username';
+    throw err;
+  }
+
+  // Username-change cooldown: if the new username differs (case-insensitive)
+  // from the current one AND a previous change is within the cooldown window,
+  // reject with a retry time. The first-ever username set is exempt.
+  if (typeof sanitized.username === 'string' && sanitized.username.trim()) {
+    const newKey = sanitized.username.trim().toLowerCase();
+    const snap = await database.ref(`users/${uid}/profile`).once('value');
+    const current = snap.val() || {};
+    const currentUsername = String(current.username || '').trim().toLowerCase();
+    const lastChangedAt = Number(current.lastUsernameChangeAt) || 0;
+    const isActualChange = currentUsername && newKey !== currentUsername;
+    if (isActualChange && lastChangedAt) {
+      const elapsed = Date.now() - lastChangedAt;
+      if (elapsed < USERNAME_COOLDOWN_MS) {
+        const retryAt = lastChangedAt + USERNAME_COOLDOWN_MS;
+        const daysLeft = Math.ceil((USERNAME_COOLDOWN_MS - elapsed) / (24 * 60 * 60 * 1000));
+        const err = new Error(`You can change your username again in ${daysLeft} day${daysLeft === 1 ? '' : 's'}.`);
+        err.statusCode = 429;
+        err.code = 'username_cooldown';
+        err.retryAt = retryAt;
+        err.cooldownDays = daysLeft;
+        throw err;
+      }
+    }
+    // Stamp the change time whenever the username actually changes (or is first
+    // set), so the cooldown applies to the NEXT change.
+    if (isActualChange || !currentUsername) {
+      sanitized.lastUsernameChangeAt = firebaseAdmin.database.ServerValue.TIMESTAMP;
+    }
+  }
+
   // Always set updatedAt server-side
   sanitized.updatedAt = firebaseAdmin.database.ServerValue.TIMESTAMP;
   await database.ref(`users/${uid}/profile`).update(sanitized);
@@ -430,9 +475,6 @@ async function getMe(event) {
     await profileSnap.ref.set(profile);
   }
 
-  // Patreon Boost is refreshed at most once per 24 hours (cached).
-  await maybeRefreshPatreon(user.uid, profile);
-
   // Best-effort: prune usage buckets older than a week (fire-and-forget).
   pruneOldUsage(user.uid).catch(() => {});
 
@@ -453,6 +495,17 @@ async function getMe(event) {
     ...(usageSnap.val() || {}),
     anticheatGames: Math.max(0, Number(weekSnap.val()) || 0),
     week,
+    coachTokens: Math.max(0, Number(usageSnap.child?.('coachTokens')?.val?.() || (usageSnap.val() || {}).coachTokens) || 0),
+    coachTokenLimit: (plan.limits && plan.limits.coachTokensPerDay) || 0,
+  };
+  // Username-change cooldown info so the client can disable the editor and
+  // show remaining time proactively. lastChangedAt = 0 means the username has
+  // never been explicitly changed (first change is exempt from the cooldown).
+  const lastUsernameChangedAt = Number(profile.lastUsernameChangeAt) || 0;
+  const usernameCooldown = {
+    lastChangedAt: lastUsernameChangedAt,
+    cooldownMs: USERNAME_COOLDOWN_MS,
+    canChangeAt: lastUsernameChangedAt ? lastUsernameChangedAt + USERNAME_COOLDOWN_MS : null,
   };
   return {
     user,
@@ -461,8 +514,9 @@ async function getMe(event) {
     usage,
     limits: plan.limits || PLAN_TIERS.free.limits,
     day,
-    isAdmin: user.email === ADMIN_EMAIL,
+    isAdmin: !!user.admin,
     pendingWarning,
+    usernameCooldown,
   };
 }
 
@@ -499,6 +553,48 @@ async function claimUsage(uid, kind, limit, { amount = 1, period = "day" } = {})
       await new Promise((resolve) => setTimeout(resolve, 50 * Math.pow(2, attempt)));
     }
   }
+}
+
+// Atomic token accounting for the AI Coach. Two-phase:
+//   1) reserveCoachTokens: atomically add a WORST-CASE cost up front (rejecting
+//      the whole request if it would exceed the daily cap). This closes the
+//      race where N parallel requests each read the same sub-cap value and all
+//      pass the gate, letting a free user overrun the cap (and run up your LLM
+//      bill). Returns { allowed, total }.
+//   2) reconcileCoachTokens: after the real cost is known, apply a signed delta
+//      (negative = refund the over-reservation). Capped at >= 0.
+// `amount` is in coach-token units (already tier-multiplied by the caller).
+async function _coachTransaction(uid, mutate, { maxRetries = 3 } = {}) {
+  const { db: database } = initAdmin();
+  const day = usageDay();
+  const ref = database.ref(`users/${uid}/usage/${day}/coachTokens`);
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const result = await ref.transaction(mutate, undefined, false);
+      return { committed: result.committed, total: Math.max(0, Number(result.snapshot.val()) || 0) };
+    } catch (err) {
+      if (attempt === maxRetries - 1) throw err;
+      await new Promise((r) => setTimeout(r, 50 * Math.pow(2, attempt)));
+    }
+  }
+}
+
+async function reserveCoachTokens(uid, amount, limit = 0) {
+  const reserve = Math.max(0, Math.trunc(Number(amount) || 0));
+  const { committed, total } = await _coachTransaction(uid, (current) => {
+    const value = Math.max(0, Number(current) || 0);
+    if (limit > 0 && value + reserve > limit) return; // would exceed cap → abort
+    return value + reserve;
+  });
+  return { allowed: committed, total };
+}
+
+async function reconcileCoachTokens(uid, delta) {
+  const d = Math.trunc(Number(delta) || 0); // may be negative (refund)
+  const { total } = await _coachTransaction(uid, (current) => {
+    return Math.max(0, Math.trunc(Number(current) || 0) + d);
+  });
+  return { total };
 }
 
 async function requireQuota(event, kind, options = {}) {
@@ -555,7 +651,7 @@ async function requireQuota(event, kind, options = {}) {
 
 async function giftBoost(event) {
   const actor = await requireUser(event);
-  if (actor.email !== ADMIN_EMAIL) return json(403, { error: 'Admin only.' });
+  if (!actor.admin) return json(403, { error: 'Admin only.' });
   const body = JSON.parse(event.body || '{}');
   const email = String(body.email || '').trim().toLowerCase();
   const days = Math.max(1, Math.min(Math.trunc(Number(body.days) || 0), 366));
@@ -585,7 +681,7 @@ async function giftBoost(event) {
 // Admin-only: clear a user's subscription back to free.
 async function removeSubscription(event) {
   const actor = await requireUser(event);
-  if (actor.email !== ADMIN_EMAIL) return json(403, { error: 'Admin only.' });
+  if (!actor.admin) return json(403, { error: 'Admin only.' });
   const body = JSON.parse(event.body || '{}');
   const email = String(body.email || '').trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(400, { error: 'Valid recipient email is required.' });
@@ -605,6 +701,22 @@ async function removeSubscription(event) {
 }
 
 // Admin-only: list recent support/contact messages for the dashboard.
+//
+// NB: this query relies on a Firebase index. To suppress the
+//   "FIREBASE WARNING: Using an unspecified index. Your data will be
+//    downloaded and filtered on the client. Consider adding
+//    .indexOn: 'createdAt' at /support to your security rules"
+// warning, add the following to the Firebase Realtime Database rules:
+//   {
+//     "rules": {
+//       "support": {
+//         ".indexOn": ["createdAt"],
+//         ...
+//       }
+//     }
+//   }
+// Without the index the warning is benign (admin SDK still returns the
+// correct slice, just without the speedup) but it spams the server logs.
 async function getSupportMessages(limit = 50) {
   const { db: database } = initAdmin();
   const snap = await database.ref('support').orderByChild('createdAt').limitToLast(limit).once('value');
@@ -619,7 +731,7 @@ async function getSupportMessages(limit = 50) {
 // Admin-only: delete a single support message by id.
 async function deleteSupportMessage(event) {
   const actor = await requireUser(event);
-  if (actor.email !== ADMIN_EMAIL) return json(403, { error: 'Admin only.' });
+  if (!actor.admin) return json(403, { error: 'Admin only.' });
   const body = JSON.parse(event.body || '{}');
   const id = String(body.id || '').replace(/[^a-zA-Z0-9_-]/g, '');
   if (!id) return json(400, { error: 'Message id is required.' });
@@ -630,7 +742,7 @@ async function deleteSupportMessage(event) {
 
 async function banUser(event) {
   const actor = await requireUser(event);
-  if (actor.email !== ADMIN_EMAIL) return json(403, { error: 'Admin only.' });
+  if (!actor.admin) return json(403, { error: 'Admin only.' });
   const body = JSON.parse(event.body || '{}');
   const email = String(body.email || '').trim().toLowerCase();
   const reason = String(body.reason || '').trim();
@@ -655,7 +767,7 @@ async function banUser(event) {
 
 async function unbanUser(event) {
   const actor = await requireUser(event);
-  if (actor.email !== ADMIN_EMAIL) return json(403, { error: 'Admin only.' });
+  if (!actor.admin) return json(403, { error: 'Admin only.' });
   const body = JSON.parse(event.body || '{}');
   const email = String(body.email || '').trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(400, { error: 'Valid recipient email is required.' });
@@ -693,8 +805,12 @@ module.exports = {
   initAdmin,
   json,
   patchProfile,
+  planRank,
+  isPaidOrAbove,
   requireQuota,
   requireUser,
+  reserveCoachTokens,
+  reconcileCoachTokens,
   usageDay,
   usageWeek,
 };

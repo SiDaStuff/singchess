@@ -16,42 +16,10 @@ const MoveClassification = Object.freeze({
   BLUNDER: { key: 'BLUNDER', name: 'Blunder', symbol: '??', color: '#ff3c2d', icon: '??', iconType: 'text', description: 'A very bad move that also loses material or the game' },
 });
 
-const OPENING_BOOK = [
-  { eco: 'B00', name: 'King Pawn Opening', moves: ['e4'] },
-  { eco: 'C20', name: "King's Pawn Game", moves: ['e4', 'e5'] },
-  { eco: 'B01', name: 'Scandinavian Defense', moves: ['e4', 'd5'] },
-  { eco: 'B06', name: 'Modern Defense', moves: ['e4', 'g6'] },
-  { eco: 'B07', name: 'Pirc Defense', moves: ['e4', 'd6'] },
-  { eco: 'B12', name: 'Caro-Kann Defense', moves: ['e4', 'c6'] },
-  { eco: 'B20', name: 'Sicilian Defense', moves: ['e4', 'c5'] },
-  { eco: 'B50', name: 'Sicilian Defense', moves: ['e4', 'c5', 'Nf3', 'd6'] },
-  { eco: 'C00', name: 'French Defense', moves: ['e4', 'e6'] },
-  { eco: 'C40', name: "King's Knight Opening", moves: ['e4', 'e5', 'Nf3'] },
-  { eco: 'C44', name: 'Scotch Game', moves: ['e4', 'e5', 'Nf3', 'Nc6', 'd4'] },
-  { eco: 'C45', name: 'Scotch Game, Schmidt Variation', moves: ['e4', 'e5', 'Nf3', 'Nc6', 'd4', 'exd4'] },
-  { eco: 'C44', name: 'Scotch Gambit', moves: ['e4', 'e5', 'Nf3', 'Nc6', 'd4', 'exd4', 'Bc4'] },
-  { eco: 'C50', name: 'Italian Game', moves: ['e4', 'e5', 'Nf3', 'Nc6', 'Bc4'] },
-  { eco: 'C53', name: 'Giuoco Piano', moves: ['e4', 'e5', 'Nf3', 'Nc6', 'Bc4', 'Bc5'] },
-  { eco: 'C55', name: 'Two Knights Defense', moves: ['e4', 'e5', 'Nf3', 'Nc6', 'Bc4', 'Nf6'] },
-  { eco: 'C60', name: 'Ruy Lopez', moves: ['e4', 'e5', 'Nf3', 'Nc6', 'Bb5'] },
-  { eco: 'C65', name: 'Ruy Lopez, Berlin Defense', moves: ['e4', 'e5', 'Nf3', 'Nc6', 'Bb5', 'Nf6'] },
-  { eco: 'D00', name: "Queen's Pawn Game", moves: ['d4'] },
-  { eco: 'D02', name: "Queen's Pawn Game, London System", moves: ['d4', 'd5', 'Bf4'] },
-  { eco: 'D06', name: "Queen's Gambit", moves: ['d4', 'd5', 'c4'] },
-  { eco: 'D30', name: "Queen's Gambit Declined", moves: ['d4', 'd5', 'c4', 'e6'] },
-  { eco: 'D20', name: "Queen's Gambit Accepted", moves: ['d4', 'd5', 'c4', 'dxc4'] },
-  { eco: 'D10', name: 'Slav Defense', moves: ['d4', 'd5', 'c4', 'c6'] },
-  { eco: 'D70', name: 'Neo-Grunfeld Defense', moves: ['d4', 'Nf6', 'c4', 'g6', 'Nc3', 'd5'] },
-  { eco: 'E00', name: 'Catalan Opening', moves: ['d4', 'Nf6', 'c4', 'e6', 'g3'] },
-  { eco: 'E10', name: 'Nimzo-Indian Defense', moves: ['d4', 'Nf6', 'c4', 'e6', 'Nc3', 'Bb4'] },
-  { eco: 'E60', name: "King's Indian Defense", moves: ['d4', 'Nf6', 'c4', 'g6'] },
-  { eco: 'E90', name: "King's Indian Defense, Main Line", moves: ['d4', 'Nf6', 'c4', 'g6', 'Nc3', 'Bg7', 'e4', 'd6'] },
-  { eco: 'A40', name: 'English Opening', moves: ['c4'] },
-  { eco: 'A10', name: 'English Opening, Anglo-Indian', moves: ['c4', 'Nf6'] },
-  { eco: 'A00', name: "Bird Opening", moves: ['f4'] },
-  { eco: 'A02', name: "Bird Opening, Dutch Variation", moves: ['f4', 'd5'] },
-  { eco: 'A04', name: "Reti Opening", moves: ['Nf3'] },
-];
+// Opening names now come from the Lichess Masters explorer (see the async
+// lookup in app.js / /api/opening-explorer), not a local database. detectOpening
+// below is retained as a no-op (returns null) so the many internal callers keep
+// their shape; the review UI fills the opening via the Lichess fetch.
 
 const CLASSIFICATION_ORDER = [
   'BRILLIANT',
@@ -1413,7 +1381,7 @@ class BrowserMoveCoach {
 
 class MoveAnalyzer {
   constructor() {
-    this.analysisDepth = 18;
+    this.analysisDepth = 14;
     this.multiPvCount = 3;
     this.fallbackTimeoutMs = 12000;
     this.bookPly = 16;
@@ -1506,42 +1474,25 @@ class MoveAnalyzer {
     return 'GOOD';
   }
 
-  _cleanSanMove(move) {
-    if (!move) return '';
-    return move
-      .replace(/[+#?!]/g, '')
-      .replace(/e\.p\./gi, '')
-      .trim();
-  }
-
+  // Opening detection is now async (Lichess Masters explorer, see app.js
+  // _fetchOpeningFromLichess). This no-op keeps the many internal callers and
+  // the resultsFromEvals swap working: it returns null, and the review UI fills
+  // the opening via the Lichess fetch. `opening.ply`/isInBook internals tolerate
+  // null (guarded with `opening && ...`).
   detectOpening(moves) {
-    if (!Array.isArray(moves) || moves.length === 0) return null;
-    const cleanMoves = moves.map((m) => this._cleanSanMove(m));
-    let best = null;
-
-    for (const entry of OPENING_BOOK) {
-      if (entry.moves.length > cleanMoves.length) continue;
-      let matches = true;
-      for (let i = 0; i < entry.moves.length; i++) {
-        if (cleanMoves[i] !== entry.moves[i]) {
-          matches = false;
-          break;
-        }
-      }
-      if (matches && (!best || entry.moves.length > best.moves.length)) {
-        best = entry;
-      }
-    }
-
-    if (!best) return null;
-    return {
-      eco: best.eco,
-      name: best.name,
-      ply: best.moves.length,
-    };
+    return null;
   }
 
   _cpLoss(bestScoreAfter, playedScoreAfter, isWhitePlaying) {
+    // When both evals are in the forced-mate band for the same side, the move
+    // is just advancing/defending a known mate — its cost is effectively 0 cp,
+    // never the ~10000 delta that would otherwise clamp to the 1200 ceiling.
+    // (mate band = |score| ≥ 9900.)
+    const bb = Math.abs(bestScoreAfter);
+    const ab = Math.abs(playedScoreAfter);
+    if (bb >= 9900 && ab >= 9900 && ((bestScoreAfter >= 0) === (playedScoreAfter >= 0))) {
+      return 0;
+    }
     const edgeBefore = isWhitePlaying ? bestScoreAfter : -bestScoreAfter;
     const edgeAfter = isWhitePlaying ? playedScoreAfter : -playedScoreAfter;
     const raw = Math.max(0, edgeBefore - edgeAfter);
@@ -1790,12 +1741,17 @@ class MoveAnalyzer {
       isBestMove,
       gapToSecond,
       opponentJustBlundered,
+      isInBook = false,
     } = moveData;
 
     // Fixed thresholds, same for all ratings/time controls. cpLoss is in
     // centipawns from the player's perspective (0 = top move, larger = worse).
+    // Tuned so a single tactical lapse near 100cp reads as inaccuracy, not
+    // mistake — fixed-depth eval wobble routinely lands at 100-150cp on the
+    // difference between "best" and the second-best line, and we don't want
+    // every such wiggle labeled Mistake (which has a red flag in the UI).
     const INACCURACY_CP = 50;
-    const MISTAKE_CP = 100;
+    const MISTAKE_CP = 150;
     const BLUNDER_CP = 300;
     const MATE_EDGE = -9000;            // "being mated" evaluation band
     const wasBeingMated = playerEdgeBefore <= MATE_EDGE;
@@ -1836,9 +1792,14 @@ class MoveAnalyzer {
       return MoveClassification.BRILLIANT;
     }
 
-    // BOOK — a conventional opening move (no real cost). Evaluated before
-    // the error classes so the opening is never penalized for search noise.
-    if (movePly <= this.bookPly && cpLoss <= 10 && !opponentJustBlundered) {
+    // BOOK — a move that is still on a recognized opening line AND cost
+    // nothing meaningful. Gated on isInBook (the move is within the matched
+    // book prefix) rather than a raw ply count, so a real opening mistake
+    // (...Ke7??, ...f6?!) is never hidden behind a BOOK label, while a true
+    // book move (1.e4) stays BOOK even when search noise at the fixed review
+    // depth momentarily inflates its cpLoss past 10. The 30cp tolerance covers
+    // the normal depth-14 eval wobble on opening positions.
+    if (isInBook && cpLoss <= 30 && !opponentJustBlundered) {
       return MoveClassification.BOOK;
     }
 
@@ -1851,14 +1812,18 @@ class MoveAnalyzer {
     if (isBestOrForced) {
       const beforeExpected = this.expectedPoints(playerEdgeBefore);
       const afterExpected = this.expectedPoints(playerEdgeAfter);
-      // GREAT — the best move was clearly the only good move (large gap to the
-      // second line) AND it changed the game outcome: equal→winning, or a
-      // rescue from a worse spot. Strict and rare.
-      const drawingToWinning = beforeExpected >= 0.45 && beforeExpected <= 0.65 && afterExpected >= 0.72;
-      const rescue = beforeExpected <= 0.40 && afterExpected >= 0.55;
+      // GREAT — the best move was clearly better than every alternative (a real
+      // gap to the second line) AND it meaningfully improved the player's
+      // prospects: converting a roughly-equal/edge position into a clear edge,
+      // turning a winning edge into a decisive one, or rescuing a worse spot.
+      // Loosened from the previous ultra-narrow windows so genuinely strong
+      // moves are recognized, while still staying stricter than BEST.
+      const drawingToWinning = beforeExpected >= 0.40 && beforeExpected <= 0.70 && afterExpected >= 0.68;
+      const winningToDecisive = beforeExpected >= 0.65 && beforeExpected <= 0.85 && afterExpected >= 0.80;
+      const rescue = beforeExpected <= 0.42 && afterExpected >= 0.52;
       if (isBestMove
-        && gapToSecond >= 120
-        && (drawingToWinning || rescue)) {
+        && gapToSecond >= 60
+        && (drawingToWinning || winningToDecisive || rescue)) {
         return MoveClassification.GREAT;
       }
       return MoveClassification.BEST;
@@ -2274,12 +2239,15 @@ class MoveAnalyzer {
     return sanMoves.join(' ');
   }
 
-  _orderLinesForSide(lines, isWhiteToMove) {
+  // `lines[].cp` are Stockfish side-to-move-relative scores (see normalizeScore:
+  // it deliberately no longer negates for Black-to-move). Positive always means
+  // "good for the side to move", so the mover's best line is the one with the
+  // HIGHEST cp regardless of color. The previous Black branch sorted ascending,
+  // which put Black's WORST line first — corrupting bestMove/eval/pv/alternatives
+  // and the eval-bar sign for every Black-to-move position.
+  _orderLinesForSide(lines, _isWhiteToMove) {
     const ordered = lines.slice();
-    ordered.sort((a, b) => {
-      if (isWhiteToMove) return b.cp - a.cp;
-      return a.cp - b.cp;
-    });
+    ordered.sort((a, b) => b.cp - a.cp);
     return ordered;
   }
 
@@ -2524,7 +2492,7 @@ class MoveAnalyzer {
       // Result-level evals are stored White-absolute (positive = good for
       // White). evals[i].cp / evals[i].lines[].cp are Stockfish side-to-move-
       // relative scores, so convert via the FEN's side-to-move field.
-      const scoreBefore = this.whiteAbsCp(evals[i].cp, fen);
+      let scoreBefore = this.whiteAbsCp(evals[i].cp, fen);
 
       // scoreAfter is the eval of the position AFTER the played move, i.e. the
       // next position's eval (evals[i+1]). evals[i].lines[0].cp is the eval of
@@ -2542,20 +2510,41 @@ class MoveAnalyzer {
         scoreAfter = this.whiteAbsCp(bestLineCp, fen);
       }
 
-      // Mate propagation: if the position BEFORE the move was a forced mate
-      // (|scoreBefore| in the mate band) and the played move is the engine's
-      // top choice, the position after is still a forced mate for the same
-      // side — a shallow child eval (evals[i+1]) that lost the mate at fixed
-      // depth should NOT flip the eval to a normal cp and make the review read
-      // as if the mating player suddenly lost their advantage. Keep scoreAfter
-      // in the mate band (mate distance may shift by one ply, which is fine).
-      const bestMoveHere = evals[i].bestMove;
-      if (!isCheckmate && Math.abs(scoreBefore) >= 9900 && movePlayedUci === bestMoveHere) {
+      // Mate-band consistency. Forced mates (|score| ≥ 9900) are a fixed-depth
+      // search artifact on the child eval: when the engine's BEST move keeps a
+      // forced mate alive, the shallow child search (evals[i+1]) frequently
+      // fails to see the mate at the review depth and reports a normal cp
+      // instead. That made a "Best" mating move read as "eval drops to +2.5" or
+      // show cpLoss 1200 / swing +20.0, because the ~10000 delta got clamped by
+      // _cpLoss/formatSwing. So when the position BEFORE the move is a forced
+      // mate AND the played move is the engine's top (mating) move, restore
+      // scoreAfter into the SAME-sign mate band, advancing the mate distance by
+      // one ply (the normal +10cp shift when the mating side moves).
+      //
+      // IMPORTANT: restoration is GATED on the played move being the engine's
+      // top choice (the mating move). A forced mate means the BEST line mates —
+      // it does NOT mean every move preserves the mate. A different played move
+      // can throw the mate away, after which evals[i+1] (opponent to move)
+      // correctly reports a normal cp; restoring that back into the mate band
+      // would overwrite the genuine eval, drive _cpLoss to 0 (via the mate-band
+      // short-circuit), and label a mate-throwing blunder as BEST. So only the
+      // engine's own (mating) move gets the child's lost-mate restored.
+      // We do NOT symmetrically propagate a child-only mate backward onto
+      // scoreBefore: a mate that appears only in the child is usually created
+      // by the played move (or the opponent's reply), and propagating it
+      // backward would likewise zero out cpLoss and hide the blunder that
+      // walked into it.
+      // We never override a genuine checkmate score or a child that already sees
+      // a same-sign mate.
+      if (!isCheckmate
+        && Math.abs(scoreBefore) >= 9900
+        && movePlayedUci === evals[i].bestMove) {
+        const dist = 10000 - Math.abs(scoreBefore);
         const sign = scoreBefore >= 0 ? 1 : -1;
-        // Only override if the child eval disagrees in sign/magnitude (i.e. it
-        // lost the mate). If the child also sees a mate, trust the child.
+        // Only override when the child eval disagrees (lost the mate). If the
+        // child also sees a same-sign mate, trust the child.
         if (sign > 0 ? scoreAfter < 9900 : scoreAfter > -9900) {
-          scoreAfter = sign > 0 ? Math.max(scoreAfter, 9990) : Math.min(scoreAfter, -9990);
+          scoreAfter = sign * Math.max(9900, 10000 - (dist + 10));
         }
       }
 
@@ -2611,7 +2600,14 @@ class MoveAnalyzer {
 		        playerRating,
 		        timeControl,
 		        opponentJustBlundered,
-		      });
+		        // True only while the game is still following a recognized opening
+		        // line (move i is within the matched book prefix). This replaces the
+		        // old `movePly <= bookPly` heuristic, which stamped every early move
+		        // as BOOK — hiding real opening mistakes (e.g. ...Ke7??) and letting
+		        // search noise flip a true book move (1.e4) into an inaccuracy once
+		        // cpLoss crept past 10.
+		        isInBook: !!(opening && i < opening.ply),
+	      });
 
       const alternatives = evals[i].lines.slice(0, this.multiPvCount).map((line, idx) => ({
         rank: idx + 1,
@@ -2957,7 +2953,6 @@ class MoveAnalyzer {
 }
 
 window.MoveClassification = MoveClassification;
-window.OPENING_BOOK = OPENING_BOOK;
 window.CLASSIFICATION_ORDER = CLASSIFICATION_ORDER;
 window.MoveAnalyzer = MoveAnalyzer;
 window.clamp = clamp;

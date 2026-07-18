@@ -1,9 +1,11 @@
+import './api-base.js';
 import './pieces.js';
 import './board.js';
 import './engine.js';
 import './chess-core.js';
 import './app-dialog.js';
 import './boost.js';
+import './coach-chat.js';
 import './header.js';
 import './footer.js';
 import './app.js';

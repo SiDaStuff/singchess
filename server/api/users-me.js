@@ -20,6 +20,7 @@ exports.handler = async (event) => {
       error: err.message || 'Could not load account.',
       code: err.code,
       reason: err.reason,
+      cooldownDays: err.cooldownDays,
     });
   }
 };

@@ -4,7 +4,11 @@ const morgan = require('morgan');
 const path = require('path');
 const fs = require('fs');
 try {
-  require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+  // Read the repo-root .env (same file Vite reads). Previously this pointed at
+  // server/.env, which doesn't exist — server-only secrets like GROQ_API_KEY
+  // would never have loaded. Fall back to server/.env if the root is absent.
+  const rootEnv = path.resolve(__dirname, '..', '.env');
+  require('dotenv').config({ path: fs.existsSync(rootEnv) ? rootEnv : path.resolve(__dirname, '.env') });
 } catch (e) {
   // ignore if dotenv not installed
 }
@@ -25,6 +29,10 @@ const adminBanUserFn = require('./api/admin-ban-user.js');
 const usersMeStreamFn = require('./api/users-me-stream.js');
 const banStatusFn = require('./api/ban-status.js');
 const adminDashboardFn = require('./api/admin-dashboard.js');
+const siteVisitFn = require('./api/site-visit.js');
+const coachChatFn = require('./api/coach-chat.js');
+const coachToolResultFn = require('./api/coach-tool-result.js');
+const openingExplorerFn = require('./api/opening-explorer.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -33,12 +41,14 @@ const publicDir = path.resolve(__dirname, '../public');
 const distDir = path.resolve(__dirname, '../dist');
 const serveStatic = process.env.SERVE_STATIC !== '0';
 const isDev = process.env.NODE_ENV === 'development' || process.env.CHESS_REVIEW_DEV_SERVER === '1';
-const allowedOrigins = new Set(['https://chess.sidastuff.com']);
-// Always allow common Vite dev server origins for development
+const allowedOrigins = new Set(['https://chess.sidastuff.com', 'https://chess.singdevelopments.com']);
+// Localhost origins are always safe to allow: browsers never send Origin:localhost
+// to a real production domain, and they're necessary for direct :3000 access
+// during dev, health checks, or local preview of the production build.
 ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:5173', 'http://127.0.0.1:5173']
   .forEach((origin) => allowedOrigins.add(origin));
 if (isDev) {
-  // Additional dev-only origins can be added here if needed
+  // Extra dev-only origins (e.g. HTTPS localtunnel / ngrok) can go here.
 }
 const rateBuckets = new Map();
 
@@ -200,6 +210,7 @@ app.post('/api/anticheat', analysisLimit, wrapHandler(anticheatFn));
 app.post('/api/anticheat/stream', analysisLimit, anticheatFn.streamHandler);
 app.get('/api/puzzle', wrapHandler(getPuzzleFn));
 app.get('/api/recent-games', wrapHandler(recentGamesFn));
+app.get('/api/opening-explorer', wrapHandler(openingExplorerFn));
 app.get('/api/public-stats', wrapHandler(publicStatsFn));
 app.post('/api/public-stats', writeLimit, wrapHandler(publicStatsFn));
 app.post('/api/puzzle/solve', writeLimit, wrapHandler(puzzleSolveFn));
@@ -210,11 +221,15 @@ app.get('/api/profile/:username', profileFn.expressHandler);
 app.get('/api/profile', wrapHandler(profileFn));
 app.post('/api/users/me', writeLimit, wrapHandler(usersMeFn));
 app.get('/api/users/me/stream', usersMeStreamFn.streamHandler);
+app.post('/api/coach/chat', writeLimit, coachChatFn.streamHandler);
+app.post('/api/coach/tool-result', writeLimit, wrapHandler(coachToolResultFn));
 app.post('/api/admin/gift-boost', writeLimit, wrapHandler(giftBoostFn));
 app.post('/api/admin/remove-subscription', writeLimit, wrapHandler(adminPlansFn.removeSubscriptionHandler));
+app.post('/api/admin/ban-user', writeLimit, wrapHandler(adminBanUserFn));
 app.get('/api/admin/support', wrapHandler(adminPlansFn.supportListHandler));
 app.post('/api/admin/support/delete', writeLimit, wrapHandler(adminPlansFn.supportDeleteHandler));
 app.post('/api/contact', writeLimit, wrapHandler(contactFn));
+app.post('/api/site/visit', writeLimit, wrapHandler(siteVisitFn));
 app.get('/api/admin/dashboard', wrapHandler(adminDashboardFn));
 app.post('/api/admin/dashboard', writeLimit, wrapHandler(adminDashboardFn));
 

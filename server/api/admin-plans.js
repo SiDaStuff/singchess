@@ -1,4 +1,4 @@
-const { removeSubscription, getSupportMessages, deleteSupportMessage, requireUser, ADMIN_EMAIL, json } = require('./_lib/user-service');
+const { removeSubscription, getSupportMessages, deleteSupportMessage, requireUser, json } = require('./_lib/user-service');
 
 // POST /api/admin/remove-subscription — clears a user's subscription to free.
 // Exposed as { handler } so it matches the wrapHandler(fn) -> fn.handler convention.
@@ -20,7 +20,7 @@ exports.supportListHandler = {
     if (event.httpMethod === 'OPTIONS') return json(200, {});
     try {
       const user = await requireUser(event);
-      if (user.email !== ADMIN_EMAIL) return json(403, { error: 'Admin only.' });
+      if (!user.admin) return json(403, { error: 'Admin only.' });
       const messages = await getSupportMessages(50);
       return json(200, { messages });
     } catch (err) {

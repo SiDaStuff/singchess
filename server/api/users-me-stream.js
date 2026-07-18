@@ -72,10 +72,13 @@ exports.streamHandler = async (req, res) => {
   }
 
   let closed = false;
+  let interval = null;
+  let maxAge = null;
   const stopStream = () => {
     if (closed) return;
     closed = true;
-    clearInterval(interval);
+    if (interval) clearInterval(interval);
+    if (maxAge) clearTimeout(maxAge);
     clearUserPresence(user.uid).catch(() => {});
     if (!res.finished) res.end();
   };
@@ -122,10 +125,14 @@ exports.streamHandler = async (req, res) => {
   sseWrite(res, 'status', { message: 'connected', email: user.email });
   await pushWarningIfNeeded(res, user.uid);
 
-  const interval = setInterval(() => {
+  interval = setInterval(() => {
     sendHeartbeat();
     checkStatus();
   }, 20000);
+
+  // Cap the stream lifetime so an idle client (tab left open) can't hold a
+  // connection + file descriptor forever. 15 min; the client reconnects.
+  maxAge = setTimeout(stopStream, 15 * 60 * 1000);
 
   req.on('close', stopStream);
 };

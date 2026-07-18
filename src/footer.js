@@ -5,7 +5,7 @@
     footer.innerHTML = `
       <span>SiDaStuff Chess</span>
       <nav aria-label="Footer navigation">
-        <a href="/boost">Boost</a>
+        <a href="/plans">Plans</a>
         <a href="/settings">Settings</a>
         <a href="/privacy">Privacy</a>
         <a href="/terms">Terms</a>

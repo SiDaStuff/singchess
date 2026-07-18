@@ -6,15 +6,24 @@ const https = require('https');
 // This prevents the server from being used to reach internal services,
 // cloud metadata endpoints (169.254.169.254), or localhost.
 const ALLOWED_HOSTNAMES = new Set([
+  // AI Coach LLM providers
+  'api.llm7.io',
+  'api.cerebras.ai',
+  'api.groq.com',
+  'api.mistral.ai',
+  // Lichess
   'lichess.org',
   'www.lichess.org',
+  'explorer.lichess.org',
+  'explorer.lichess.ovh',
   'api.chess.com',
   'www.chess.com',
   'fonts.googleapis.com',
   'accounts.google.com',
   'oauth2.googleapis.com',
-  'content-patreon-production.s3.amazonaws.com',
-  'api.patreon.com',
+  // AI Coach web_search tool (no API key, public endpoints):
+  'en.wikipedia.org',
+  'api.duckduckgo.com',
 ]);
 
 // Check if a hostname is an IP address (v4 or v6)
@@ -75,8 +84,24 @@ function validateUrl(urlString) {
   return parsed;
 }
 
+// Validate EVERY request URL (including each redirect hop) against the
+// allowlist. This is the core SSRF defense.
+async function fetchWithGlobal(urlString, options, redirectCount) {
+  const parsed = validateUrl(urlString); // throws if host isn't allowlisted
+  // redirect:'manual' so fetch does NOT silently follow a redirect to a
+  // non-allowlisted host; we re-validate each Location ourselves.
+  const res = await fetch(urlString, { ...options, redirect: 'manual' });
+  if ([301, 302, 303, 307, 308].includes(res.status) && res.headers.get('location') && redirectCount < 4) {
+    const next = new URL(res.headers.get('location'), parsed).toString();
+    // consume/abort the redirect response body before recursing
+    try { await res.arrayBuffer(); } catch (_) {}
+    return fetchCompat(next, options, redirectCount + 1);
+  }
+  return res;
+}
+
 function fetchCompat(url, options = {}, redirectCount = 0) {
-  if (typeof fetch === 'function') return fetch(url, options);
+  if (typeof fetch === 'function') return fetchWithGlobal(url, options, redirectCount);
   const parsed = validateUrl(url);
   return new Promise((resolve, reject) => {
     try {

@@ -1,9 +1,19 @@
 const { initAdmin, json, requireUser } = require('./_lib/user-service');
 
+// Extract the originating IP for per-IP rate limiting (respects XFF only when
+// the server is behind a trusted proxy — see TRUST_PROXY in server/index.cjs).
+function clientIp(event) {
+  const h = event.headers || {};
+  return String(h['x-forwarded-for'] || h['x-real-ip'] || '').split(',')[0].trim() || 'unknown';
+}
+
 // POST /api/contact — saves a contact/support message to Firebase support/{id}.
-// Auth is OPTIONAL: capture uid/email if the user is signed in, but allow
-// anonymous (logged-out) submissions too. Rate-limited per-IP by the Express
-// middleware (writeLimit) registered on the route.
+//
+// Signed-in users: their verified JWT email is the sender (trusted). Anonymous
+// submissions are allowed but (a) capped to 3/day per IP and (b) stored with an
+// `anonymous: true` flag so the admin inbox never displays an attacker-supplied
+// email as if it were a verified sender (no impersonation). A body `email` from
+// an anonymous submitter is stored as an optional `contactEmail` hint only.
 exports.handler = async (event = {}) => {
   try {
     if (event.httpMethod === 'OPTIONS') return json(200, {});
@@ -16,23 +26,39 @@ exports.handler = async (event = {}) => {
       return json(400, { error: 'Invalid JSON body.' });
     }
 
-    const email = String(payload.email || '').trim().toLowerCase();
     const reason = String(payload.reason || 'general').trim().slice(0, 40);
     const message = String(payload.message || '').trim();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(400, { error: 'A valid email is required.' });
     if (message.length < 5) return json(400, { error: 'Please enter a message (at least a few words).' });
 
-    // Capture the signed-in uid/email if a valid token is present (optional).
+    // Resolve the sender: prefer a verified signed-in user; fall back to anonymous.
     let uid = null;
+    let senderEmail = '';
+    let anonymous = true;
     try {
       const user = await requireUser(event);
-      if (user?.uid) uid = user.uid;
+      if (user?.uid) { uid = user.uid; senderEmail = user.email || ''; anonymous = false; }
     } catch (_err) { /* anonymous submission */ }
+
+    if (anonymous) {
+      // Per-IP daily cap on anonymous contact to prevent inbox/DB flooding.
+      const { tryClaimRateLimit } = require('./_lib/firebase-stats');
+      const allowed = await tryClaimRateLimit('contact_anon', clientIp(event), 24 * 60 * 60 * 1000).catch(() => true);
+      if (!allowed) return json(429, { error: 'You\'ve sent a few messages already today. Please try again tomorrow.' });
+    }
+
+    // An anonymous submitter's body email is an unverified hint only — never the
+    // trusted sender. Validate it lightly if present.
+    const contactEmail = anonymous ? String(payload.email || '').trim().toLowerCase() : '';
+    if (contactEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(contactEmail)) {
+      return json(400, { error: 'A valid email is required.' });
+    }
 
     const { admin: firebaseAdmin, db: database } = initAdmin();
     const ref = database.ref('support').push();
     await ref.set({
-      email,
+      email: senderEmail || (contactEmail || ''),
+      anonymous,
+      contactEmail: anonymous ? contactEmail : '',
       reason,
       message: message.slice(0, 4000),
       uid,

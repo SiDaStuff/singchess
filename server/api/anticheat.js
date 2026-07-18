@@ -19,10 +19,15 @@ const MAX_GAMES = 15;
 const MAX_PLIES_PER_GAME = 90;
 // Limit total positions evaluated in one request to avoid serverless timeouts.
 const TOTAL_POSITIONS_LIMIT = 220;
+// Anticheat evaluates up to TOTAL_POSITIONS_LIMIT positions (potentially across
+// multiple games) on the single-threaded server engine, so depth is kept moderate
+// to avoid serverless timeouts. Bumped from depth 10/MPV 1 toward a more thorough
+// depth 12/MPV 2 (≈2s/position) since cheat detection benefits from the extra
+// depth and the user is actively waiting for the result.
 const ANTICHEAT_PROFILE = {
-  depth: 10,
-  multiPv: 1,
-  timeoutMs: 2800,
+  depth: 12,
+  multiPv: 2,
+  timeoutMs: 2000,
 };
 const { fetchCompat } = require('./_lib/fetch-compat');
 const { requireQuota } = require('./_lib/user-service');

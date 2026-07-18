@@ -5,7 +5,7 @@
     ['/coach', 'Coach'],
     ['/puzzles', 'Puzzles'],
     ['/anticheat', 'Anticheat'],
-    ['/boost', 'Boost'],
+    ['/plans', 'Plans'],
     ['/account', 'Account'],
     ['/settings', 'Settings'],
   ];

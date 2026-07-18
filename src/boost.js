@@ -133,7 +133,10 @@
   const elAuthRequired = document.getElementById('spa-boost-auth-required');
   const elContent = document.getElementById('spa-boost-content');
   const elStatusCard = document.getElementById('spa-boost-status-card');
-  const elStatusTitle = document.getElementById('spa-boost-status-title');
+  // HTML renamed this id to `spa-plans-status-title`. Fall back to the old
+  // name for any older markup so the activation banner still updates.
+  const elStatusTitle = document.getElementById('spa-plans-status-title')
+    || document.getElementById('spa-boost-status-title');
   const elStatusText = document.getElementById('spa-boost-status-text');
   const elBtnAccount = document.getElementById('btn-boost-to-account');
 
@@ -149,7 +152,7 @@
   }
 
   async function loadMe(user) {
-    const res = await fetch('/api/users/me', { headers: await authHeaders(user), cache: 'no-store' });
+    const res = await window.apiFetch('/api/users/me', { headers: await authHeaders(user), cache: 'no-store' });
     const json = await res.json().catch(() => null);
     if (!res.ok) throw new Error(json?.error || `Account API responded with ${res.status}`);
     return json;
