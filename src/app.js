@@ -1925,6 +1925,19 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
         '  <div class="admin-abuse-reasons">' + (a.reasons || []).map((r) => this._escapeHtml(r)).join(' · ') + '</div>',
         a.usageDetails?.length ? '  <div class="admin-abuse-details">' + a.usageDetails.map((d) => this._escapeHtml(d)).join('<br>') + '</div>' : '',
         a.multiAccountCount ? '  <div class="admin-abuse-links">Linked accounts: ' + a.multiAccountCount + '</div>' : '',
+        '  <div class="admin-abuse-notes">',
+        (a.notes || []).map((n) =>
+          '    <div class="admin-abuse-note" data-noteid="' + this._escapeHtml(n.id || '') + '">' +
+          '      <span class="admin-abuse-note-text">' + this._escapeHtml(n.text || '') + '</span>' +
+          '      <span class="admin-abuse-note-meta">— ' + this._escapeHtml(n.author || '') + (n.updatedAt ? ' · ' + new Date(n.updatedAt).toLocaleString() : '') + '</span>' +
+          '      <span class="admin-abuse-note-actions">' +
+          '        <button class="btn btn-secondary btn-small admin-abuse-note-edit" type="button">Edit</button>' +
+          '        <button class="btn btn-secondary btn-small admin-abuse-note-remove" type="button">Remove</button>' +
+          '      </span>' +
+          '    </div>'
+        ).join('') || '    <p class="account-status">No notes.</p>',
+        '    <button class="btn btn-secondary btn-small admin-abuse-note-add" type="button">+ Add note</button>',
+        '  </div>',
         '  <div class="admin-abuse-actions">',
         '    <button class="btn btn-primary btn-small admin-abuse-ban" type="button" ' + (a.banned ? 'disabled' : '') + '>Ban for abuse</button>',
         '    <button class="btn btn-secondary btn-small admin-abuse-dismiss" type="button">Dismiss</button>',
@@ -1937,7 +1950,48 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
       list.querySelectorAll('.admin-abuse-dismiss').forEach((btn) => {
         btn.addEventListener('click', () => this._adminAbuseAction(btn.closest('.admin-abuse-item')?.dataset.uid, 'dismiss'));
       });
+      list.querySelectorAll('.admin-abuse-note-add').forEach((btn) => {
+        btn.addEventListener('click', () => this._adminAbuseNote(btn.closest('.admin-abuse-item')?.dataset.uid, 'add'));
+      });
+      list.querySelectorAll('.admin-abuse-note-edit').forEach((btn) => {
+        const item = btn.closest('.admin-abuse-item');
+        const note = btn.closest('.admin-abuse-note');
+        btn.addEventListener('click', () => this._adminAbuseNote(item?.dataset.uid, 'edit', note?.dataset.noteid));
+      });
+      list.querySelectorAll('.admin-abuse-note-remove').forEach((btn) => {
+        const item = btn.closest('.admin-abuse-item');
+        const note = btn.closest('.admin-abuse-note');
+        btn.addEventListener('click', () => this._adminAbuseNote(item?.dataset.uid, 'remove', note?.dataset.noteid));
+      });
     } catch (_err) { list.innerHTML = '<p class="account-status error">Could not load flagged accounts.</p>'; }
+  }
+
+  // Add / edit / remove an admin note on an account.
+  async _adminAbuseNote(uid, action, noteId = '') {
+    if (!uid) return;
+    const status = this.elAdminAbuseStatus;
+    const set = (m, c) => { if (status) { status.textContent = m; status.className = 'account-status ' + c; } };
+    let text = '';
+    if (action === 'add') {
+      text = window.prompt('Note text:') || '';
+      if (!text.trim()) return;
+    } else if (action === 'edit') {
+      text = window.prompt('Edit note:') || '';
+      if (!text.trim()) return;
+    } else if (action === 'remove') {
+      if (!window.confirm('Remove this note?')) return;
+    }
+    set('Working...', '');
+    try {
+      const res = await apiFetch('/api/admin/abuse/notes', {
+        method: 'POST', headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ action, uid, noteId, text }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed (' + res.status + ')');
+      set(action === 'remove' ? 'Note removed.' : 'Note saved.', 'success');
+      this._loadAdminAbuse();
+    } catch (err) { set(err.message || 'Note action failed.', 'error'); }
   }
 
   async _adminAbuseAction(uid, action) {

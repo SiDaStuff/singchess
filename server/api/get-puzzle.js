@@ -81,12 +81,14 @@ exports.handler = async (event) => {
     }
 
     if (event.httpMethod === 'GET' && type === 'next') {
+      // Per-user "already attempted" tracking is owned by the client
+      // (puzzleMode.attemptedPuzzleIds). The server is stateless here, so no
+      // attemptedIds set is passed — getNextPuzzle defaults to an empty set.
       const payload = await puzzleDb.getNextPuzzle({
         theme: theme || 'mix',
         difficulty: difficulty || 'normal',
         target: target ? Number(target) : 1500,
         exclude: exclude || '',
-        attemptedIds,
       });
       if (!payload) {
         return {

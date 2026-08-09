@@ -215,6 +215,22 @@ async function listFlaggedAccounts(event) {
     // Deduplicate reasons.
     const uniqueReasons = [...new Set(data.reasons || [])];
 
+    // Load admin notes for this account (abuse/notes/<uid>).
+    let notes = [];
+    try {
+      const notesSnap = await db.ref(`abuse/notes/${uid}`).once('value');
+      const notesVal = notesSnap.val() || {};
+      notes = Object.entries(notesVal)
+        .map(([noteId, n]) => ({
+          id: noteId,
+          text: String(n.text || ''),
+          author: String(n.author || ''),
+          createdAt: Number(n.createdAt) || 0,
+          updatedAt: Number(n.updatedAt) || 0,
+        }))
+        .sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+    } catch (_) { /* notes are best-effort */ }
+
     results.push({
       uid,
       email,
@@ -231,6 +247,7 @@ async function listFlaggedAccounts(event) {
       usageDetails: usageScore.details,
       multiAccount: multiAccountLinks,
       multiAccountCount: multiAccountLinks.length,
+      notes,
       banned: false, // filled below
     });
   }
@@ -356,29 +373,37 @@ async function _computeUsageAbuseScore(uid) {
     }
 
     // Total API calls (sum of everything in today's usage except nested week).
+    // NOT gated on plan — a free account making thousands of calls is MORE
+    // suspicious (quota bypass), and even paid accounts shouldn't be at 10k+.
     let totalCalls = 0;
     for (const [key, val] of Object.entries(todayUsage)) {
       if (key !== 'week' && typeof val === 'number') totalCalls += val;
     }
-    if (isPaid && totalCalls > 800) {
-      score += 0.5;
-      details.push(`Extremely high total API activity: ${totalCalls} calls today`);
-    } else if (isPaid && totalCalls > 500) {
-      score += 0.3;
+    if (totalCalls > 10000) {
+      score += 1.2;
+      details.push(`Extreme API activity: ${totalCalls} calls today (likely automated/abuse)`);
+    } else if (totalCalls > 5000) {
+      score += 0.9;
       details.push(`Very high API activity: ${totalCalls} calls today`);
-    } else if (isPaid && totalCalls > 300) {
-      score += 0.15;
+    } else if (totalCalls > 2000) {
+      score += 0.6;
       details.push(`High API activity: ${totalCalls} calls today`);
+    } else if (totalCalls > 800) {
+      score += 0.4;
+      details.push(`Elevated API activity: ${totalCalls} calls today`);
+    } else if (totalCalls > 300) {
+      score += 0.2;
+      details.push(`Above-normal API activity: ${totalCalls} calls today`);
     }
   } catch (_) {
     // Best-effort — don't fail the whole request if usage stats are unavailable.
   }
 
-  // Clamp score to [0, 2] and derive a level.
-  score = Math.min(2, Math.max(0, score));
+  // Clamp score to [0, 3] and derive a level.
+  score = Math.min(3, Math.max(0, score));
   let level = 'none';
-  if (score >= 1.5) level = 'high';
-  else if (score >= 1.0) level = 'medium';
+  if (score >= 2.0) level = 'high';
+  else if (score >= 1.2) level = 'medium';
   else if (score >= 0.5) level = 'low';
 
   return { score, level, details };
@@ -664,10 +689,64 @@ async function checkMultiAccount(uid, event) {
   }
 }
 
+// ── Admin notes on accounts ─────────────────────────────────────────────────
+// POST /api/admin/abuse/notes
+// Body: { action: 'add'|'edit'|'remove', uid, noteId?, text? }
+//   add:    create a new note on the account
+//   edit:   update an existing note (noteId required)
+//   remove: delete an existing note (noteId required)
+// Notes are stored at abuse/notes/<uid>/<noteId>.
+async function handleAbuseNotes(event) {
+  const actor = await requireUser(event);
+  if (!actor.admin) return json(403, { error: 'Admin only.' });
+
+  const body = JSON.parse(event.body || '{}');
+  const uid = String(body.uid || '').trim();
+  const action = String(body.action || '').trim().toLowerCase();
+  const noteId = String(body.noteId || '').trim();
+  const text = String(body.text || '').trim().slice(0, 2000);
+
+  if (!uid) return json(400, { error: 'Target user uid is required.' });
+  if (!['add', 'edit', 'remove'].includes(action)) {
+    return json(400, { error: 'Action must be "add", "edit", or "remove".' });
+  }
+  if ((action === 'add' || action === 'edit') && !text) {
+    return json(400, { error: 'Note text is required.' });
+  }
+  if ((action === 'edit' || action === 'remove') && !noteId) {
+    return json(400, { error: 'noteId is required for edit/remove.' });
+  }
+
+  const { db, admin: firebaseAdmin } = initAdmin();
+  const now = firebaseAdmin.database.ServerValue.TIMESTAMP;
+
+  if (action === 'add') {
+    const ref = db.ref(`abuse/notes/${uid}`).push();
+    await ref.set({ text, author: actor.email, createdAt: now, updatedAt: now });
+    return json(200, { success: true, action: 'added', noteId: ref.key });
+  }
+
+  if (action === 'edit') {
+    const ref = db.ref(`abuse/notes/${uid}/${noteId}`);
+    const snap = await ref.once('value');
+    if (!snap.exists()) return json(404, { error: 'Note not found.' });
+    await ref.update({ text, updatedAt: now });
+    return json(200, { success: true, action: 'edited', noteId });
+  }
+
+  // remove
+  const ref = db.ref(`abuse/notes/${uid}/${noteId}`);
+  const snap = await ref.once('value');
+  if (!snap.exists()) return json(404, { error: 'Note not found.' });
+  await ref.remove();
+  return json(200, { success: true, action: 'removed', noteId });
+}
+
 module.exports = {
   reportAbuse,
   listFlaggedAccounts,
   handleAbuseAction,
+  handleAbuseNotes,
   trackLoginFingerprint,
   checkMultiAccount,
   handler: async (event) => {
@@ -675,6 +754,8 @@ module.exports = {
     if (event.httpMethod === 'OPTIONS') return json(200, {});
     const path = event.path || event.rawUrl || '';
     const isAdmin = path.includes('/admin/abuse');
+    const isNotes = path.includes('/admin/abuse/notes');
+    if (event.httpMethod === 'POST' && isNotes) return handleAbuseNotes(event);
     if (event.httpMethod === 'GET' && isAdmin) return listFlaggedAccounts(event);
     if (event.httpMethod === 'POST' && isAdmin) return handleAbuseAction(event);
     if (event.httpMethod === 'POST') return reportAbuse(event);

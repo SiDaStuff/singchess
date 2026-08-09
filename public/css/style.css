@@ -2857,6 +2857,29 @@ body.in-app-route .page-panel[hidden] { display: none; }
 .profile-share-status.success { color: var(--clr-best); }
 .anticheat-usage-bar { margin: 4px 0 0; }
 
+/* Admin abuse panel + notes */
+.admin-abuse-panel { margin: 14px 0; padding: 14px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--bg-panel); }
+.admin-abuse-panel h3 { margin: 0 0 8px; }
+.admin-abuse-list { display: grid; gap: 10px; margin-top: 10px; }
+.admin-abuse-item { padding: 12px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--bg-muted); }
+.admin-abuse-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.admin-abuse-plan { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; }
+.admin-abuse-score { font-size: 0.72rem; font-weight: 700; padding: 2px 6px; border-radius: 6px; }
+.admin-abuse-score.level-high { background: rgba(202,52,49,0.18); color: #CA3431; }
+.admin-abuse-score.level-medium { background: rgba(216,138,29,0.18); color: #D88A1D; }
+.admin-abuse-score.level-low { background: rgba(216,138,29,0.12); color: #D88A1D; }
+.admin-abuse-count { font-size: 0.72rem; color: var(--text-muted); }
+.admin-abuse-banned { font-size: 0.72rem; font-weight: 700; color: #fff; background: #CA3431; padding: 2px 6px; border-radius: 6px; }
+.admin-abuse-reasons { margin: 6px 0 0; font-size: 0.82rem; color: var(--text-primary); }
+.admin-abuse-details { margin: 4px 0 0; font-size: 0.78rem; color: var(--text-muted); }
+.admin-abuse-links { margin: 4px 0 0; font-size: 0.78rem; color: var(--boost-text); }
+.admin-abuse-notes { margin: 8px 0 0; padding-top: 8px; border-top: 1px dashed var(--border-soft); }
+.admin-abuse-note { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; font-size: 0.82rem; }
+.admin-abuse-note-text { flex: 1; color: var(--text-primary); white-space: pre-wrap; }
+.admin-abuse-note-meta { color: var(--text-muted); font-size: 0.72rem; white-space: nowrap; }
+.admin-abuse-note-actions { display: flex; gap: 4px; }
+.admin-abuse-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+
 /* ===== Public profile page ===== */
 .profile-loading { padding: 24px 8px; color: var(--text-muted); text-align: center; }
 .profile-header { display: flex; align-items: center; gap: 16px; margin-bottom: 8px; }

@@ -273,6 +273,7 @@ app.post('/api/admin/dashboard', writeLimit, wrapHandler(adminDashboardFn));
 app.post('/api/report-abuse', writeLimit, wrapHandler(adminAbuseReportFn));
 app.get('/api/admin/abuse', wrapHandler(adminAbuseReportFn));
 app.post('/api/admin/abuse', writeLimit, wrapHandler(adminAbuseReportFn));
+app.post('/api/admin/abuse/notes', writeLimit, wrapHandler(adminAbuseReportFn));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
