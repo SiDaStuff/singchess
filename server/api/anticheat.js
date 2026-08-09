@@ -20,14 +20,15 @@ const MAX_PLIES_PER_GAME = 90;
 // Limit total positions evaluated in one request to avoid serverless timeouts.
 const TOTAL_POSITIONS_LIMIT = 220;
 // Anticheat evaluates up to TOTAL_POSITIONS_LIMIT positions (potentially across
-// multiple games) on the single-threaded server engine, so depth is kept moderate
-// to avoid serverless timeouts. Bumped from depth 10/MPV 1 toward a more thorough
-// depth 12/MPV 2 (≈2s/position) since cheat detection benefits from the extra
-// depth and the user is actively waiting for the result.
+// multiple games) on the shared server engine. Depth 18 gives far stronger
+// cheat-detection signal than the old depth 12 (the native engine reaches depth
+// 18 reliably in ~3-6s/position), but each run is now a much heavier operation,
+// so the per-position + overall timeouts are raised to let depth-18 searches
+// actually finish instead of being cut short.
 const ANTICHEAT_PROFILE = {
-  depth: 12,
+  depth: 18,
   multiPv: 2,
-  timeoutMs: 2000,
+  timeoutMs: 8000,
 };
 const { fetchCompat } = require('./_lib/fetch-compat');
 const { requireQuota } = require('./_lib/user-service');
@@ -370,7 +371,7 @@ async function lichessGames(username, limit) {
 
 const CHESSCOM_HEADERS = {
   Accept: 'application/json',
-  'User-Agent': 'Mozilla/5.0 (compatible; SiDaStuffChess/1.0; +https://lichess.org)',
+  'User-Agent': 'Mozilla/5.0 (compatible; SingChess/1.0; +https://lichess.org)',
 };
 
 async function chessComGames(username, limit) {
@@ -471,7 +472,9 @@ exports.handler = async (event, context = {}) => {
 
     // Engine-only mode: return per-position engine evaluations for each PGN.
     if (payload.mode === 'engine') {
-      const overallTimeoutMs = 22000;
+      // Raised for depth 18: each position now budgets up to 8s, so a full
+      // batch needs a much larger window than the old depth-12 22s cap.
+      const overallTimeoutMs = 120000;
       const result = await withTimeout(withEngineQueue(async () => {
         await reviewEngine.newGame();
         const responses = [];
@@ -574,7 +577,7 @@ exports.handler = async (event, context = {}) => {
 	        subjectsAnalyzed: allMetrics.length,
 	        profile: ANTICHEAT_PROFILE,
 	      };
-	    }), 30000, 'Anticheat overall processing timed out.');
+	    }), 180000, 'Anticheat overall processing timed out.');
 
 		    return json(200, { ...result, quota: quotaState.quota, plan: quotaState.plan });
 		  } catch (err) {

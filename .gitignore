@@ -2,6 +2,7 @@ node_modules/
 *.log
 public/vendor
 server/vendor/stockfish
+server/vendor/stockfish-native
 server/data/lichess_db_puzzle.csv.zst
 server/data/lichess_db_puzzle.csv
 server/data/puzzles.db
@@ -17,3 +18,4 @@ old/
 .vscode/
 .vscode
 
+.aider*

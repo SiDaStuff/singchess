@@ -1,52 +1,27 @@
-const fs = require('fs');
-const path = require('path');
+const { spawn } = require('child_process');
+const { resolveStockfishBinary } = require('./stockfish-binary');
 
-// stockfish@18 exposes a single `initEngine(enginePath, cb)` helper that
-// resolves to an engine object with `sendCommand(cmd)` and a `listener`
-// callback for UCI output.  `enginePath` may be one of the keywords:
-// "lite-single" (fastest, ~7MB), "single" (full single-threaded),
-// "lite" (lite multi-threaded), or "full" (full multi-threaded, strongest).
+// Native Stockfish engine for the server, run as a persistent UCI child process.
 //
-// "Fastest to smartest to newest": the server defaults to the full
-// single-threaded build (Stockfish 18, strongest single-threaded) for
-// high-quality analysis that is still fast.  When a request asks for the
-// strongest available engine (preferFull), we use the full multi-threaded
-// build ("full").  Set SERVER_STOCKFISH_ENGINE to "single", "lite", "full",
-// or "lite-single" to force a specific build for non-preferFull requests.
-function resolveEngineKeyword(preferFull = false) {
-  if (preferFull) return 'full';
-  const envEngine = String(process.env.SERVER_STOCKFISH_ENGINE || '').toLowerCase();
-  if (envEngine === 'lite' || envEngine === 'single' || envEngine === 'full' || envEngine === 'lite-single') {
-    return envEngine;
-  }
-  return 'single';
-}
-
-// Choose the Stockfish build keyword for the server. Server review runs at a
-// FIXED depth, and at fixed depth the lite-single build is the FASTEST choice:
-// the fuller "single"/"full" builds are stronger but only because they search
-// far more nodes per ply, which makes them ~3x slower to reach a given depth
-// (measured). lite-single also loads reliably in Node; the multithreaded builds
-// additionally collide when instantiated more than once in a process.
+// This replaces the former in-process WASM singleton (`stockfish` npm package).
+// The lite-single WASM build is ASYNCIFY and corrupted its own heap under
+// concurrency → "RuntimeError: memory access out of bounds" → dead Node
+// process, with no in-process recovery (a poisoned WASM instance required a
+// PM2 restart). The native binary is isolated: a crash no longer kills Node,
+// and the singleton can respawn the child itself.
 //
-// We therefore default to 'lite-single'. SERVER_STOCKFISH_ENGINE overrides
-// ('single' | 'full' | 'lite' | 'lite-single') for operators who want to trade
-// speed for node-depth strength. preferFull (boost/strong reviews) selects the
-// fuller build via the env-equivalent path below only when explicitly enabled.
-function resolveEngineKeywordForServer(preferFull = false) {
-  const envEngine = String(process.env.SERVER_STOCKFISH_ENGINE || '').toLowerCase();
-  // Explicit env override always wins.
-  if (envEngine === 'single' || envEngine === 'full' || envEngine === 'lite' || envEngine === 'lite-single') {
-    return envEngine === 'lite' ? 'lite-single' : envEngine;
-  }
-  // preferFull (boost "stronger" reviews) opts into the multithreaded full
-  // build only if the operator has not configured a faster default. At fixed
-  // depth this is slower, so we keep lite-single unless explicitly requested
-  // via SERVER_STOCKFISH_ENGINE. Boost still gets a higher DEPTH from the
-  // strong review profile, which is where the extra strength comes from.
-  if (preferFull) return 'lite-single';
-  return 'lite-single';
-}
+// Transport: one long-lived `stockfish` child per Node instance, fed UCI over
+// stdin/stdout. No per-call spawn cost — optimized for fast repeated calls
+// (game review, anticheat over many positions). Browser stays on WASM.
+//
+// The UCI protocol layer below (handlers, _waitFor, evaluate/evaluateMultiPV
+// promise bodies, _parseInfo) is transport-agnostic: it only depends on
+// this._send(cmd) and this._handleLine(line). Only the spawn/stdio plumbing
+// differs from the old WASM version.
+//
+// One UCI stream = one search at a time, so evaluate/evaluateMultiPV/newGame
+// are serialized on _operationChain (see _runExclusive). Interleaving two `go`
+// commands on a single stream would corrupt it.
 
 // Auto-detect a thread count for the engine. Clamp to [1, 8] and leave a core
 // free for the event loop. SERVER_STOCKFISH_THREADS overrides.
@@ -58,115 +33,92 @@ function detectThreadCount() {
   return Math.max(1, Math.min(cores - 1, 4));
 }
 
-// The multithreaded "single"/"full" WASM builds can use a large Hash; the
-// "lite-single" single-threaded build caps it at 16 MB (larger values can make
-// it silently abort during allocation).
-function supportsLargeHash(keyword) {
-  return keyword === 'single' || keyword === 'full';
-}
-
-function loadInitEngine() {
-  // The npm `stockfish` package (v18) exports `initEngine` from its main
-  // entry.  We resolve it through the package so the engine files under
-  // `node_modules/stockfish/bin/` are located automatically.
-  try {
-    const stockfish = require('stockfish');
-    if (typeof stockfish === 'function') return stockfish;
-    if (stockfish && typeof stockfish.initEngine === 'function') return stockfish.initEngine;
-  } catch (_err) {
-    // Fall through to the manual loader below.
-  }
-  // Fallback: locate the package's index.js directly.
-  const candidates = [
-    path.resolve(process.cwd(), 'node_modules/stockfish/index.js'),
-    path.resolve(__dirname, '../../node_modules/stockfish/index.js'),
-    path.resolve(__dirname, '../../../node_modules/stockfish/index.js'),
-  ];
-  const found = candidates.find((candidate) => fs.existsSync(candidate));
-  if (!found) {
-    throw new Error('Cannot find the stockfish npm package (v18+). Run `npm install stockfish@18`.');
-  }
-  const moduleExports = require(found);
-  return typeof moduleExports === 'function' ? moduleExports : moduleExports.initEngine;
+// Hash size (MB) for the native engine. The native binary handles large hashes
+// fine; 128MB is a good default for analysis. SERVER_STOCKFISH_HASH overrides.
+function resolveHashMb() {
+  const env = parseInt(String(process.env.SERVER_STOCKFISH_HASH || '').trim(), 10);
+  if (Number.isFinite(env) && env > 0) return Math.min(env, 4096);
+  return 128;
 }
 
 class ServerStockfishEngine {
-  constructor(options = {}) {
-    this.engine = null;
+  constructor(_options = {}) {
+    this.child = null;
     this.ready = false;
     this.handlers = [];
     this.history = [];
     this.activeSearch = null;
     this.currentMultiPv = 1;
-    this.preferFull = !!options.preferFull;
-    // Threads to apply at configure() time. Auto-detected by default; the
-    // single-threaded builds ignore values > 1.
-    this.threads = Math.max(1, Math.floor(Number(options.threads)) || detectThreadCount());
-    this.keyword = null;
-    // Default no-op sender; replaced in init() once the engine is loaded.
-    this._send = () => {};
-    // Operation queue for serializing engine commands
+    // Threads/Hash applied at configure() time.
+    this.threads = detectThreadCount();
+    this.hashMb = resolveHashMb();
+    // Default no-op sender; replaced in _startChild() once the child is up.
+    this._send = () => {
+      throw new Error('Stockfish child is not running');
+    };
     this._operationChain = Promise.resolve();
+    this._stderrBuf = [];
+    this._destroyed = false;
+    this._needsRespawn = false;
   }
 
-    async init() {
-      const initEngine = loadInitEngine();
-      const keyword = resolveEngineKeywordForServer(this.preferFull);
+  async init() {
+    await this._startChild();
+    try {
+      await this._uci();
+      await this.configure();
+      const version = await this._getVersion().catch(() => 'unknown');
+      console.log(
+        `Stockfish native UCI ready (${version}, ${this.threads} thread(s), ${this.hashMb}MB hash, pid=${this.child?.pid})`
+      );
+      this.ready = true;
+    } catch (err) {
+      this.destroy();
+      throw new Error(`Native Stockfish init failed: ${err.message}`);
+    }
+  }
 
-      // stockfish@18: initEngine(keyword) returns a Promise that resolves to
-      // an engine object once the WASM binary is loaded and ready.  UCI
-      // output is delivered through `engine.listener`; commands are sent
-      // through `engine.sendCommand(cmd)`.
-      let engine;
-      try {
-        engine = await initEngine(keyword);
-      } catch (err) {
-        // The multithreaded builds should load in Node, but if the host
-        // environment can't (missing worker/WASM support), fall back to the
-        // reliable single-threaded lite build before giving up.
-        if (keyword !== 'lite-single') {
-          console.warn(`Stockfish "${keyword}" failed to load (${err.message}); falling back to lite-single.`);
-          try {
-            engine = await initEngine('lite-single');
-            this.keyword = 'lite-single';
-          } catch (fbErr) {
-            throw new Error(`Stockfish engine "${keyword}" failed to load: ${err.message}`);
-          }
-        } else {
-          throw new Error(`Stockfish engine "${keyword}" failed to load: ${err.message}`);
-        }
+  // Spawn the native binary and wire its stdio to the UCI line handler.
+  async _startChild() {
+    const exePath = await resolveStockfishBinary();
+    const child = spawn(exePath, [], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+
+    this.child = child;
+    this._destroyed = false;
+
+    // Line-buffer stdout → dispatch each complete UCI line to handlers.
+    let pending = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      pending += chunk;
+      let idx;
+      while ((idx = pending.indexOf('\n')) >= 0) {
+        const line = pending.slice(0, idx).replace(/\r$/, '');
+        pending = pending.slice(idx + 1);
+        if (line.length) this._handleLine(line);
       }
-      if (!engine || typeof engine.sendCommand !== 'function') {
-        throw new Error(`Stockfish engine "${keyword}" did not produce a usable engine object.`);
+    });
+
+    // Keep a short stderr ring for crash diagnostics; never feed to the UCI parser.
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+      this._stderrBuf.push(chunk);
+      if (this._stderrBuf.length > 40) this._stderrBuf.shift();
+    });
+
+    child.on('error', (err) => this._onChildGone(err, null, null));
+    child.on('exit', (code, signal) => this._onChildGone(null, code, signal));
+
+    // Route UCI commands to the child's stdin.
+    this._send = (command) => {
+      if (!child.stdin || child.stdin.destroyed) {
+        throw new Error('Stockfish child stdin is not writable');
       }
-      this.keyword = this.keyword || keyword;
-
-      this.engine = engine;
-
-      // Route all UCI output into the line handler.  stockfish@18 calls
-      // `engine.listener(line)` for every line the engine prints.
-      engine.listener = (line) => this._handleLine(line);
-
-      // Send UCI commands through the package's sendCommand helper, which
-      // handles the single-threaded vs multi-threaded routing internally.
-      this._send = (command) => engine.sendCommand(command);
-
-      // Run UCI init synchronously so the engine is truly ready before
-      // any analysis request can use it.  Without this, getServerEngine()
-      // returns the engine immediately and the 8 s timeout fires with
-      // "Server engine is still warming up."
-      try {
-        await this._uci();
-        await this.configure();
-        console.log(`Stockfish ${engine.getVersion ? engine.getVersion() : '18'} (${this.keyword}, ${this.threads} thread(s)) UCI initialization completed`);
-        this.ready = true;
-      } catch (initError) {
-        console.warn('Stockfish UCI initialization failed (non-critical):', initError.message);
-        // Mark ready anyway so the engine can still attempt searches;
-        // individual evaluate() calls will fail on their own if the
-        // engine is truly broken.
-        this.ready = true;
-      }
+      child.stdin.write(command + '\n');
+    };
   }
 
   _runExclusive(task) {
@@ -175,9 +127,8 @@ class ServerStockfishEngine {
     return run;
   }
 
-
-
-  _handleLine(payload) {    for (const raw of String(payload || '').split('\n')) {
+  _handleLine(payload) {
+    for (const raw of String(payload || '').split('\n')) {
       const line = raw.trim();
       if (!line) continue;
       this.history.push(line);
@@ -219,54 +170,88 @@ class ServerStockfishEngine {
     await wait;
   }
 
+  async _getVersion() {
+    // Stockfish prints "id name Stockfish <version>" after `uci`. Grab it from
+    // recent history so we don't run an extra round-trip.
+    const line = [...this.history].reverse().find((l) => l.startsWith('id name'));
+    if (line) return line.replace(/^id name\s+/i, '').trim();
+    return 'unknown';
+  }
+
   async configure() {
     this._cancelActiveSearch();
     this._send('stop');
     this._send('setoption name MultiPV value 1');
-    // The multithreaded "single"/"full" builds support Threads>1 and a large
-    // Hash; the lite-single build must stay at Threads=1 and Hash<=16MB
-    // (larger values make it silently abort during allocation).
-    const largeHash = supportsLargeHash(this.keyword);
-    if (largeHash) {
-      this._send(`setoption name Threads value ${this.threads}`);
-      this._send('setoption name Hash value 128');
-    } else {
-      this._send('setoption name Threads value 1');
-    }
+    this._send(`setoption name Threads value ${this.threads}`);
+    this._send(`setoption name Hash value ${this.hashMb}`);
     this.currentMultiPv = 1;
     const wait = this._waitFor('readyok', 15000);
     this._send('isready');
     await wait;
   }
 
+  // newGame() MUST run inside _operationChain, exactly like evaluate()/
+  // evaluateMultiPV(). Even though we left WASM behind, there is still only one
+  // UCI stream: ucinewgame/isready written while another request's `go` is in
+  // flight would interleave on the stream and corrupt the in-flight search's
+  // bestmove. Serializing newGame against all searches guarantees no command
+  // ever reaches the engine while a search is running.
   async newGame() {
-    this._cancelActiveSearch();
-    this._send('stop');
-    this._send('ucinewgame');
-    const wait = this._waitFor('readyok', 12000);
+    return this._runExclusive(async () => {
+      this._cancelActiveSearch();
+      this._send('stop');
+      this._send('ucinewgame');
+      const wait = this._waitFor('readyok', 12000);
+      this._send('isready');
+      await wait;
+    });
+  }
+
+  async _ensureMultiPv(numPV = 1) {
+    const next = Math.max(1, Math.floor(Number(numPV) || 1));
+    if (this.currentMultiPv === next) return;
+    this._send(`setoption name MultiPV value ${next}`);
+    this.currentMultiPv = next;
+    const wait = this._waitFor('readyok', 3000);
     this._send('isready');
     await wait;
   }
 
-    async _ensureMultiPv(numPV = 1) {
-      const next = Math.max(1, Math.floor(Number(numPV) || 1));
-      if (this.currentMultiPv === next) return;
-      this._send(`setoption name MultiPV value ${next}`);
-      this.currentMultiPv = next;
-      const wait = this._waitFor('readyok', 3000);
-      this._send('isready');
-      await wait;
+  // Resolve the UCI `go` command and the safety timeout from the search mode.
+  //   - mode 'depth' (default): `go depth N`, timeoutMs is a hard safety cap
+  //     that sends `stop` if the engine runs long.
+  //   - mode 'movetime':        `go movetime N`, where N is the search budget
+  //     (ms). The engine self-limits, but we keep timeoutMs as a safety cap
+  //     (movetime + buffer) in case the engine ignores its limit or wedges.
+  //   - mode 'depth+movetime':  `go depth N movetime M` — searches to depth N
+  //     but stops early if movetime M is exceeded. Used for the two-pass review
+  //     (quick-scan at moderate depth with a tight ceiling, deep re-analysis at
+  //     high depth with a generous ceiling).
+  _goCommand(mode, depth, movetimeMs, timeoutMs) {
+    const safeDepth = Math.max(1, Math.floor(depth) || 1);
+    if (mode === 'movetime') {
+      const budget = Math.max(10, Math.floor(Number(movetimeMs) || 0));
+      const safety = Math.max(budget + 5000, Number(timeoutMs) || budget + 5000);
+      return { go: `go movetime ${budget}`, safety };
     }
-
-    async evaluate(fen, depth = 18, timeoutMs = 6000) {
-      if (!this.ready) throw new Error('Engine not ready');
-      return this._runExclusive(() => this._evaluate(fen, depth, timeoutMs));
+    if (mode === 'depth+movetime') {
+      const budget = Math.max(10, Math.floor(Number(movetimeMs) || 0));
+      const safety = Math.max(budget + 5000, Number(timeoutMs) || budget + 5000);
+      return { go: `go depth ${safeDepth} movetime ${budget}`, safety };
     }
+    return { go: `go depth ${safeDepth}`, safety: Number(timeoutMs) || 6000 };
+  }
 
-    async _evaluate(fen, depth = 18, timeoutMs = 6000) {
-      this._cancelActiveSearch();
-      this._send('stop');
-      await this._ensureMultiPv(1);
+  async evaluate(fen, depth = 18, timeoutMs = 6000, options = {}) {
+    if (!this.ready) throw new Error('Engine not ready');
+    return this._runExclusive(() => this._evaluate(fen, depth, timeoutMs, options));
+  }
+
+  async _evaluate(fen, depth = 18, timeoutMs = 6000, options = {}) {
+    this._cancelActiveSearch();
+    this._send('stop');
+    await this._ensureMultiPv(1);
+    const { go, safety } = this._goCommand(options.mode, depth, options.movetimeMs, timeoutMs);
 
     return new Promise((resolve, reject) => {
       let bestInfo = null;
@@ -306,23 +291,24 @@ class ServerStockfishEngine {
         this._send('stop');
         hardTimer = setTimeout(() => finish(bestInfo?.pv?.split(/\s+/).filter(Boolean)[0] || ''), 900);
         if (this.activeSearch?.handler === handler) this.activeSearch.hardTimer = hardTimer;
-      }, timeoutMs);
+      }, safety);
       this._addHandler(handler);
       this.activeSearch = { handler, timer, hardTimer, reject };
       this._send(`position fen ${fen}`);
-      this._send(`go depth ${depth}`);
+      this._send(go);
     });
   }
 
-    async evaluateMultiPV(fen, depth = 18, numPV = 3, timeoutMs = 6000) {
-      if (!this.ready) throw new Error('Engine not ready');
-      return this._runExclusive(() => this._evaluateMultiPV(fen, depth, numPV, timeoutMs));
-    }
+  async evaluateMultiPV(fen, depth = 18, numPV = 3, timeoutMs = 6000, options = {}) {
+    if (!this.ready) throw new Error('Engine not ready');
+    return this._runExclusive(() => this._evaluateMultiPV(fen, depth, numPV, timeoutMs, options));
+  }
 
-    async _evaluateMultiPV(fen, depth = 18, numPV = 3, timeoutMs = 6000) {
-      this._cancelActiveSearch();
-      this._send('stop');
-      await this._ensureMultiPv(numPV);
+  async _evaluateMultiPV(fen, depth = 18, numPV = 3, timeoutMs = 6000, options = {}) {
+    this._cancelActiveSearch();
+    this._send('stop');
+    await this._ensureMultiPv(numPV);
+    const { go, safety } = this._goCommand(options.mode, depth, options.movetimeMs, timeoutMs);
 
     return new Promise((resolve, reject) => {
       const pvResults = {};
@@ -368,11 +354,11 @@ class ServerStockfishEngine {
         this._send('stop');
         hardTimer = setTimeout(() => finish(), 900);
         if (this.activeSearch?.handler === handler) this.activeSearch.hardTimer = hardTimer;
-      }, timeoutMs);
+      }, safety);
       this._addHandler(handler);
       this.activeSearch = { handler, timer, hardTimer, reject };
       this._send(`position fen ${fen}`);
-      this._send(`go depth ${depth}`);
+      this._send(go);
     });
   }
 
@@ -406,72 +392,131 @@ class ServerStockfishEngine {
     return result;
   }
 
-  destroy() {
-    this._cancelActiveSearch();
-    if (this.engine) {
-      try {
-        this._send('quit');
-      } catch (_err) {
-        // Ignore shutdown failures in serverless teardown.
-      }
-    }
+  // Unexpected child exit: mark not-ready, reject any in-flight search, and
+  // flag for respawn. Unlike the WASM singleton, this is recoverable in-process
+  // — the next getServerEngine() call respawns and re-inits the same instance.
+  _onChildGone(err, code, signal) {
+    if (this._destroyed) return; // intentional shutdown path
+    const stderrTail = (this._stderrBuf || []).join('').slice(-2000);
+    console.error(
+      `Stockfish native child exited unexpectedly (code=${code}, signal=${signal}` +
+        (err ? `, err=${err.message}` : '') + `); stderr tail:\n${stderrTail}`
+    );
     this.ready = false;
+    this.child = null;
+    this._send = () => {
+      throw new Error('Stockfish child is not running');
+    };
+    // Reject any in-flight search so its caller's timeout/queue fires.
+    this._cancelActiveSearch();
+    this._needsRespawn = true;
+  }
+
+  destroy() {
+    this._destroyed = true;
+    this._cancelActiveSearch();
+    const child = this.child;
+    if (child) {
+      try {
+        child.stdin.end('quit\n');
+      } catch (_) {
+        // ignore
+      }
+      // Give it 2s to exit on `quit`, then SIGTERM, then SIGKILL. Timers are
+      // unref()'d so they never keep the event loop alive during teardown.
+      const killTimer = setTimeout(() => {
+        try {
+          child.kill('SIGTERM');
+        } catch (_) {}
+        const forceTimer = setTimeout(() => {
+          try {
+            child.kill('SIGKILL');
+          } catch (_) {}
+        }, 1500);
+        forceTimer.unref();
+      }, 2000);
+      killTimer.unref();
+    }
+    this.child = null;
+    this.ready = false;
+    this._send = () => {
+      throw new Error('Stockfish child is not running');
+    };
   }
 }
 
 // ── Process-wide singleton ──────────────────────────────────────────────
-// The `stockfish` npm package (v18) is a HARD singleton per Node process:
-// its Emscripten glue registers `process.on("uncaughtException")` handlers
-// that re-throw anything that isn't an ExitStatus. A second `initEngine()`
-// call (1) rejects with "INIT_ENGINE(...) is not a function" (the factory is
-// mutated to a non-function after first use) AND (2) re-runs
-// WebAssembly.instantiate(), which fails with
-// "LinkError: Import #17 module="a" function="s" ..." → Aborted() → an
-// uncaught WebAssembly.RuntimeError → the process dies.
+// The engine is a process-wide singleton shared by all call sites
+// (analyze.js, anticheat.js). PM2 runs N cluster instances, each owning its own
+// child process. This module is the single owner of that one instance.
 //
-// There is therefore exactly ONE engine per process, shared by every call
-// site (analyze.js, anticheat.js). `preferFull` is accepted for API
-// compatibility but ignored: resolveEngineKeywordForServer() already
-// returns 'lite-single' for all paths (the multithreaded builds are ~3x
-// SLOWER at the fixed depths this server uses and also collide on a second
-// init). This module is the single owner of that one instance.
+// Recovery model (a real improvement over the WASM version):
+//   - Unsupported OS  → permanent poison (_unsupportedOs); fail fast forever.
+//   - Transient fail  → (download/spawn/probe) null _singletonInit so the NEXT
+//                       caller retries init() on the same instance.
+//   - Child crash     → _needsRespawn=true; next getServerEngine() respawns +
+//                       re-inits the same instance in-process.
 let _singletonEngine = null;
 let _singletonInit = null;
-let _singletonFailed = false;
+let _unsupportedOs = false;
 
 async function getServerEngine(_preferFull = false) {
-  // Once the very first init has failed, the package is poisoned in-process:
-  // any further initEngine() call would crash the process. Fail fast and let
-  // PM2 restart the process to recover.
-  if (_singletonFailed) {
-    throw new Error('Stockfish engine unavailable; process restart required.');
+  // preferFull is accepted for API compatibility and ignored: the native binary
+  // is always the strongest single build (AVX2, multi-threaded).
+  if (_unsupportedOs) {
+    throw new Error('Native Stockfish is not supported on this platform (win32/x64 or linux/x64 AVX2 required).');
   }
+
+  // Existing healthy instance.
+  if (_singletonEngine && _singletonEngine.ready) return _singletonEngine;
+
+  // An init/respawn is already in flight: await it rather than starting a
+  // second spawn. `_singletonInit` is nulled once it settles (below), so its
+  // mere presence means "work in progress".
   if (_singletonInit) {
     await _singletonInit;
-    return _singletonEngine;
+    if (_singletonEngine && _singletonEngine.ready) return _singletonEngine;
+    // Init settled but engine still not ready (e.g. it threw and was marked
+    // for retry). Fall through to the (re)spawn branch.
   }
-  const engine = new ServerStockfishEngine({});
+
+  const engine = _singletonEngine || new ServerStockfishEngine({});
   _singletonEngine = engine;
-  _singletonInit = engine.init().catch((err) => {
-    _singletonFailed = true;
-    _singletonEngine = null;
-    _singletonInit = null;
-    throw err;
-  });
-  try {
-    await _singletonInit;
-  } catch (err) {
-    // _singletonInit already rejected and flipped _singletonFailed above;
-    // re-surface the original error to this caller.
-    throw err;
-  }
+
+  // (Re)spawn / first init. Covers both the very first call and recovery after
+  // a child crash (_needsRespawn) or a transient init failure.
+  _singletonInit = engine
+    .init()
+    .then(() => {
+      engine._needsRespawn = false;
+    })
+    .catch((err) => {
+      const msg = String(err?.message || err);
+      if (/Unsupported platform/.test(msg)) {
+        // Permanent: no amount of retrying changes process.platform.
+        _unsupportedOs = true;
+        _singletonEngine = null;
+      } else {
+        // Transient (download/spawn/probe/crash): keep the instance and flag it
+        // so the next caller retries init().
+        engine._needsRespawn = true;
+      }
+      throw err;
+    })
+    .finally(() => {
+      // Clear the in-flight marker once settled so a later caller can retry or
+      // respawn. (Doesn't affect a concurrent awaiter — they hold the promise.)
+      _singletonInit = null;
+    });
+
+  await _singletonInit;
   return _singletonEngine;
 }
 
 // Non-destructive "reset": clear the hash / transposition table via a UCI
-// newGame() so the next search starts clean. We deliberately do NOT destroy
-// and recreate the engine — that would call initEngine() a second time and
-// crash the process. Best-effort: a reset failure must never propagate.
+// newGame() so the next search starts clean. We deliberately do NOT destroy and
+// recreate the child. Best-effort: a reset failure must never propagate. The
+// preferFull arg is accepted for API compatibility and ignored.
 function resetServerEngine(_preferFull = false) {
   const engine = _singletonEngine;
   if (!engine || !engine.ready) return;
@@ -479,6 +524,21 @@ function resetServerEngine(_preferFull = false) {
     engine.newGame();
   } catch (_err) {
     // Ignore: a failed hash clear is not fatal to the next search.
+  }
+}
+
+// Register one process-level teardown so PM2 reloads/sigterms don't leak the
+// child. Guarded so re-requires don't double-register.
+if (!process._stockfishTeardownRegistered) {
+  process._stockfishTeardownRegistered = true;
+  for (const sig of ['SIGINT', 'SIGTERM']) {
+    process.once(sig, () => {
+      try {
+        if (_singletonEngine) _singletonEngine.destroy();
+      } catch (_) {
+        // ignore
+      }
+    });
   }
 }
 

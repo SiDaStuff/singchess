@@ -24,15 +24,16 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         // Behind nginx/Cloudflare: trust X-Forwarded-For so per-IP rate limits
-        // key off the real client, not the proxy. Set SERVE_STATIC=0 if a
-        // separate web server serves the built frontend.
+        // key off the real client, not the proxy.
         TRUST_PROXY: '1',
-        SERVE_STATIC: '1',
+        // API-ONLY mode: Netlify serves the frontend SPA, the Oracle VM serves
+        // ONLY /api/* + /vendor/* + /health. Do NOT serve dist/ from here.
+        SERVE_STATIC: '0',
       },
       env_production: {
         NODE_ENV: 'production',
         TRUST_PROXY: '1',
-        SERVE_STATIC: '1',
+        SERVE_STATIC: '0',
       },
     },
   ],

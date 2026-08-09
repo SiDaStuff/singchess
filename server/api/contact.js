@@ -1,4 +1,5 @@
 const { initAdmin, json, requireUser } = require('./_lib/user-service');
+const { verify: verifyRecaptcha } = require('./_lib/recaptcha');
 
 // Extract the originating IP for per-IP rate limiting (respects XFF only when
 // the server is behind a trusted proxy — see TRUST_PROXY in server/index.cjs).
@@ -10,10 +11,14 @@ function clientIp(event) {
 // POST /api/contact — saves a contact/support message to Firebase support/{id}.
 //
 // Signed-in users: their verified JWT email is the sender (trusted). Anonymous
-// submissions are allowed but (a) capped to 3/day per IP and (b) stored with an
+// submissions are allowed but (a) capped to 1/day per IP and (b) stored with an
 // `anonymous: true` flag so the admin inbox never displays an attacker-supplied
 // email as if it were a verified sender (no impersonation). A body `email` from
 // an anonymous submitter is stored as an optional `contactEmail` hint only.
+//
+// reCAPTCHA v3 token must accompany every submission; the helper in
+// _lib/recaptcha.js returns ok=false on low scores or wrong action. Score is
+// not surfaced to the client.
 exports.handler = async (event = {}) => {
   try {
     if (event.httpMethod === 'OPTIONS') return json(200, {});
@@ -24,6 +29,13 @@ exports.handler = async (event = {}) => {
       payload = JSON.parse(event.body || '{}');
     } catch (_err) {
       return json(400, { error: 'Invalid JSON body.' });
+    }
+
+    // reCAPTCHA v3 gate. Skipped when RECAPTCHA_DISABLED=1 (dev) or when the
+    // server has no secret configured (the helper treats both cases as ok).
+    const captchaResult = await verifyRecaptcha(payload.recaptchaToken, 'contact');
+    if (!captchaResult.ok) {
+      return json(400, { error: 'Captcha verification failed.' });
     }
 
     const reason = String(payload.reason || 'general').trim().slice(0, 40);

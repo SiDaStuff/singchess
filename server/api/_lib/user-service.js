@@ -107,9 +107,9 @@ async function getUserRecord(uid) {
 
 function banError(reason = '') {
   const suffix = reason ? ` Reason: ${reason}` : '';
-  const error = new Error(`Account banned.${suffix}`);
+  const error = new Error(`Account Closed. Please contact support for help.${suffix}`);
   error.statusCode = 403;
-  error.code = 'account_banned';
+  error.code = 'account_closed';
   error.reason = reason || '';
   return error;
 }
@@ -139,6 +139,12 @@ async function requireUser(event) {
   if (ban.disabled === true) {
     throw banError(String(ban.reason || '').trim());
   }
+
+  // Track login fingerprint for anti-abuse multi-account detection (fire-and-forget).
+  try {
+    const { trackLoginFingerprint } = require('../admin-abuse-report.js');
+    trackLoginFingerprint(decoded.uid, event).catch(() => {});
+  } catch (_) { /* admin-abuse-report may not be loaded yet */ }
   return {
     uid: decoded.uid,
     email: String(decoded.email || '').toLowerCase(),

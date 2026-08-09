@@ -3,63 +3,130 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SiDaStuff CHESS</title>
-  <link rel="icon" type="image/png" href="/assets/logo.png">
-  <link rel="apple-touch-icon" href="/assets/logo.png">
+  <title>Sing CHESS</title>
+  <link rel="icon" type="image/png" href="/assets/favicon.png">
+  <link rel="apple-touch-icon" href="/assets/favicon.png">
   <link rel="stylesheet" href="/css/style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400..700,0..1,0" rel="stylesheet" crossorigin="anonymous">
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-TFW7HFWKYP"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-TFW7HFWKYP', { send_page_view: true });
+  </script>
 </head>
 <body class="menu-active">
   <div id="app">
     <section id="main-menu" class="main-menu" aria-label="Home">
-      <div class="home-hero">
-        <div class="brand-eyebrow">
-          <span class="material-symbols-outlined" style="font-size:14px;font-variation-settings:'opsz'20,'wght'600;">auto_awesome</span>
-          Chess review for serious improvement
+      <!-- Import card: the first thing a visitor sees -->
+      <div class="home-import-card">
+        <div class="home-import-head">
+          <img class="home-import-logo" src="/assets/icon.png" alt="Sing Chess logo">
+          <h1 class="home-import-title">Review your chess games</h1>
+          <p class="home-import-sub">Paste a PGN or load games from Chess.com / Lichess. No account needed to review.</p>
         </div>
-        <h1 class="home-hero-title">Find every mistake.<br>Win more games.</h1>
-        <p class="home-hero-sub">Upload a game, replay your blunders with Stockfish 18, and train with a coach that adjusts to your level.
-          <span class="brand-proof">No account needed to review your first game.</span>
-        </p>
-        <div class="home-cta-row">
-          <a id="btn-menu-import" class="menu-button menu-button-review" href="/review">
-            <span class="material-symbols-outlined btn-symbol">upload</span>
-            <span>Review a game</span>
-          </a>
-          <a id="btn-menu-try-review" class="menu-button menu-button-ghost" href="/review?demo=1">
-            <span class="material-symbols-outlined btn-symbol">flash_on</span>
-            <span>Try a sample</span>
-          </a>
-          <a id="btn-menu-coach" class="menu-button menu-button-secondary" href="/coach">
-            <span class="material-symbols-outlined btn-symbol">school</span>
-            <span>Play coach</span>
-          </a>
+
+        <!-- Linked usernames: quick-load chips when signed in and linked -->
+        <div class="home-quick-load" id="home-quick-load" hidden>
+          <span class="home-quick-load-label">Open my recent games from</span>
+          <div class="home-quick-load-buttons" id="home-quick-load-buttons"></div>
+        </div>
+
+        <!-- Shared import-tool component (also used inside the modal) -->
+        <div class="import-tool" id="home-import-tool" data-import-scope="home">
+          <div class="import-tabs" role="tablist" aria-label="Import source">
+            <button type="button" class="import-tab active" data-import-tab="pgn" role="tab" aria-selected="true">
+              <span class="material-symbols-outlined">content_paste</span>
+              <span>Paste PGN</span>
+            </button>
+            <button type="button" class="import-tab" data-import-tab="lichess" role="tab" aria-selected="false">
+              <span>Lichess</span>
+            </button>
+            <button type="button" class="import-tab" data-import-tab="chesscom" role="tab" aria-selected="false">
+              <span>Chess.com</span>
+            </button>
+          </div>
+
+          <div class="import-panels">
+            <!-- PGN panel -->
+            <div class="import-panel active" data-import-panel="pgn">
+              <textarea id="home-pgn-input" class="import-pgn-input input-select" placeholder="Paste your PGN here...&#10;&#10;Example:&#10;1. e4 e5 2. Nf3 Nc6 3. Bb5 a6..." rows="8"></textarea>
+              <div class="import-actions">
+                <button type="button" id="btn-home-load-pgn" class="btn btn-primary import-load-btn">
+                  <span class="btn-content">
+                    <span class="material-symbols-outlined btn-symbol">play_arrow</span>
+                    <span class="btn-label">Load Game</span>
+                  </span>
+                </button>
+                <button type="button" id="btn-home-sample" class="btn btn-secondary import-sample-btn">
+                  <span class="btn-content">
+                    <span class="material-symbols-outlined btn-symbol">flash_on</span>
+                    <span class="btn-label">Try sample</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Lichess panel -->
+            <div class="import-panel" data-import-panel="lichess">
+              <label class="field">
+                <span class="field-label">Lichess username</span>
+                <input id="home-import-username-lichess" class="input-select import-username" type="text" placeholder="hikaru" data-source="lichess">
+              </label>
+              <div class="import-row">
+                <label class="field">
+                  <span class="field-label">Games</span>
+                  <select id="home-import-limit-lichess" class="input-select import-limit">
+                    <option value="10">Last 10</option>
+                    <option value="5">Last 5</option>
+                    <option value="20">Last 20</option>
+                  </select>
+                </label>
+                <button type="button" class="btn btn-primary import-load-username-btn" data-source="lichess">
+                  <span class="btn-content">
+                    <span class="material-symbols-outlined btn-symbol">download</span>
+                    <span class="btn-label">Load Games</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Chess.com panel -->
+            <div class="import-panel" data-import-panel="chesscom">
+              <label class="field">
+                <span class="field-label">Chess.com username</span>
+                <input id="home-import-username-chesscom" class="input-select import-username" type="text" placeholder="MagnusCarlsen" data-source="chesscom">
+              </label>
+              <div class="import-row">
+                <label class="field">
+                  <span class="field-label">Games</span>
+                  <select id="home-import-limit-chesscom" class="input-select import-limit">
+                    <option value="10">Last 10</option>
+                    <option value="5">Last 5</option>
+                    <option value="20">Last 20</option>
+                  </select>
+                </label>
+                <button type="button" class="btn btn-primary import-load-username-btn" data-source="chesscom">
+                  <span class="btn-content">
+                    <span class="material-symbols-outlined btn-symbol">download</span>
+                    <span class="btn-label">Load Games</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="import-status" id="home-import-status"></div>
+          <div class="import-results" id="home-import-results"></div>
         </div>
       </div>
 
-      <a class="home-continue-card" id="home-continue-review" href="/review" hidden>
-        <span class="material-symbols-outlined">play_circle</span>
-        <span class="home-continue-text">Continue your last review</span>
-        <span class="home-continue-meta" id="home-continue-meta"></span>
-      </a>
-
-      <!-- Quick-setup progress banner (3 steps): review a game, save/label a
-           username, solve a puzzle. Driven by _renderOnboardingProgress(). -->
-      <div class="onboarding-progress" id="onboarding-progress" hidden>
-        <div class="onboarding-progress-track">
-          <div class="onboarding-progress-fill" id="onboarding-progress-fill" style="width:8%"></div>
-        </div>
-        <p class="onboarding-progress-label" id="onboarding-progress-label">Quick setup</p>
-        <div class="onboarding-progress-steps">
-          <span class="onboarding-step" data-step="review"><span class="onboarding-step-dot"></span>Review a game</span>
-          <span class="onboarding-step" data-step="save"><span class="onboarding-step-dot"></span>Save a username</span>
-          <span class="onboarding-step" data-step="puzzle"><span class="onboarding-step-dot"></span>Solve a puzzle</span>
-        </div>
-      </div>
-
+      <!-- Community stats -->
       <div class="home-stats" id="home-stats" aria-label="Community stats">
         <div class="home-stat-card" data-stat="reviews">
           <span class="material-symbols-outlined home-stat-icon">analytics</span>
@@ -78,34 +145,50 @@
         </div>
       </div>
 
-      <div class="home-quick-load" id="home-quick-load" hidden>
-        <span class="home-quick-load-label">Open my recent games from</span>
-        <div class="home-quick-load-buttons" id="home-quick-load-buttons"></div>
+      <!-- About section -->
+      <div class="home-about">
+        <h2 class="home-about-title">What is Sing Chess?</h2>
+        <p class="home-about-text">Upload any game, play through your moves, and see what Stockfish thinks. Practice with puzzles matched to your level, or ask the AI coach about a position.</p>
+        <div class="home-about-stats" id="home-about-stats" aria-label="Site activity">
+          <div class="home-about-stat">
+            <strong id="home-about-reviews">—</strong>
+            <span>moves reviewed</span>
+          </div>
+          <div class="home-about-stat">
+            <strong id="home-about-puzzles">—</strong>
+            <span>puzzles solved</span>
+          </div>
+          <div class="home-about-stat">
+            <strong id="home-about-coaches">—</strong>
+            <span>coach games played</span>
+          </div>
+        </div>
       </div>
 
+      <!-- Compact feature links -->
       <div class="feature-grid">
         <a id="btn-menu-puzzles" class="feature-card" href="/puzzles">
           <span class="feature-icon material-symbols-outlined">extension</span>
           <strong>Puzzles</strong>
-          <p>Start at 1500 — we adjust to you. No account needed.</p>
+          <p>Solve tactics matched to your level.</p>
         </a>
         <a id="btn-menu-anticheat" class="feature-card" href="/anticheat">
           <span class="feature-icon material-symbols-outlined">shield</span>
           <strong>Anticheat</strong>
-          <p>Scan online games for suspicious patterns. Included with Boost.</p>
+          <p>Check online games for unusual moves.</p>
         </a>
         <a id="btn-menu-plans" class="feature-card feature-card-boost" href="/plans">
           <span class="feature-icon material-symbols-outlined">bolt</span>
           <strong>Plans</strong>
-          <p>Unlimited reviews, no daily limits. Never miss a blunder.</p>
+          <p>More reviews, deeper analysis, no daily caps.</p>
         </a>
       </div>
     </section>
 
     <header class="header" id="app-header">
       <a class="apple-brand apple-brand-link" href="/" data-route="/index" aria-label="Home">
-        <img class="apple-brand-logo" src="/assets/logo.png" alt="SiDaStuff Chess logo">
-        <span class="apple-brand-name">SiDaStuff Chess</span>
+        <img class="apple-brand-logo" src="/assets/icon.png" alt="Sing Chess logo">
+        <span class="apple-brand-name">Sing Chess</span>
       </a>
 
       <nav class="apple-nav" id="apple-nav" aria-label="Main navigation">
@@ -235,26 +318,51 @@
             </div>
             <div class="field">
               <span class="field-label">Piece Icons</span>
-              <div class="select-row" data-cols="2" role="radiogroup" aria-label="Piece icons">
+              <div class="select-row" data-cols="3" role="radiogroup" aria-label="Piece icons">
                 <label class="select-row-item piece-set-chip">
-                  <input type="radio" name="onboard-piece-theme" value="classic" checked>
-                  <img class="piece-set-knight" src="./assets/pieces/classic/wn.png" alt="">
-                  <span class="piece-set-name">Classic</span>
+                  <input type="radio" name="onboard-piece-theme" value="cburnett" checked>
+                  <img class="piece-set-knight" src="/assets/pieces/cburnett/wn.svg" alt="">
+                  <span class="piece-set-name">Cburnett</span>
                 </label>
                 <label class="select-row-item piece-set-chip">
-                  <input type="radio" name="onboard-piece-theme" value="glass">
-                  <img class="piece-set-knight" src="./assets/pieces/glass/wn.png" alt="">
-                  <span class="piece-set-name">Glass</span>
+                  <input type="radio" name="onboard-piece-theme" value="celtic">
+                  <img class="piece-set-knight" src="/assets/pieces/celtic/wn.svg" alt="">
+                  <span class="piece-set-name">Celtic</span>
                 </label>
                 <label class="select-row-item piece-set-chip">
-                  <input type="radio" name="onboard-piece-theme" value="wood">
-                  <img class="piece-set-knight" src="./assets/pieces/wood/wn.png" alt="">
-                  <span class="piece-set-name">Wood</span>
+                  <input type="radio" name="onboard-piece-theme" value="chessnut">
+                  <img class="piece-set-knight" src="/assets/pieces/chessnut/wn.svg" alt="">
+                  <span class="piece-set-name">Chessnut</span>
                 </label>
                 <label class="select-row-item piece-set-chip">
-                  <input type="radio" name="onboard-piece-theme" value="neo">
-                  <img class="piece-set-knight" src="./assets/pieces/neo/wn.png" alt="">
-                  <span class="piece-set-name">Neo</span>
+                  <input type="radio" name="onboard-piece-theme" value="fantasy">
+                  <img class="piece-set-knight" src="/assets/pieces/fantasy/wn.svg" alt="">
+                  <span class="piece-set-name">Fantasy</span>
+                </label>
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="firi">
+                  <img class="piece-set-knight" src="/assets/pieces/firi/wn.svg" alt="">
+                  <span class="piece-set-name">Firi</span>
+                </label>
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="kiwen-suwi">
+                  <img class="piece-set-knight" src="/assets/pieces/kiwen-suwi/wn.svg" alt="">
+                  <span class="piece-set-name">Kiwen-suwi</span>
+                </label>
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="merida">
+                  <img class="piece-set-knight" src="/assets/pieces/merida/wn.svg" alt="">
+                  <span class="piece-set-name">Merida</span>
+                </label>
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="rhosgfx">
+                  <img class="piece-set-knight" src="/assets/pieces/rhosgfx/wn.svg" alt="">
+                  <span class="piece-set-name">Rhosgfx</span>
+                </label>
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="spatial">
+                  <img class="piece-set-knight" src="/assets/pieces/spatial/wn.svg" alt="">
+                  <span class="piece-set-name">Spatial</span>
                 </label>
               </div>
             </div>
@@ -422,7 +530,14 @@
             <button id="spa-btn-refresh-support" class="btn btn-secondary btn-small" type="button">Refresh</button>
             <div class="admin-support-list" id="spa-admin-support-list"><p class="account-status">Click Refresh to load messages.</p></div>
           </div>
+          <div class="admin-abuse-panel" id="spa-admin-abuse-panel" hidden>
+            <h3>Flagged accounts</h3>
+            <button id="spa-btn-refresh-abuse" class="btn btn-secondary btn-small" type="button">Refresh</button>
+            <div class="admin-abuse-list" id="spa-admin-abuse-list"><p class="account-status">Click Refresh to load flagged accounts.</p></div>
+            <p class="account-status" id="spa-admin-abuse-status"></p>
+          </div>
           <div class="standalone-actions">
+            <button id="spa-btn-report-account" class="btn btn-secondary" type="button">Report Account</button>
             <button id="spa-btn-reset-password" class="btn btn-secondary" type="button">Reset Password</button>
             <button id="btn-signout" class="btn btn-secondary" type="button">Sign Out</button>
           </div>
@@ -430,6 +545,7 @@
         <p class="account-status" id="spa-page-status"></p>
       </div>
     </section>
+
 
     <section id="page-settings" class="page-panel" hidden>
       <div class="card panel-wide page-card">
@@ -450,13 +566,25 @@
             <option value="4500" selected>4.5 seconds</option>
           </select>
         </div>
-        <h2 style="font-size:1rem;margin-top:18px">Browser Engine</h2>
+        <h2 style="font-size:1rem;margin-top:18px">Review Source</h2>
+        <p>Choose where game reviews run. Server reviews are faster and stronger but require an account.</p>
+        <label class="field">
+          <span class="field-label">Default Review Source</span>
+          <select id="analysis-location" class="input-select">
+            <option value="browser">Browser (local)</option>
+            <option value="server">Server (requires account)</option>
+          </select>
+        </label>
+
+        <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
+
+        <h2 style="font-size:1rem">Browser Engine</h2>
         <p>These settings apply when using browser review, coach, live eval, and local analysis.</p>
         <label class="field">
           <span class="field-label">Engine Type</span>
           <select id="settings-engine-module" class="input-select">
-            <option value="lite-single">Stockfish 18 Lite (7 MB, recommended)</option>
-            <option value="full-single">Stockfish 18 Full (108 MB)</option>
+            <option value="lite-single">Stockfish 18 Lite WASM (7 MB, recommended)</option>
+            <option value="full-single">Stockfish 18 Full WASM (108 MB)</option>
           </select>
         </label>
         <label class="switch-row app-switch-row">
@@ -522,26 +650,51 @@
         </div>
         <div class="field">
           <span class="field-label">Piece Icons</span>
-          <div class="select-row" data-cols="2" role="radiogroup" aria-label="Piece icons">
+          <div class="select-row" data-cols="3" role="radiogroup" aria-label="Piece icons">
             <label class="select-row-item piece-set-chip">
-              <input type="radio" name="settings-piece-theme" value="classic">
-              <img class="piece-set-knight" src="./assets/pieces/classic/wn.png" alt="">
-              <span class="piece-set-name">Classic</span>
+              <input type="radio" name="settings-piece-theme" value="cburnett">
+              <img class="piece-set-knight" src="/assets/pieces/cburnett/wn.svg" alt="">
+              <span class="piece-set-name">Cburnett</span>
             </label>
             <label class="select-row-item piece-set-chip">
-              <input type="radio" name="settings-piece-theme" value="glass">
-              <img class="piece-set-knight" src="./assets/pieces/glass/wn.png" alt="">
-              <span class="piece-set-name">Glass</span>
+              <input type="radio" name="settings-piece-theme" value="celtic">
+              <img class="piece-set-knight" src="/assets/pieces/celtic/wn.svg" alt="">
+              <span class="piece-set-name">Celtic</span>
             </label>
             <label class="select-row-item piece-set-chip">
-              <input type="radio" name="settings-piece-theme" value="wood">
-              <img class="piece-set-knight" src="./assets/pieces/wood/wn.png" alt="">
-              <span class="piece-set-name">Wood</span>
+              <input type="radio" name="settings-piece-theme" value="chessnut">
+              <img class="piece-set-knight" src="/assets/pieces/chessnut/wn.svg" alt="">
+              <span class="piece-set-name">Chessnut</span>
             </label>
             <label class="select-row-item piece-set-chip">
-              <input type="radio" name="settings-piece-theme" value="neo">
-              <img class="piece-set-knight" src="./assets/pieces/neo/wn.png" alt="">
-              <span class="piece-set-name">Neo</span>
+              <input type="radio" name="settings-piece-theme" value="fantasy">
+              <img class="piece-set-knight" src="/assets/pieces/fantasy/wn.svg" alt="">
+              <span class="piece-set-name">Fantasy</span>
+            </label>
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="firi">
+              <img class="piece-set-knight" src="/assets/pieces/firi/wn.svg" alt="">
+              <span class="piece-set-name">Firi</span>
+            </label>
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="kiwen-suwi">
+              <img class="piece-set-knight" src="/assets/pieces/kiwen-suwi/wn.svg" alt="">
+              <span class="piece-set-name">Kiwen-suwi</span>
+            </label>
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="merida">
+              <img class="piece-set-knight" src="/assets/pieces/merida/wn.svg" alt="">
+              <span class="piece-set-name">Merida</span>
+            </label>
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="rhosgfx">
+              <img class="piece-set-knight" src="/assets/pieces/rhosgfx/wn.svg" alt="">
+              <span class="piece-set-name">Rhosgfx</span>
+            </label>
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="spatial">
+              <img class="piece-set-knight" src="/assets/pieces/spatial/wn.svg" alt="">
+              <span class="piece-set-name">Spatial</span>
             </label>
           </div>
         </div>
@@ -551,13 +704,30 @@
         <label class="switch-row app-switch-row">
           <span>
             <strong>Piece Animations</strong>
-            <small>Fade pieces into place after moves.</small>
+            <small>Smoothly animate pieces to their new squares.</small>
           </span>
           <span class="app-switch">
-            <input id="settings-piece-animations" type="checkbox">
+            <input id="settings-piece-animations" type="checkbox" checked>
             <span class="app-switch-track"></span>
           </span>
         </label>
+        <div class="settings-anim-speed" id="settings-anim-speed-group">
+          <span class="field-label">Animation Speed</span>
+          <div class="chip-row">
+            <label class="chip-label">
+              <input type="radio" name="settings-anim-speed" value="0.2">
+              <span class="chip">0.2s</span>
+            </label>
+            <label class="chip-label">
+              <input type="radio" name="settings-anim-speed" value="0.5" checked>
+              <span class="chip">0.5s</span>
+            </label>
+            <label class="chip-label">
+              <input type="radio" name="settings-anim-speed" value="1">
+              <span class="chip">1s</span>
+            </label>
+          </div>
+        </div>
         <div class="settings-color-grid">
           <label class="field">
             <span class="field-label">Arrow Color</span>
@@ -792,44 +962,45 @@
       <div class="card panel-wide page-card">
         <div class="page-card-head">
           <h1>Privacy Policy</h1>
-          <p class="legal-updated">Last updated: July 2026</p>
+          <p class="legal-updated">Last updated: 18 July 2026</p>
         </div>
         <div class="legal-body">
-          <p>SiDaStuff Chess ("we", "us") operates chess.sidastuff.com. This policy explains what we collect and why. We aim to collect the minimum needed to run the site and to keep your data under your control.</p>
+          <p>This policy explains what Sing Chess collects and why. We keep it simple: we only store what we need to run the service, and we don't sell your data.</p>
 
-          <h2>What we collect</h2>
+          <h2>What we store</h2>
           <ul>
-            <li><strong>Account data.</strong> When you create an account, we store your email address and a Firebase-assigned user ID. We never see or store your password — authentication is handled by Firebase, which stores only a one-way hash.</li>
-            <li><strong>Games you provide.</strong> PGN text and game links you paste or import are processed to run your review and coach analysis. We keep what you choose to save to your account so you can return to it.</li>
-            <li><strong>Puzzle &amp; training results.</strong> Your puzzle rating, solve history, and coach-game results, so we can track progress and serve puzzles at your level.</li>
-            <li><strong>Usage &amp; technical data.</strong> Anonymous counts (e.g. games analyzed, puzzles solved) and standard request data (IP, browser type) used to keep the service running and secure.</li>
+            <li><strong>Account data.</strong> Your email and a Firebase user ID if you sign up. Passwords are handled by Firebase; we never see them.</li>
+            <li><strong>Games and reviews.</strong> PGNs you paste or import, plus any reviews you save to your account.</li>
+            <li><strong>Training data.</strong> Your puzzle rating, solve history, coach chat history (if saved), and coach-game results.</li>
+            <li><strong>Preferences.</strong> Board theme, piece set, engine settings, and similar options. These live in your browser by default and sync to your account when you're signed in.</li>
+            <li><strong>Technical data.</strong> IP address and browser type for rate limits and security. We also keep anonymous counts like total games reviewed.</li>
           </ul>
 
-          <h2>Where it lives</h2>
-          <p>Account and training data is stored in Google Firebase (Authentication and Realtime Database). Your board and engine preferences are saved in your browser's local storage and, when you're signed in, synced to your profile.</p>
+          <h2>Where your data lives</h2>
+          <p>Account data is stored in Google Firebase (Authentication and Realtime Database). Local preferences stay in your browser unless you sign in.</p>
 
-          <h2>Cookies &amp; local storage</h2>
-          <p>We don't use advertising or tracking cookies. We use Firebase's authentication cookie/local storage to keep you signed in, and local storage to remember your settings and in-progress games. You can clear all of this from your browser or from Settings → Clear data.</p>
+          <h2>Cookies and local storage</h2>
+          <p>We don't use advertising or tracking cookies. Firebase may set an authentication cookie or local storage entry to keep you signed in. To help detect multi-accounting and abuse, we set a single device-identifier cookie and store a hash of your IP address; raw IP addresses are not kept. You can clear all stored data from Settings → Clear data or through your browser.</p>
 
           <h2>Third parties</h2>
           <ul>
-            <li><strong>Firebase</strong> — authentication and data storage.</li>
-            <li><strong>lichess.org &amp; chess.com</strong> — only when you ask us to import your public games by username.</li>
+            <li><strong>Firebase</strong> — sign-in and database.</li>
+            <li><strong>lichess.org and chess.com</strong> — only when you import your public games by username.</li>
+            <li><strong>Google reCAPTCHA</strong> — bot detection on the signup and contact forms. Google processes the request per their <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">privacy policy</a> and <a href="https://policies.google.com/terms" target="_blank" rel="noopener noreferrer">terms</a>.</li>
           </ul>
-          <p>We do not sell your data, and we do not share it for advertising.</p>
-
-          <h2>Contact messages</h2>
-          <p>If you use our contact form, we store the email, reason, and message you provide so we can respond. If you're signed in, we also record your user ID. These are visible only to site administrators and are used solely to reply to your request.</p>
+          <p>We don't sell or share your personal data for advertising.</p>
 
           <h2>Public profiles</h2>
-          <p>If you set a username, a public profile is created at chess.sidastuff.com/profile/&lt;username&gt; showing your username, plan flair, puzzle rating, and puzzle stats. Your email, games, and usage are never shown publicly. You can hide your profile by contacting us.</p>
+          <p>If you choose a username, a public profile appears at <code>chess.sidastuff.com/profile/&lt;username&gt;</code>. It shows your username, plan flair, puzzle rating, and puzzle stats. Your email, games, and usage stats stay private. You can hide your profile by contacting us.</p>
 
+          <h2>Messages</h2>
+          <p>When you use the contact form, we keep your email and message so we can reply. If you're signed in, we also store your user ID. Only site admins can see these.</p>
 
           <h2>Your choices</h2>
-          <p>You can delete your account and its data at any time by contacting us. You can use most of the site — reviewing games, playing the coach, solving puzzles — without creating an account.</p>
+          <p>You can use most of the site without an account. To delete your account and all associated data, contact us.</p>
 
           <h2>Contact</h2>
-          <p>Questions about your data? Email the address listed on the home page. We'll respond within a reasonable timeframe.</p>
+          <p>Questions about privacy? Use the contact form or email the address on the home page.</p>
         </div>
         <div class="standalone-actions">
           <a class="btn btn-primary" href="/" data-route="/index">Back to home</a>
@@ -842,39 +1013,34 @@
       <div class="card panel-wide page-card">
         <div class="page-card-head">
           <h1>Terms of Service</h1>
-          <p class="legal-updated">Last updated: July 2026</p>
+          <p class="legal-updated">Last updated: 18 July 2026</p>
         </div>
         <div class="legal-body">
-          <p>By using SiDaStuff Chess ("the service"), you agree to these terms. The service is provided by SiDaStuff at chess.sidastuff.com.</p>
+          <p>By using Sing Chess, you agree to these terms. If you don't agree, please don't use the service.</p>
 
           <h2>Your account</h2>
-          <p>You're responsible for keeping your login secure and for activity under your account. You must be at least 13 years old (or have a guardian's permission) to create an account. Please provide accurate information.</p>
+          <p>Keep your login details safe. You're responsible for activity under your account. You must be at least 13 to sign up, or have a guardian's permission. You may create and use only one account. Creating multiple accounts, sharing accounts, or using another person's account is not allowed. We may use technical information such as a hashed IP address and a device identifier to detect violations.</p>
 
           <h2>Acceptable use</h2>
-          <ul>
-            <li>Use the service for personal chess improvement and analysis only.</li>
-            <li>Don't attempt to overload, reverse-engineer, or disrupt the service, its engine, or its servers.</li>
-            <li>Don't use the review or anti-cheat tools to harass, defame, or falsely accuse other players. Engine analysis is a heuristic, not proof of anything about a person.</li>
-            <li>Don't use another person's games or data without their consent.</li>
-          </ul>
+          <p>Use Sing Chess for your own chess training and analysis. Don't try to break, overload, or scrape the service. Don't automate, script, or otherwise abuse review, anti-cheat, or coach limits. Activity that appears designed to extract value beyond normal personal use may result in account closure. Don't use the review or anti-cheat tools to harass or falsely accuse other players. Engine stats are a guide, not proof of cheating. Don't upload someone else's games without their permission.</p>
 
           <h2>Your content</h2>
-          <p>You retain ownership of the games and PGNs you upload. By saving them to your account, you give us permission to store and process them solely to provide the service to you.</p>
+          <p>You own the games and PGNs you upload. By saving them to your account, you let us store and process them so you can view them later.</p>
 
-          <h2>Engine analysis</h2>
-          <p>Reviews, accuracy scores, and classifications are produced by Stockfish running at a fixed depth and are approximate. They're a training aid, not a definitive judgment of a move or a player.</p>
+          <h2>Analysis and ratings</h2>
+          <p>Reviews, accuracy scores, and classifications come from Stockfish at fixed depths. They're helpful estimates, not final judgments of a move or player.</p>
 
-          <h2>The service is provided "as is"</h2>
-          <p>The service is provided "as is" and "as available" without warranties of any kind. We may change, limit, or discontinue features, quotas (including free daily limits), or the service itself at any time. We're not liable for any indirect or consequential damages arising from its use.</p>
+          <h2>Paid plans</h2>
+          <p>Free, Boost, and Max plans are available. Paid plans add features like more server reviews and anti-cheat games. Prices and perks may change. Refunds are handled case by case — contact us with billing questions.</p>
 
-          <h2>Plans (Free, Boost, Max)</h2>
-          <p>The Free plan is available to everyone. Boost and Max are optional, paid plans currently granted manually by our team — contact us to subscribe. Paid plans (Boost, Max) add a weekly anticheat-game budget and other perks, and may be changed, limited, or discontinued at any time. Refunds are handled at our discretion; contact us with any billing question. Free features remain available without a paid plan.</p>
+          <h2>Availability</h2>
+          <p>The service is provided as-is. We may change, limit, or remove features at any time. We're not liable for indirect damages from using the site.</p>
 
-          <h2>Changes to these terms</h2>
-          <p>We may update these terms; the "Last updated" date above reflects the current version. Continued use after changes means you accept the updated terms.</p>
+          <h2>Changes</h2>
+          <p>We may update these terms. The date at the top shows the current version. Continued use means you accept the updates.</p>
 
           <h2>Contact</h2>
-          <p>Questions? Email the address listed on the home page.</p>
+          <p>Questions? Use the contact form or email the address on the home page.</p>
         </div>
         <div class="standalone-actions">
           <a class="btn btn-primary" href="/" data-route="/index">Back to home</a>
@@ -896,17 +1062,20 @@
           <div class="coach-card-header">
             <div class="coach-identity">
               <div class="coach-avatar" aria-hidden="true">
-                <img src="/assets/logo.png" alt="">
+                <img src="/assets/icon.png" alt="">
               </div>
               <div>
-                <h3>Coach</h3>
+                <h3>Coach <span class="beta-badge">Beta</span></h3>
                 <span class="coach-coming-soon" id="coach-chat-subtitle">AI coach</span>
               </div>
             </div>
             <div class="coach-chat-header-actions">
+              <button type="button" class="btn btn-secondary coach-icon-btn" id="btn-coach-sidebar-toggle" title="Chat history" aria-label="Toggle chat history">
+                <span class="material-symbols-outlined">history</span>
+              </button>
               <div class="coach-model-toggle" role="group" aria-label="Coach model">
-                <button type="button" class="coach-model-seg" data-model="fast" aria-pressed="true">Fast</button>
-                <button type="button" class="coach-model-seg" data-model="strong" aria-pressed="false">Strong</button>
+                <button type="button" class="coach-model-seg" data-model="fast" aria-pressed="true">Fast <span class="beta-badge">Beta</span></button>
+                <button type="button" class="coach-model-seg" data-model="strong" aria-pressed="false">Strong <span class="beta-badge">Beta</span></button>
               </div>
               <button type="button" class="btn btn-secondary coach-play-btn" id="btn-coach-play-bot" title="Play a game against the Stockfish bot">
                 <span class="material-symbols-outlined">sports_esports</span>
@@ -1043,11 +1212,11 @@
               <div class="insight-gate-teaser">
                 <span class="insight-move" id="insight-gate-move"></span>
                 <span class="insight-class" id="insight-gate-class"></span>
+                <span class="insight-gate-lock-icon">🔒</span>
               </div>
               <p class="insight-gate-copy">Create a free account to unlock move-by-move coaching — CP loss, best moves, threats, engine lines, and more.</p>
               <div class="insight-gate-actions">
                 <a class="btn btn-primary btn-small" href="/signup?src=review" data-route="/signup">Sign up to unlock</a>
-                <button type="button" class="insight-gate-close" id="insight-gate-close" aria-label="Dismiss">Maybe later</button>
               </div>
             </div>
             <div class="insight-content" id="insight-content" style="display:none">
@@ -1088,36 +1257,48 @@
               <div class="insight-actions">
                 <button id="btn-line-explorer" class="btn btn-secondary btn-small" disabled>
                   <span class="btn-content">
-                    <span class="material-symbols-outlined btn-symbol">timeline</span>
-                    <span class="btn-label">Explore Line</span>
+                    <span class="material-symbols-outlined btn-symbol">arrow_forward</span>
+                    <span class="btn-label">Explore Best Move</span>
+                  </span>
+                </button>
+                <button id="btn-insight-coach" class="btn btn-secondary btn-small">
+                  <span class="btn-content">
+                    <span class="material-symbols-outlined btn-symbol">psychology</span>
+                    <span class="btn-label">Ask Coach <span class="beta-badge">Beta</span></span>
                   </span>
                 </button>
                 <button id="btn-return-explorer" class="btn btn-secondary btn-small" hidden>
                   <span class="btn-content">
                     <span class="material-symbols-outlined btn-symbol">keyboard_return</span>
-                    <span class="btn-label">Back to Review</span>
+                    <span class="btn-label">Back to Main Line</span>
                   </span>
                 </button>
               </div>
+              <div class="insight-coach-result" id="insight-coach-result" hidden></div>
               <div class="insight-alternatives" id="insight-alternatives"></div>
             </div>
           </div>
         </div>
 
         <div class="server-boost-toggle panel-wide" id="server-boost-toggle">
-          <label class="switch-row app-switch-row">
-            <span>
-              <strong>Stronger server review</strong>
-            </span>
-            <span class="boost-switch-wrap">
-              <span class="material-symbols-outlined boost-lock-icon" id="boost-lock-icon" style="display:none">lock</span>
-              <span class="app-switch">
-                <input id="server-strong-review" type="checkbox" role="switch" aria-label="Stronger server review">
-                <span class="app-switch-track" aria-hidden="true"></span>
-              </span>
-            </span>
-          </label>
-          <p class="server-strong-note" id="server-strong-note" hidden>Stronger review runs at higher depth for more accurate results, but it takes additional time.</p>
+          <div class="server-strength-select">
+            <span class="field-label">Server Review Strength</span>
+            <div class="chip-row" id="strength-chips" role="radiogroup" aria-label="Server review strength">
+              <label class="chip-label">
+                <input type="radio" name="server-strength" value="fast">
+                <span class="chip">Fast</span>
+              </label>
+              <label class="chip-label">
+                <input type="radio" name="server-strength" value="normal" checked>
+                <span class="chip">Normal</span>
+              </label>
+              <label class="chip-label">
+                <input type="radio" name="server-strength" value="strong">
+                <span class="chip">Strong</span>
+              </label>
+            </div>
+            <p class="server-strength-note" id="server-strength-note">Normal review uses two-pass analysis (quick-scan + deep on critical moments).</p>
+          </div>
         </div>
 
         <section class="boost-page card panel-wide" id="boost-panel" hidden>
@@ -1147,9 +1328,13 @@
             <span id="review-btn-text" class="btn-label">Start Review</span>
           </span>
           <span class="review-progress-step" id="review-progress-step" hidden></span>
-          <div class="progress-bar" id="review-progress" style="display:none">
-            <div class="progress-fill" id="progress-fill"></div>
-          </div>
+          <span class="review-progress-pct" id="review-progress-pct" hidden></span>
+        </button>
+        <button id="btn-stop-review" class="btn btn-secondary btn-small panel-wide" style="display:none">
+          <span class="btn-content">
+            <span class="material-symbols-outlined btn-symbol">stop</span>
+            <span class="btn-label">Stop Review</span>
+          </span>
         </button>
 
         <div class="move-list-container card panel-wide">
@@ -1166,10 +1351,39 @@
 
         <div class="analysis-overview card panel-wide">
           <div class="opening-info card panel-compact" id="opening-info" style="display:none">
-            <span class="material-symbols-outlined opening-icon">menu_book</span>
-            <span class="opening-label">Opening</span>
-            <span class="opening-name" id="opening-name"></span>
+            <div class="opening-header">
+              <span class="material-symbols-outlined opening-icon">menu_book</span>
+              <span class="opening-label">Opening</span>
+              <span class="opening-name" id="opening-name"></span>
+            </div>
             <div class="opening-stats" id="opening-stats" hidden></div>
+            <div class="opening-controls" id="opening-controls" hidden>
+              <div class="opening-source-toggle" role="group" aria-label="Opening explorer source">
+                <button type="button" class="opening-source-btn" data-source="masters">Masters</button>
+                <button type="button" class="opening-source-btn" data-source="lichess">Lichess</button>
+              </div>
+              <div class="opening-filters" id="opening-filters" hidden>
+                <div class="opening-filter-group">
+                  <span class="opening-filter-label">Speed</span>
+                  <div class="opening-chips" data-filter="speeds">
+                    <button type="button" class="opening-chip" data-val="bullet">Bullet</button>
+                    <button type="button" class="opening-chip" data-val="blitz">Blitz</button>
+                    <button type="button" class="opening-chip" data-val="rapid">Rapid</button>
+                    <button type="button" class="opening-chip" data-val="classical">Classical</button>
+                  </div>
+                </div>
+                <div class="opening-filter-group">
+                  <span class="opening-filter-label">Rating</span>
+                  <div class="opening-chips" data-filter="ratings">
+                    <button type="button" class="opening-chip" data-val="1600">1600+</button>
+                    <button type="button" class="opening-chip" data-val="1800">1800+</button>
+                    <button type="button" class="opening-chip" data-val="2000">2000+</button>
+                    <button type="button" class="opening-chip" data-val="2200">2200+</button>
+                    <button type="button" class="opening-chip" data-val="2500">2500+</button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="game-status card panel-compact" id="game-status" style="display:none">
@@ -1183,7 +1397,7 @@
           <div class="coach-card card panel-wide" id="coach-card" hidden>            <div class="coach-card-header">
               <div class="coach-identity">
                 <div class="coach-avatar" aria-hidden="true">
-                  <img src="/assets/logo.png" alt="">
+                  <img src="/assets/icon.png" alt="">
                 </div>
                 <div>
                   <h3>Coach</h3>
@@ -1380,18 +1594,12 @@
                 </span>
               </button>
               <button type="button" class="anticheat-source-card" data-source="lichess" role="radio" aria-checked="false">
-                <span class="anticheat-source-icon" aria-hidden="true">
-                  <img src="./assets/lichess.png" alt="">
-                </span>
                 <span class="anticheat-source-meta">
                   <strong>Lichess username</strong>
                   <small>Pull their last games</small>
                 </span>
               </button>
               <button type="button" class="anticheat-source-card" data-source="chesscom" role="radio" aria-checked="false">
-                <span class="anticheat-source-icon" aria-hidden="true">
-                  <img src="./assets/chesscom.png" alt="">
-                </span>
                 <span class="anticheat-source-meta">
                   <strong>Chess.com username</strong>
                   <small>Pull their last games</small>
@@ -1456,6 +1664,15 @@
             </div>
           </div>
           <div class="phase-breakdown" id="phase-breakdown"></div>
+          <div class="summary-coach">
+            <button id="btn-game-coach" class="btn btn-secondary btn-small" type="button">
+              <span class="btn-content">
+                <span class="material-symbols-outlined btn-symbol">psychology</span>
+                <span class="btn-label">Coach Overview <span class="beta-badge">Beta</span></span>
+              </span>
+            </button>
+            <div class="insight-coach-result" id="game-coach-result" hidden></div>
+          </div>
         </div>
 
         <div class="engine-info card panel-compact" id="engine-info" hidden>
@@ -1511,21 +1728,14 @@
                 <option value="30000">30 seconds</option>
               </select>
             </label>
-            <label class="field">
-              <span class="field-label">Review Location</span>
-              <select id="analysis-location" class="input-select">
-                <option value="browser">Browser</option>
-                <option value="server" selected>Server</option>
-              </select>
-            </label>
-          </div>
+            </div>
           <p class="modal-help">These browser settings apply to browser review, coach, live eval, and browser anticheat.</p>
         </div>
       </div>
     </div>
 
     <div class="modal-overlay" id="pgn-modal" style="display:none">
-      <div class="modal">
+      <div class="modal modal-import">
         <div class="modal-header">
           <h2>Import Games</h2>
           <button type="button" class="modal-close material-symbols-outlined" id="modal-close" aria-label="Close">close</button>
@@ -1535,44 +1745,94 @@
             <span class="saved-username-bar-label">Quick load:</span>
             <div id="saved-username-content" class="saved-username-content"></div>
           </div>
-          <div class="import-source-grid">
-            <label class="field">
-              <span class="field-label">Source</span>
-              <select id="import-source" class="input-select">
-                <option value="pgn">Paste PGN</option>
-                <option value="lichess">Lichess username</option>
-                <option value="chesscom">Chess.com username</option>
-              </select>
-            </label>
-            <label class="field">
-              <span class="field-label">Username</span>
-              <input id="import-username" class="input-select" type="text" placeholder="hikaru">
-            </label>
-            <label class="field">
-              <span class="field-label">Games</span>
-              <select id="import-limit" class="input-select">
-                <option value="10">Last 10</option>
-                <option value="5">Last 5</option>
-                <option value="20">Last 20</option>
-              </select>
-            </label>
-            <button id="btn-import-username" class="btn btn-secondary import-action">
-              <span class="btn-content">
-                <span class="material-symbols-outlined btn-symbol">download</span>
-                <span class="btn-label">Load by Username</span>
-              </span>
-            </button>
+
+          <!-- Shared import-tool component (matches the home page) -->
+          <div class="import-tool" id="modal-import-tool" data-import-scope="modal">
+            <div class="import-tabs" role="tablist" aria-label="Import source">
+              <button type="button" class="import-tab active" data-import-tab="pgn" role="tab" aria-selected="true">
+                <span class="material-symbols-outlined">content_paste</span>
+                <span>Paste PGN</span>
+              </button>
+              <button type="button" class="import-tab" data-import-tab="lichess" role="tab" aria-selected="false">
+                <span>Lichess</span>
+              </button>
+              <button type="button" class="import-tab" data-import-tab="chesscom" role="tab" aria-selected="false">
+                <span>Chess.com</span>
+              </button>
+            </div>
+
+            <div class="import-panels">
+              <!-- PGN panel -->
+              <div class="import-panel active" data-import-panel="pgn">
+                <textarea id="pgn-input" class="import-pgn-input input-select" placeholder="Paste your PGN here...&#10;&#10;Example:&#10;1. e4 e5 2. Nf3 Nc6 3. Bb5 a6..." rows="10"></textarea>
+                <div class="import-actions">
+                  <button type="button" id="btn-pgn-load" class="btn btn-primary import-load-btn">
+                    <span class="btn-content">
+                      <span class="material-symbols-outlined btn-symbol">play_arrow</span>
+                      <span class="btn-label">Load Game</span>
+                    </span>
+                  </button>
+                  <button type="button" id="btn-pgn-sample" class="btn btn-secondary import-sample-btn">
+                    <span class="btn-content">
+                      <span class="material-symbols-outlined btn-symbol">flash_on</span>
+                      <span class="btn-label">Try sample</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Lichess panel -->
+              <div class="import-panel" data-import-panel="lichess">
+                <label class="field">
+                  <span class="field-label">Lichess username</span>
+                  <input id="import-username-lichess" class="input-select import-username" type="text" placeholder="hikaru" data-source="lichess">
+                </label>
+                <div class="import-row">
+                  <label class="field">
+                    <span class="field-label">Games</span>
+                    <select id="import-limit-lichess" class="input-select import-limit">
+                      <option value="10">Last 10</option>
+                      <option value="5">Last 5</option>
+                      <option value="20">Last 20</option>
+                    </select>
+                  </label>
+                  <button type="button" class="btn btn-primary import-load-username-btn" data-source="lichess">
+                    <span class="btn-content">
+                      <span class="material-symbols-outlined btn-symbol">download</span>
+                      <span class="btn-label">Load Games</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Chess.com panel -->
+              <div class="import-panel" data-import-panel="chesscom">
+                <label class="field">
+                  <span class="field-label">Chess.com username</span>
+                  <input id="import-username-chesscom" class="input-select import-username" type="text" placeholder="MagnusCarlsen" data-source="chesscom">
+                </label>
+                <div class="import-row">
+                  <label class="field">
+                    <span class="field-label">Games</span>
+                    <select id="import-limit-chesscom" class="input-select import-limit">
+                      <option value="10">Last 10</option>
+                      <option value="5">Last 5</option>
+                      <option value="20">Last 20</option>
+                    </select>
+                  </label>
+                  <button type="button" class="btn btn-primary import-load-username-btn" data-source="chesscom">
+                    <span class="btn-content">
+                      <span class="material-symbols-outlined btn-symbol">download</span>
+                      <span class="btn-label">Load Games</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="import-status" id="import-status"></div>
+            <div class="import-results" id="import-results"></div>
           </div>
-          <div class="import-status" id="import-status"></div>
-          <div class="import-results" id="import-results"></div>
-          <div class="modal-divider"></div>
-          <div class="pgn-input-header">
-            <button type="button" id="btn-pgn-sample" class="link-button">Load sample game</button>
-          </div>
-          <textarea id="pgn-input" placeholder="Paste your PGN here...&#10;&#10;Example:&#10;1. e4 e5 2. Nf3 Nc6 3. Bb5 a6..." rows="12"></textarea>
-        </div>
-        <div class="modal-footer">
-          <button id="btn-pgn-load" class="btn btn-primary">Load Game</button>
         </div>
       </div>
     </div>
@@ -1675,25 +1935,13 @@
       </div>
     </div>
 
-    <div class="modal-overlay engine-loading-overlay" id="engine-loading-overlay" style="display:none">
-      <div class="modal modal-loading" role="status" aria-live="polite">
-        <div class="modal-body">
-          <div class="modal-loading-spinner" aria-hidden="true"></div>
-          <h2>Loading Engine</h2>
-          <p id="engine-loading-text">Preparing Stockfish...</p>
-          <div class="engine-load-progress modal-engine-progress">
-            <div class="engine-load-progress-fill" id="engine-loading-fill"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="modal-overlay app-loading-overlay" id="app-loading-overlay" style="display:none">
-      <div class="modal modal-loading" role="status" aria-live="polite">
-        <div class="modal-body">
-          <div class="modal-loading-spinner" aria-hidden="true"></div>
-          <h2>Loading</h2>
-          <p id="app-loading-text">Loading profile...</p>
+    <div class="loading-overlay" id="loading-overlay" hidden>
+      <div class="loading-overlay-content">
+        <img class="loading-icon" src="/assets/icon.png" alt="Sing Chess">
+        <h2 class="loading-title">Sing Chess</h2>
+        <p class="loading-text" id="loading-text">Loading...</p>
+        <div class="loading-bar-track">
+          <div class="loading-bar-fill" id="loading-bar-fill"></div>
         </div>
       </div>
     </div>
@@ -1787,6 +2035,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js" crossorigin="anonymous" integrity="sha384-mLD+wdwynYnAhgHAkdPP5hroWJXJTNy5C2OhPKM55zuiV2vjzFD1LtBohaHq2Ex8"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js" crossorigin="anonymous" integrity="sha384-NiuRnBs5Z0OgJ12kYJLSeWxANeJN369zH3+Zn0TGVPaCH/TKmbPFqfOmmLtrj+wg"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js" crossorigin="anonymous" integrity="sha384-fXPb0uemoXlFCqQMtM0MOAv7FM0LsMegbR6x22q7lfnohaCNmTQzgA8BTrR8WqGx"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-analytics-compat.js" crossorigin="anonymous" integrity="sha384-gvOMWiQUJv50DK9YO7baRlBer0G57hUig9Nse17qQ/YQVDVr0DKhlK/G9MncLzab"></script>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

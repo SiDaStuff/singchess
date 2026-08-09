@@ -4,7 +4,6 @@
 //   - stockfish        -> BROWSER (the user's engine runs this.engine.evaluate).
 //   - game_review      -> BROWSER (asks the user, then loads the PGN into the review system).
 //   - show_board       -> BROWSER (renders a static board embed in chat from a FEN).
-//   - puzzle           -> BROWSER (opens a popup with a position for the user to solve).
 //   - ask_question     -> BROWSER (inline multiple-choice question to the user).
 //   - end_conversation -> BROWSER (locks this chat — response to ToS/abuse).
 //   - web_search       -> SERVER  (Wikipedia + DuckDuckGo, no API key).
@@ -12,10 +11,11 @@
 
 const { fetchCompat } = require('./fetch-compat');
 const { lookupOpening } = require('./lichess-explorer');
+const { activePlan } = require('./user-service');
 
 // Tool names that must execute in the browser. The chat handler emits a
 // `tool_call` SSE event for these and waits for the browser to POST the result.
-const BROWSER_TOOLS = new Set(['stockfish', 'game_review', 'show_board', 'puzzle', 'ask_question', 'end_conversation']);
+const BROWSER_TOOLS = new Set(['stockfish', 'game_review', 'show_board', 'ask_question', 'end_conversation']);
 
 // OpenAI-compatible function-tool schemas shown to the LLM.
 const TOOL_DEFINITIONS = [
@@ -23,7 +23,7 @@ const TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'stockfish',
-      description: 'Evaluate a chess position with the Stockfish engine running in the user\'s browser. Use to verify evaluations, best moves, and tactical claims about a SPECIFIC position. Returns score (side-to-move perspective), best move (UCI), principal variation, and depth reached.',
+      description: 'Evaluate a chess position with the Stockfish engine running in the user\'s browser. Use this tool to verify ANY claim about a specific position: evaluations, best moves, tactical lines, or whether a move is good/bad. ALWAYS call it before answering when the user asks about a position, a specific move, or its quality. Never answer such questions from memory. Returns score (side-to-move perspective — POSITIVE = good for the side to move), best move (UCI), principal variation, and depth reached. If the result has an "error" field, an empty bestMove, or depth 0, the eval FAILED — do NOT report it as a real evaluation; tell the user you could not verify it.',
       parameters: {
         type: 'object',
         properties: {
@@ -60,23 +60,6 @@ const TOOL_DEFINITIONS = [
           fen: { type: 'string', description: 'FEN of the position to display.' },
         },
         required: ['fen'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'puzzle',
-      description: 'Open a popup with a chess position for the user to solve. Use this to give the user a tactical puzzle or practice position. The popup shows the board, an instruction, and optionally a revealable solution.',
-      parameters: {
-        type: 'object',
-        properties: {
-          fen: { type: 'string', description: 'FEN of the puzzle position.' },
-          title: { type: 'string', description: 'Popup title, e.g. "Mate in 2".' },
-          instruction: { type: 'string', description: 'What the user should do, e.g. "White to move and win."' },
-          solution: { type: 'string', description: 'The solution (revealed on request), e.g. "1.Qxh7#"' },
-        },
-        required: ['fen', 'instruction'],
       },
     },
   },
@@ -136,11 +119,11 @@ const TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'lichess_opening',
-      description: 'Look up the opening name (ECO + name) and master-game statistics for a sequence of moves, using the Lichess Masters opening explorer. Use whenever the user asks "what opening is this", to name a position/line, or to give White/Draw/Black expectations for a line. Pass the moves as UCI strings (e.g. ["e2e4","e7e5","g1f3","b8c6","f1c4"]). Always cite the opening name and the W/D/B percentages.',
+      description: 'Look up the opening name (ECO + name) and master-game statistics for a sequence of moves using the Lichess Masters opening explorer at https://explorer.lichess.org/masters. Use whenever the user asks "what opening is this", to name a position/line, or to give White/Draw/Black expectations for a line. Pass ONLY UCI move strings, not FEN. Example: ["e2e4","e7e5","g1f3","b8c6","f1c4"]. Always cite the opening name and the W/D/B percentages.',
       parameters: {
         type: 'object',
         properties: {
-          moves: { type: 'array', items: { type: 'string' }, description: 'Moves played so far in UCI notation (from-square + to-square + optional promo), e.g. ["e2e4","d7d5"]. Empty array = the starting position.' },
+          moves: { type: 'array', items: { type: 'string' }, description: 'Moves played so far in UCI notation (from-square + to-square + optional promo piece), e.g. ["e2e4","d7d5"]. Empty array = the starting position. Do not pass SAN or FEN here.' },
         },
         required: ['moves'],
       },
@@ -160,6 +143,14 @@ const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'user_plan_stats',
+      description: 'Look up the signed-in user\'s current plan (Free/Boost/Max), limits, and remaining quota for server reviews, anticheat games, and coach tokens. Use when the user asks about their subscription, limits, or how much they have left.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
 ];
 
 // Run a SERVER-side tool. Returns a JSON-serialisable result.
@@ -169,6 +160,7 @@ async function runServerTool(name, args, user) {
     case 'coach_games': return runCoachGames(user);
     case 'lichess_opening': return runLichessOpening(args || {});
     case 'lichess_player': return runLichessPlayer(args || {});
+    case 'user_plan_stats': return runUserPlanStats(user);
     default: return { error: `Unknown tool: ${name}` };
   }
 }
@@ -200,7 +192,7 @@ async function runLichessPlayer({ username }) {
   const url = `https://lichess.org/api/user/${encodeURIComponent(user)}?trophies=false&profile=true&rank=true`;
   let res;
   try {
-    res = await fetchCompat(url, { method: 'GET', headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 (compatible; SiDaStuffChess/1.0; +https://lichess.org)' } });
+    res = await fetchCompat(url, { method: 'GET', headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 (compatible; SingChess/1.0; +https://lichess.org)' } });
   } catch (_) {
     return { error: 'Could not reach Lichess.' };
   }
@@ -300,6 +292,56 @@ function runCoachGames(user) {
   else parts.push('No saved Lichess/Chess.com usernames on file.');
   if (rating) parts.push(`Puzzle rating: ${rating}.`);
   return { summary: parts.join(' '), usernames: usernames.slice(0, 10), puzzleRating: rating };
+}
+
+// Look up the user's current plan and usage. Returns a short prose summary plus
+// the structured numbers so the model can answer "how many reviews do I have left"
+// accurately.
+async function runUserPlanStats(user) {
+  if (!user || !user.uid) return { error: 'Not signed in.' };
+  const { initAdmin, usageDay, usageWeek } = require('./user-service');
+  const { admin: firebaseAdmin, db: database } = initAdmin();
+  const profile = user._profile || {};
+  const plan = activePlan(profile);
+  const day = usageDay();
+  const week = usageWeek();
+  const [usageSnap, weekSnap] = await Promise.all([
+    database.ref(`users/${user.uid}/usage/${day}`).once('value'),
+    database.ref(`users/${user.uid}/usage/week/${week}/anticheatGames`).once('value'),
+  ]);
+  const usage = usageSnap.val() || {};
+  const reviews = Math.max(0, Number(usage.serverReviews) || 0);
+  const coachTokens = Math.max(0, Number(usage.coachTokens) || 0);
+  const anticheat = Math.max(0, Number(weekSnap.val()) || 0);
+  const limits = plan.limits || {};
+  const reviewLimit = limits.serverReviewsPerDay;
+  const anticheatLimit = limits.anticheatGamesPerWeek;
+  const coachLimit = limits.coachTokensPerDay;
+
+  const parts = [`Plan: ${plan.name}.`];
+  if (reviewLimit === null || reviewLimit === undefined) parts.push('Server reviews: unlimited.');
+  else parts.push(`Server reviews today: ${reviews} / ${reviewLimit} used.`);
+  if (anticheatLimit) parts.push(`Anticheat this week: ${anticheat} / ${anticheatLimit} used.`);
+  else parts.push('Anticheat: not included.');
+  parts.push(`Coach tokens today: ${coachTokens.toLocaleString()} / ${coachLimit ? coachLimit.toLocaleString() : 'unlimited'} used.`);
+  if (plan.expiresAt) parts.push(`Plan expires: ${new Date(plan.expiresAt).toLocaleDateString()}.`);
+
+  return {
+    summary: parts.join(' '),
+    plan: plan.name,
+    limits: {
+      serverReviewsPerDay: reviewLimit,
+      anticheatGamesPerWeek: anticheatLimit,
+      coachTokensPerDay: coachLimit,
+    },
+    usage: {
+      serverReviews: reviews,
+      anticheatGames: anticheat,
+      coachTokens,
+      day,
+      week,
+    },
+  };
 }
 
 function stripHtml(s) {

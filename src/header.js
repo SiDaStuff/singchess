@@ -28,8 +28,8 @@
     nav.className = 'site-header';
     nav.innerHTML = `
       <a class="site-brand" href="/">
-        <img src="./assets/logo.png" alt="">
-        <span>SiDaStuff Chess</span>
+        <img src="./assets/icon.png" alt="">
+        <span>Sing Chess</span>
       </a>
       <button class="site-menu-toggle" type="button" aria-expanded="false" aria-controls="site-menu">Menu</button>
       <nav class="site-menu" id="site-menu" aria-label="Site navigation">

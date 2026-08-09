@@ -3,7 +3,7 @@
     const footer = document.createElement('footer');
     footer.className = 'site-footer';
     footer.innerHTML = `
-      <span>SiDaStuff Chess</span>
+      <span>Sing Chess</span>
       <nav aria-label="Footer navigation">
         <a href="/plans">Plans</a>
         <a href="/settings">Settings</a>

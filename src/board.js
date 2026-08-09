@@ -70,7 +70,7 @@ class ChessBoard {
       // Merge settings, with appearanceSettings taking precedence
       const settings = { ...engineSettings, ...appearanceSettings };
 			      document.body.dataset.boardTheme = settings.boardTheme || 'classic';
-			      document.body.dataset.pieceTheme = settings.pieceTheme || 'classic';
+			      document.body.dataset.pieceTheme = settings.pieceTheme || 'cburnett';
 			      document.body.dataset.pieceAnimations = settings.pieceAnimations ? 'on' : 'off';
 			      // The real animation toggle is the body class (CSS reads
 			      // body.no-piece-animations, not the dataset above). Apply it at
@@ -80,7 +80,7 @@ class ChessBoard {
 			      document.body.style.setProperty('--annotation-highlight-color', this._annotationHighlightColor(settings.highlightColor || settings.annotationHighlightColor));
 			    } catch (_) {
 			      document.body.dataset.boardTheme = 'classic';
-			      document.body.dataset.pieceTheme = 'classic';
+			      document.body.dataset.pieceTheme = 'cburnett';
 			      document.body.dataset.pieceAnimations = 'off';
 			      this.enableAnimations(false);
 			      document.body.style.setProperty('--annotation-arrow-color', '#d88a1d');
@@ -124,8 +124,86 @@ class ChessBoard {
 	    this.changedSquares = previousSquares.length
 	      ? Object.keys({ ...previous, ...next }).filter((sq) => previous[sq] !== next[sq])
 	      : [];
+
+	    // Detect a piece move for slide animation
+	    let slideFrom = null;
+	    let slideTo = null;
+	    let slidePiece = null;
+	    if (!document.body.classList.contains('no-piece-animations') && previousSquares.length > 0) {
+	      for (const sq of this.changedSquares) {
+	        if (previous[sq] && !next[sq]) {
+	          const pieceType = previous[sq];
+	          for (const otherSq of this.changedSquares) {
+	            if (otherSq !== sq && next[otherSq] === pieceType) {
+	              slideFrom = sq;
+	              slideTo = otherSq;
+	              slidePiece = pieceType;
+	              break;
+	            }
+	          }
+	          if (slideFrom) break;
+	        }
+	      }
+	    }
+
 	    this.position = next;
-	    this._updatePieces();
+
+	    if (this._skipNextSlide) {
+	      this._skipNextSlide = false;
+	      this._updatePieces();
+	    } else if (this._animateNext && slideFrom && slideTo && slidePiece) {
+	      this._animateNext = false;
+	      this._animateSlide(slideFrom, slideTo, slidePiece);
+	    } else {
+	      this._animateNext = false;
+	      this._updatePieces();
+	    }
+	  }
+
+	  _animateSlide(fromSq, toSq, piece) {
+	    if (!this.wrapper) { this._updatePieces(); return; }
+
+	    const fromEl = this.container.querySelector(`[data-square="${fromSq}"]`);
+	    const toEl = this.container.querySelector(`[data-square="${toSq}"]`);
+	    if (!fromEl || !toEl) { this._updatePieces(); return; }
+
+	    // Hide the original piece on the from-square immediately
+	    const fromPiece = fromEl.querySelector('.piece');
+	    if (fromPiece) fromPiece.style.opacity = '0';
+
+	    const wrapperRect = this.wrapper.getBoundingClientRect();
+	    const fromRect = fromEl.getBoundingClientRect();
+	    const toRect = toEl.getBoundingClientRect();
+
+	    const startLeft = fromRect.left - wrapperRect.left;
+	    const startTop = fromRect.top - wrapperRect.top;
+	    const endLeft = toRect.left - wrapperRect.left;
+	    const endTop = toRect.top - wrapperRect.top;
+
+	    const slideEl = document.createElement('div');
+	    slideEl.className = 'piece-slide';
+	    const img = document.createElement('img');
+	    img.src = getPieceSvgUri(piece);
+	    img.draggable = false;
+	    img.alt = '';
+	    slideEl.appendChild(img);
+
+	    slideEl.style.left = startLeft + 'px';
+	    slideEl.style.top = startTop + 'px';
+	    slideEl.style.width = fromRect.width + 'px';
+	    slideEl.style.height = fromRect.height + 'px';
+	    this.wrapper.appendChild(slideEl);
+
+	    slideEl.offsetHeight;
+
+	    slideEl.style.left = endLeft + 'px';
+	    slideEl.style.top = endTop + 'px';
+
+	    const durationMs = parseFloat(getComputedStyle(document.body).getPropertyValue('--piece-slide-duration')) * 1000 || 500;
+	    setTimeout(() => {
+	      slideEl.remove();
+	      this._updatePieces();
+	    }, durationMs + 50);
 	  }
 
   // Update board display
@@ -323,6 +401,19 @@ class ChessBoard {
   // this method owns the real toggle. Called from app.js settings apply.
   enableAnimations(enabled) {
     document.body.classList.toggle('no-piece-animations', !enabled);
+  }
+
+  // Skip slide animation for the next position update. Used after drag-and-drop
+  // moves so the piece doesn't slide from the old square — it already moved.
+  skipNextSlide() {
+    this._skipNextSlide = true;
+  }
+
+  // Request slide animation for the next position update. Used when navigating
+  // moves via arrow keys or prev/next buttons. All other updates (puzzle moves,
+  // coach moves, game load, etc.) are instant.
+  animateNextUpdate() {
+    this._animateNext = true;
   }
 
 

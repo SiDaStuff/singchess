@@ -88,9 +88,26 @@ function validateUrl(urlString) {
 // allowlist. This is the core SSRF defense.
 async function fetchWithGlobal(urlString, options, redirectCount) {
   const parsed = validateUrl(urlString); // throws if host isn't allowlisted
-  // redirect:'manual' so fetch does NOT silently follow a redirect to a
-  // non-allowlisted host; we re-validate each Location ourselves.
-  const res = await fetch(urlString, { ...options, redirect: 'manual' });
+  // Optional per-request timeout via AbortController. Callers that fetch slow
+  // upstreams (chess.com month archives, lichess explorer) pass timeoutMs so a
+  // hung host fails fast instead of stalling the request (and the client UI).
+  const ac = Number(options?.timeoutMs) > 0 ? new AbortController() : null;
+  const timer = ac ? setTimeout(() => ac.abort(), options.timeoutMs) : null;
+  const fetchOpts = { ...options, redirect: 'manual' };
+  if (ac) fetchOpts.signal = ac.signal;
+  let res;
+  try {
+    // redirect:'manual' so fetch does NOT silently follow a redirect to a
+    // non-allowlisted host; we re-validate each Location ourselves.
+    res = await fetch(urlString, fetchOpts);
+  } catch (err) {
+    if (ac && ac.signal.aborted) {
+      throw new Error(`Request timed out after ${options.timeoutMs}ms: ${urlString}`);
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   if ([301, 302, 303, 307, 308].includes(res.status) && res.headers.get('location') && redirectCount < 4) {
     const next = new URL(res.headers.get('location'), parsed).toString();
     // consume/abort the redirect response body before recursing
@@ -134,6 +151,10 @@ function fetchCompat(url, options = {}, redirectCount = 0) {
         });
       });
       req.on('error', reject);
+      // Optional per-request timeout for the legacy https path.
+      if (Number(options.timeoutMs) > 0) {
+        req.setTimeout(options.timeoutMs, () => req.destroy(new Error(`Request timed out after ${options.timeoutMs}ms: ${url}`)));
+      }
       if (options.body) req.write(options.body);
       req.end();
     } catch (err) {

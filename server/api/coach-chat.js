@@ -12,6 +12,7 @@
 const { requireUser, isPaidOrAbove, activePlan, initAdmin, usageDay, reserveCoachTokens, reconcileCoachTokens } = require('./_lib/user-service');
 const llm = require('./_lib/llm-service');
 const { TOOL_DEFINITIONS, BROWSER_TOOLS, runServerTool } = require('./_lib/coach-tools');
+const { acquireHeavyAction, releaseHeavyAction, getBusyAction } = require('./_lib/action-lock');
 
 const LLM_HISTORY_LIMIT = 20;    // prior turns sent to the LLM (client caps this too)
 const MAX_TOOL_ROUNDS = 5;       // cap agentic loops
@@ -38,7 +39,17 @@ function coachAllowUid(uid) {
 function coachReleaseUid(uid) {
   if (!uid) return;
   const inFlight = coachInFlight.get(uid) || 0;
-  coachInFlight.set(uid, Math.max(0, inFlight - 1));
+  const next = Math.max(0, inFlight - 1);
+  // Free the Map slots once a uid has no active streams and no recent bursts —
+  // otherwise coachInFlight/coachRecent hold stale zero/empty entries forever
+  // (one per distinct uid seen over the process lifetime).
+  if (next === 0) coachInFlight.delete(uid);
+  else coachInFlight.set(uid, next);
+  const now = Date.now();
+  const win = 60000;
+  const recent = (coachRecent.get(uid) || []).filter((t) => now - t < win);
+  if (recent.length === 0) coachRecent.delete(uid);
+  else coachRecent.set(uid, recent);
 }
 // Daily-quota charge multiplier per model tier. Strong models are far larger
 // (gpt-oss-120b / llama-3.3-70b / mistral-large vs. their fast siblings), so a
@@ -143,6 +154,21 @@ exports.streamHandler = async (req, res) => {
     return;
   }
 
+  // Heavy-action lock: block coach chat while a game review is running for the
+  // same user (and vice versa). This is backend defense in depth on top of the
+  // frontend mutual-exclusion popup.
+  if (!acquireHeavyAction(user.uid, 'coach')) {
+    const busy = getBusyAction(user.uid);
+    sseWrite(res, 'error', {
+      error: busy === 'review'
+        ? 'A game review is running. Please wait for it to finish before using the coach.'
+        : 'You already have a coach chat running. Please wait for it to finish.',
+      code: 'heavy_action_busy',
+    });
+    res.end();
+    return;
+  }
+
   // Atomic quota gate: reserve a worst-case cost up front (transactional, so N
   // parallel requests can't all pass the gate on the same stale read and run up
   // the LLM bill past the cap). The over-reservation is refunded after the
@@ -152,6 +178,7 @@ exports.streamHandler = async (req, res) => {
   try {
     const r = await reserveCoachTokens(user.uid, reserveAmount, tokenLimit);
     if (!r.allowed) {
+      releaseHeavyAction(user.uid);
       sseWrite(res, 'error', {
         error: 'You\'ve used all your daily Coach tokens. They reset at midnight UTC — or upgrade for more.',
         code: 'quota_exceeded',
@@ -163,6 +190,7 @@ exports.streamHandler = async (req, res) => {
     }
     reservedTotal = r.total;
   } catch (err) {
+    releaseHeavyAction(user.uid);
     sseWrite(res, 'error', { error: 'Could not verify token quota. Please try again.', code: 'quota_check_failed' });
     res.end();
     return;
@@ -176,6 +204,13 @@ exports.streamHandler = async (req, res) => {
   let closed = false;
   req.on('close', () => { closed = true; });
 
+  // Cooperative instance affinity: stamp the process pid on the init event so
+  // the client can include it in /api/coach/tool-result. The sticky-routing in
+  // nginx (hash on sid_device cookie) should already keep both on the same
+  // instance; this pid is a backstop — when tool-result reports a pid mismatch
+  // we can log it (and the client can retry), rather than timing out silently.
+  sseWrite(res, 'init', { pid: process.pid, ts: Date.now() });
+
   const heartbeat = setInterval(() => { if (!closed) sseWrite(res, 'heartbeat', { ts: Date.now() }); }, HEARTBEAT_MS);
   const stopHeartbeat = () => clearInterval(heartbeat);
 
@@ -183,7 +218,7 @@ exports.streamHandler = async (req, res) => {
     // Build the LLM message list (system + last N client-supplied messages +
     // this one). The client already includes the current `text` in history, so
     // buildLlmMessages dedupes to avoid sending it twice.
-    const llmMessages = buildLlmMessages(clientHistory, text);
+    const llmMessages = buildLlmMessages(clientHistory, text, payload.reviewContext);
 
     // Run the tool loop, then stream the final answer.
     let assistantText = '';
@@ -236,15 +271,26 @@ exports.streamHandler = async (req, res) => {
     }
     sseWrite(res, 'error', { error: err.message || 'Coach chat failed.', code: err.code || 'server_error' });
   } finally {
+    releaseHeavyAction(user && user.uid);
     coachReleaseUid(user && user.uid);
     stopHeartbeat();
     if (!res.writableEnded) res.end();
   }
 };
 
-function buildLlmMessages(history, currentText) {
+function buildLlmMessages(history, currentText, reviewContext) {
   const recent = history.slice(-LLM_HISTORY_LIMIT);
   const msgs = [{ role: 'system', content: llm.SYSTEM_PROMPT }];
+  // Optional review seed: when the chat was opened from a game review, the
+  // client sends the reviewed game's compact data so the coach can answer
+  // follow-up questions about it WITHOUT re-running a full review (the coach
+  // is otherwise forbidden from reviewing games inline). Injected as a second
+  // system message so it applies to every turn in the chat. The model MUST
+  // still verify position/move claims with the stockfish tool rather than
+  // relying only on this summary.
+  if (reviewContext && typeof reviewContext === 'object') {
+    msgs.push({ role: 'system', content: `The user opened this chat from a reviewed game. Here is the engine review data you can reference (evals are White's perspective, in centipawns unless noted). Do NOT invent facts from this data — when the user asks about a position, move, or evaluation, use the stockfish tool to verify before answering.\n\n${JSON.stringify(reviewContext).slice(0, 8000)}` });
+  }
   for (const m of recent) {
     if (m.role === 'user' || m.role === 'assistant') {
       msgs.push({ role: m.role, content: String(m.content || '') });
@@ -388,7 +434,7 @@ async function runConversation({ res, llmMessages, modelTier, user, closedRef, o
 // warm, and chess-scoped (consistent with the SYSTEM_PROMPT), and it steers the
 // user toward something the coach can actually help with.
 function fallbackReply() {
-  return "I thought about that but couldn't put together a clear answer. Could you rephrase, or ask me something specific — like an opening to explain, a position to evaluate (paste a FEN), or a game to review (paste a PGN)?";
+  return "I couldn't verify an answer with Stockfish or the available tools, so I don't want to guess. Could you rephrase, or ask me something specific — like an opening to explain, a position to evaluate (paste a FEN), or a game to review (paste a PGN)?";
 }
 
 function toolLabel(name) {
@@ -409,6 +455,12 @@ function summariseBrowserResult(name, result) {
   if (result && result.error) return `${name} failed: ${result.error}`;
   if (name === 'stockfish') {
     if (!result) return null;
+    // An empty/failed result (no bestMove + depth 0) is NOT a real eval — never
+    // display "+0.00" as though the engine clears the position. Surface an honest
+    // "no result" so the user (and the visible tool card) isn't misled.
+    if (!result.bestMove && (!result.depth || result.depth === 0)) {
+      return 'Stockfish returned no result (possibly timed out).';
+    }
     const mate = result.scoreType === 'mate' ? `M${result.score}` : `${(result.score / 100).toFixed(2)}`;
     return `Stockfish d${result.depth || '?'}: ${mate} (side to move) — best ${result.bestMove || '?'}`;
   }

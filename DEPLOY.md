@@ -1,4 +1,8 @@
-# Production deployment — SiDaStuff Chess Review
+# Production deployment — Sing Chess Review
+
+> **Need a from-scratch walkthrough?** See **[SETUP_ORACLE_NETLIFY.md](./SETUP_ORACLE_NETLIFY.md)**
+> for the complete step-by-step (VM provisioning, SSH, PM2, nginx TLS, Netlify,
+> DNS, smoke tests). This file is the quick-reference companion.
 
 ## Architecture
 
@@ -58,8 +62,11 @@ npm ci
 # again whenever src/puzzles or piece art changes:
 npm run puzzles:build
 npm run pieces:build
-# Vite build (outputs dist/) + copies the stockfish worker into dist/.
-npm run build
+npm run stockfish:copy
+# Vite build (outputs dist/) — only needed if this VM serves the frontend.
+# In the Netlify-split architecture, SERVE_STATIC=0 so this VM is API-only;
+# you can skip `npm run build` here (Netlify builds the frontend).
+# npm run build
 ```
 
 `npm run build` already runs `prebuild` (`stockfish:copy`). The puzzle/piece

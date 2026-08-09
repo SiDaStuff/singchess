@@ -38,7 +38,7 @@ class ChessReviewApp {
 						liveDeepening: _savedEngineSettings.liveDeepening !== undefined ? !!_savedEngineSettings.liveDeepening : true,
 						forcedDepth: Number(_savedEngineSettings.forcedDepth) || 16,
 						analysisLocation: _savedEngineSettings.analysisLocation || 'server',
-						serverStrongReview: _savedEngineSettings.serverStrongReview !== undefined ? !!_savedEngineSettings.serverStrongReview : true,
+						serverStrength: _savedEngineSettings.serverStrength || 'normal',
 			};
 	    this.engineSettings.module = this._recommendedEngineModule();
     this.engineInitToken = 0;
@@ -70,8 +70,29 @@ class ChessReviewApp {
 	    this.liveMoveResults = [];
 	    this.explorerReturnState = null;
     this.exploreLineMode = false;
+    // "Explore Best Move" preview state — when set, the board is showing the
+    // position after the engine's recommended move as a read-only preview.
+    // _exitBestMovePreview() restores the saved board. No move can be played
+    // from it (playing a move exits the preview first).
+    this.bestMovePreview = null;
+	    // Manual sub-lines (variations) the user plays off the main line. Each
+	    // entry hangs off a main-line move index; multiple parallel sub-lines
+	    // per parent move are supported. Sub-lines are session-only - cleared
+	    // when a new PGN loads or coach starts. See _startOrExtendSubLine /
+	    // _deleteSubLine / _returnToMainLine.
+	    this.subLines = new Map();
+	    // Where the board cursor actually lives. Was implicit (this.currentMoveIndex).
+	    // main means the cursor is on the main line at index. sub means the
+	    // cursor is inside a sub-line hanging off main-line index parentIndex,
+	    // at sub-line subIndex, pointed at sub-line move moveIndex.
+	    this.activeLine = { kind: 'main', index: -1 };
 	    this.isAnalyzing = false;
 	    this.autoPlaying = false;
+    // Global lock for heavy, mutually-exclusive user actions. Values:
+    // null = idle, 'review' = game review in progress, 'coach' = coach chat
+    // streaming/reasoning. Basic API calls (puzzles, imports, etc.) do NOT use
+    // this lock and can run concurrently.
+    this.busyAction = null;
 	    this._setAnticheatChecking(false);
 	    this.reviewPlaybackTimer = null;
 	    this.liveEvalHistory = [];
@@ -187,7 +208,7 @@ class ChessReviewApp {
 		    this._updateLiveEvalPanel();
 		    this._resetInsightPanel();
 			    this._initRouting();
-			    this._ensureImportModalTabs();
+			    this._initImportToolTabs();
 			    this._initSavedUsernameBar();
 			    this._initLinkUsernameRow();
 			    window.addEventListener('resize', () => this._updateEvalBar(this.currentEvalScore), { passive: true });
@@ -209,6 +230,38 @@ class ChessReviewApp {
 			    });
 			    window.addEventListener('focus', refreshPlanAndUsage);
 		  }
+
+  // ── Heavy-action mutual-exclusion lock ─────────────────────────────────
+  // Review and coach chat are long-running, CPU/network-heavy operations. We
+  // block starting a second one while another is in progress and show a popup.
+  // Basic API calls (puzzles, imports, account updates, etc.) are intentionally
+  // NOT gated by this lock.
+  _isBusyWithHeavyAction() {
+    return this.busyAction === 'review' || this.busyAction === 'coach';
+  }
+
+  _canStartHeavyAction(action, uiLabel) {
+    if (!this._isBusyWithHeavyAction()) return true;
+    const current = this.busyAction === 'review' ? 'a game review' : 'the coach chat';
+    this._showPopup({
+      icon: 'warning',
+      title: `${uiLabel} is blocked`,
+      text: `Please wait for ${current} to finish before starting ${uiLabel.toLowerCase()}.`,
+      confirmButtonText: 'OK',
+    });
+    return false;
+  }
+
+  _setBusyAction(action) {
+    this.busyAction = action || null;
+    // Update UI sensitivity on buttons that start heavy actions.
+    this._syncActionButtons();
+    // Notify other UI surfaces (e.g., the coach chat textarea) so they can
+    // disable/enable themselves without tight coupling.
+    try {
+      document.dispatchEvent(new CustomEvent('chessreview:busyaction', { detail: { action: this.busyAction } }));
+    } catch (_) {}
+  }
 
 	  _bindElements() {
 		    this.elMainMenu = document.getElementById('main-menu');
@@ -237,11 +290,9 @@ class ChessReviewApp {
     // the recommended module is applied silently). elEngineChoiceModal is kept
     // null-safe for any defensive checks elsewhere.
     this.elEngineChoiceModal = null;
-		    this.elEngineLoadingOverlay = document.getElementById('engine-loading-overlay');
-		    this.elEngineLoadingText = document.getElementById('engine-loading-text');
-		    this.elEngineLoadingFill = document.getElementById('engine-loading-fill');
-		    this.elAppLoadingOverlay = document.getElementById('app-loading-overlay');
-		    this.elAppLoadingText = document.getElementById('app-loading-text');
+		    this.elLoadingOverlay = document.getElementById('loading-overlay');
+		    this.elLoadingText = document.getElementById('loading-text');
+		    this.elLoadingBarFill = document.getElementById('loading-bar-fill');
 	    this.elPromotionModal = document.getElementById('promotion-modal');
 	    this.elPromotionOptions = document.getElementById('promotion-options');
     this.elBtnImport = document.getElementById('btn-import');
@@ -253,6 +304,7 @@ class ChessReviewApp {
     this.elBtnSettings = document.getElementById('btn-settings');
     this.elBtnReview = document.getElementById('btn-review');
     this.elReviewBtnText = document.getElementById('review-btn-text');
+    this.elBtnStopReview = document.getElementById('btn-stop-review');
     this.elBtnFlip = document.getElementById('btn-flip');
     this.elBtnFirst = document.getElementById('btn-first');
     this.elBtnPrev = document.getElementById('btn-prev');
@@ -296,10 +348,11 @@ class ChessReviewApp {
     this.elArrowColor = document.getElementById('settings-arrow-color');
     this.elHighlightColor = document.getElementById('settings-highlight-color');
     this.elPieceAnimations = document.getElementById('settings-piece-animations');
+	    this.elAnimSpeed = document.querySelector('input[name="settings-anim-speed"]:checked');
 	    this.elAnalysisLocation = document.getElementById('analysis-location');
 	    this.elServerBoostToggle = document.getElementById('server-boost-toggle');
-	    this.elServerStrongReview = document.getElementById('server-strong-review');
-	    this.elServerStrongNote = document.getElementById('server-strong-note');
+	    this.elStrengthChips = document.getElementById('strength-chips');
+	    this.elServerStrengthNote = document.getElementById('server-strength-note');
     this.elEngineLoadProgress = document.getElementById('engine-load-progress');
     this.elEngineLoadProgressFill = document.getElementById('engine-load-progress-fill');
     this.elReviewSummary = document.getElementById('review-summary');
@@ -308,16 +361,17 @@ class ChessReviewApp {
     this.elProgressBar = document.getElementById('review-progress');
     this.elProgressFill = document.getElementById('progress-fill');
     this.elReviewProgressStep = document.getElementById('review-progress-step');
-    // Home: onboarding ribbon, continue card, social proof, streak
-    this.elOnboardingProgress = document.getElementById('onboarding-progress');
-    this.elOnboardingFill = document.getElementById('onboarding-progress-fill');
-    this.elOnboardingLabel = document.getElementById('onboarding-progress-label');
-    this.elHomeContinueReview = document.getElementById('home-continue-review');
-    this.elHomeContinueMeta = document.getElementById('home-continue-meta');
+    this.elReviewProgressPct = document.getElementById('review-progress-pct');
+    // Home: onboarding ribbon, social proof, streak
     this.elHomeStats = document.getElementById('home-stats');
     this.elHomeStatReviews = document.getElementById('home-stat-reviews');
     this.elHomeStatPuzzles = document.getElementById('home-stat-puzzles');
     this.elHomeStatCoaches = document.getElementById('home-stat-coaches');
+    // Home: direct import controls (new simplified home page)
+    // Home import-tool elements are selected dynamically via _getImportTool().
+    this.elHomeAboutReviews = document.getElementById('home-about-reviews');
+    this.elHomeAboutPuzzles = document.getElementById('home-about-puzzles');
+    this.elHomeAboutCoaches = document.getElementById('home-about-coaches');
     this.elMoveBadge = document.getElementById('move-badge');
     this.elBadgeIcon = document.getElementById('badge-icon');
     this.elBadgeText = document.getElementById('badge-text');
@@ -328,7 +382,15 @@ class ChessReviewApp {
     this.elOpeningInfo = document.getElementById('opening-info');
     this.elOpeningName = document.getElementById('opening-name');
     this.elOpeningStats = document.getElementById('opening-stats');
-    this._openingCache = new Map(); // uci-sequence -> {opening, stats} | null
+    this.elOpeningControls = document.getElementById('opening-controls');
+    this.elOpeningFilters = document.getElementById('opening-filters');
+    this._openingCache = new Map(); // key -> {opening, stats} | null
+    // Opening-explorer source + filters (persisted). Masters is the default
+    // (back-compat). Lichess = all-player rated games; filters default to ALL
+    // OFF (load every result) — the user opts into speed/rating filters.
+    this._openingSource = localStorage.getItem('openingSource') || 'masters';
+    try { this._openingFilters = JSON.parse(localStorage.getItem('openingFilters')) || null; } catch (_) { this._openingFilters = null; }
+    if (!this._openingFilters) this._openingFilters = { speeds: [], ratings: [] };
     this.elGameStatus = document.getElementById('game-status');
     this.elGameStatusTitle = document.getElementById('game-status-title');
     this.elGameStatusReason = document.getElementById('game-status-reason');
@@ -358,11 +420,15 @@ class ChessReviewApp {
 	    this.elInsightCoach = document.getElementById('insight-coach');
 	    this.elBtnLineExplorer = document.getElementById('btn-line-explorer');
 	    this.elBtnReturnExplorer = document.getElementById('btn-return-explorer');
+	    this.elBtnInsightCoach = document.getElementById('btn-insight-coach');
+	    this.elInsightCoachResult = document.getElementById('insight-coach-result');
+	    this.elBtnGameCoach = document.getElementById('btn-game-coach');
+	    this.elGameCoachResult = document.getElementById('game-coach-result');
 	    this.elInsightAlternatives = document.getElementById('insight-alternatives');
 	    this.elInsightGate = document.getElementById('insight-gate');
 	    this.elInsightGateMove = document.getElementById('insight-gate-move');
 	    this.elInsightGateClass = document.getElementById('insight-gate-class');
-	    this.elInsightGateClose = document.getElementById('insight-gate-close');
+	    // this.elInsightGateClose = document.getElementById('insight-gate-close'); // removed
 
     this.elCoachCard = document.getElementById('coach-card');
     this.elCoachState = document.getElementById('coach-state');
@@ -434,21 +500,15 @@ class ChessReviewApp {
     this.elCriticalList = document.getElementById('critical-list');
 
     this.elPgnModal = document.getElementById('pgn-modal');
-    this.elPgnInput = document.getElementById('pgn-input');
-    this.elBtnPgnSample = document.getElementById('btn-pgn-sample');
-    this.elBtnPgnLoad = document.getElementById('btn-pgn-load');
+    // PGN input is selected dynamically from the modal import-tool.
     this.elModalClose = document.getElementById('modal-close');
     this.elSettingsModal = document.getElementById('settings-modal');
     this.elSettingsClose = document.getElementById('settings-close');
-    this.elImportSource = document.getElementById('import-source');
-    this.elImportUsername = document.getElementById('import-username');
-    this.elImportLimit = document.getElementById('import-limit');
-    this.elBtnImportUsername = document.getElementById('btn-import-username');
+    // Modal import-tool elements are selected dynamically via _getImportTool().
     this.elImportStatus = document.getElementById('import-status');
     this.elImportResults = document.getElementById('import-results');
     this.elSavedUsernameBar = document.getElementById('saved-username-bar');
     this.elSavedUsernameContent = document.getElementById('saved-username-content');
-    this.elSavedUsernameList = document.getElementById('saved-username-list');
 	    this.elAccountModal = document.getElementById('account-modal');
 	    this.elAccountClose = document.getElementById('account-close');
 	    this.elAccountSignedOut = document.getElementById('account-signed-out');
@@ -471,6 +531,11 @@ class ChessReviewApp {
 		    this.elAccountPlan = document.getElementById('account-plan');
 		    this.elAccountUsage = document.getElementById('account-usage');
 		    this.elAdminBoostPanel = document.getElementById('admin-boost-panel');
+		    this.elAdminAbusePanel = document.getElementById('spa-admin-abuse-panel');
+		    this.elAdminAbuseList = document.getElementById('spa-admin-abuse-list');
+		    this.elAdminAbuseStatus = document.getElementById('spa-admin-abuse-status');
+		    this.elBtnRefreshAbuse = document.getElementById('spa-btn-refresh-abuse');
+		    this.elBtnReportAccount = document.getElementById('spa-btn-report-account');
 		    this.elGiftBoostEmail = document.getElementById('gift-boost-email');
 		    this.elGiftBoostDays = document.getElementById('gift-boost-days');
 		    this.elBtnGiftBoost = document.getElementById('btn-gift-boost');
@@ -726,7 +791,7 @@ class ChessReviewApp {
       liveDeepening,
       forcedDepth,
       analysisLocation: this.elAnalysisLocation?.value || this.engineSettings.analysisLocation,
-      serverStrongReview: this.elServerStrongReview?.checked ?? this.engineSettings.serverStrongReview,
+      serverStrength: this.engineSettings.serverStrength || 'normal',
     };
     this.engineSettings = { ...this.engineSettings, ...settings };
     this._persistEngineSettings();
@@ -754,13 +819,15 @@ class ChessReviewApp {
     const boardTheme = document.querySelector('input[name="settings-board-theme"]:checked')?.value
       || this.elBoardTheme?.value || 'classic';
     const pieceTheme = document.querySelector('input[name="settings-piece-theme"]:checked')?.value
-      || this.elPieceTheme?.value || 'classic';
+      || this.elPieceTheme?.value || 'cburnett';
+    const animSpeedEl = document.querySelector('input[name="settings-anim-speed"]:checked');
     const settings = {
       boardTheme,
       pieceTheme,
       arrowColor: this.elArrowColor?.value || '#d88a1d',
       highlightColor: this.elHighlightColor?.value || '#d22626',
-      pieceAnimations: this.elPieceAnimations?.checked || false
+      pieceAnimations: this.elPieceAnimations?.checked || false,
+      animSpeed: animSpeedEl?.value || '0.5'
     };
     localStorage.setItem('sidastuff.appearanceSettings', JSON.stringify(settings));
     if (this.elAppearanceSettingsStatus) {
@@ -792,6 +859,10 @@ class ChessReviewApp {
     if (this.elHighlightColor && saved.highlightColor) this.elHighlightColor.value = saved.highlightColor;
     if (this.elPieceAnimations && typeof saved.pieceAnimations === 'boolean') {
       this.elPieceAnimations.checked = saved.pieceAnimations;
+    }
+    if (saved.animSpeed) {
+      const speedEl = document.querySelector(`input[name="settings-anim-speed"][value="${saved.animSpeed}"]`);
+      if (speedEl) speedEl.checked = true;
     }
   }
 
@@ -838,6 +909,10 @@ class ChessReviewApp {
     }
     if (saved.pieceAnimations !== undefined && this.board) {
       this.board.enableAnimations(saved.pieceAnimations);
+    }
+    // Apply animation speed
+    if (saved.animSpeed) {
+      document.body.dataset.animSpeed = saved.animSpeed;
     }
     // Keep the settings-page preview in sync with whatever was just applied.
     this._renderBoardPreview?.();
@@ -1139,10 +1214,11 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    const checkedPiece = document.querySelector('input[name="onboard-piece-theme"]:checked');
 	    return {
 	      boardTheme: checkedBoard?.value || this.elOnboardBoardTheme?.value || 'classic',
-	      pieceTheme: checkedPiece?.value || this.elOnboardPieceTheme?.value || 'classic',
+	      pieceTheme: checkedPiece?.value || this.elOnboardPieceTheme?.value || 'cburnett',
 	      arrowColor: '#d88a1d',
 	      highlightColor: '#d22626',
 	      pieceAnimations: true,
+	      animSpeed: '0.5',
 	    };
 	  }
 
@@ -1186,7 +1262,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	  // here: persist their onboarding choices + set the onboardingComplete flag
 	  // server-side, then send them to /account. (No new Firebase account to create.)
 	  async _finishOnboardingForSignedInUser() {
-	    this._showAppLoadingOverlay('Saving your setup...');
+	    this._showLoadingOverlay('Saving your setup...');
 	    try {
 	      await this._saveUserProfile({
 	        ...this.authState.profile,
@@ -1203,7 +1279,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    } catch (_err) {
 	      // Profile save is best-effort; still proceed so the user isn't stuck.
 	    } finally {
-	      this._hideAppLoadingOverlay();
+	      this._hideLoadingOverlay();
 	    }
 	    this._navigateTo('/account', { replace: true });
 	    setTimeout(() => window.location.reload(), 400);
@@ -1276,7 +1352,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    show('profile-owner-actions', isOwner);
 	    // Share button (bound once)
 	    this._bindProfileShare(username);
-	    document.title = `${username} | SiDaStuff Chess`;
+	    document.title = `${username} | Sing Chess`;
 	  }
 
 	  _bindProfileShare(username) {
@@ -1334,15 +1410,23 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    if (!message || message.length < 5) { set('Please write a short message.', 'error'); return; }
 	    set('Sending…', '');
 	    try {
+	      // reCAPTCHA v3 token — invisible to the user, verified server-side.
+	      // Throws if the site key is missing or Google's script fails to load.
+	      const recaptchaToken = await window.recaptchaLib.executeRecaptcha('contact');
 	      const res = await apiFetch('/api/contact', {
 	        method: 'POST', headers: { 'Content-Type': 'application/json' },
-	        body: JSON.stringify({ email, reason, message }),
+	        body: JSON.stringify({ email, reason, message, recaptchaToken }),
 	      });
 	      const data = await res.json().catch(() => ({}));
 	      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
 	      set('Message sent — we\'ll get back to you soon.', 'success');
 	      const msg = document.getElementById('contact-message'); if (msg) msg.value = '';
-	    } catch (err) { set(err.message || 'Could not send. Try again.', 'error'); }
+	    } catch (err) {
+	      // Distinguish captcha load/exec failures (client-side, no network) from
+	      // server rejection. Both render the same way to the user.
+	      const msg = err?.message || 'Could not send. Try again.';
+	      set(msg.includes('reCAPTCHA') ? 'Captcha unavailable. Please try again in a moment.' : msg, 'error');
+	    }
 	  }
 
 	  // Forgot-password from the sign-in page: send a reset email to the
@@ -1530,7 +1614,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    if (!firebase?.auth) return this._setSpaAccountStatus('Firebase auth is unavailable.', 'error');
 		    const email = (this.elSpaResetEmail?.value || '').trim();
 		    if (!email) return this._setSpaAccountStatus('Enter your email first.', 'error');
-		    this._showAppLoadingOverlay('Sending reset email...');
+		    this._showLoadingOverlay('Sending reset email...');
 		    try {
 		      await firebase.auth().sendPasswordResetEmail(email);
 		      this._setSpaAccountStatus('Password reset email sent.', 'success');
@@ -1544,7 +1628,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 } catch (err) {
 		      this._setSpaAccountStatus(err?.message || 'Unable to send reset email.', 'error');
 		    } finally {
-		      this._hideAppLoadingOverlay();
+		      this._hideLoadingOverlay();
 		    }
 		  }
 
@@ -1553,14 +1637,14 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    if (!firebase?.auth) return this._setSpaAccountStatus('Firebase auth is unavailable.', 'error');
 		    const email = (this.authState?.user?.email || '').trim();
 		    if (!email) return this._setSpaAccountStatus('No account email found. Sign in again.', 'error');
-		    this._showAppLoadingOverlay('Sending reset email...');
+		    this._showLoadingOverlay('Sending reset email...');
 		    try {
 		      await firebase.auth().sendPasswordResetEmail(email);
 		      this._setSpaAccountStatus(`Password reset email sent to ${email}.`, 'success');
 		    } catch (err) {
 		      this._setSpaAccountStatus(err?.message || 'Unable to send reset email.', 'error');
 		    } finally {
-		      this._hideAppLoadingOverlay();
+		      this._hideLoadingOverlay();
 		    }
 		  }
 
@@ -1571,7 +1655,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    const confirmPassword = (this.elSpaResetConfirmPassword?.value || '').trim();
 		    if (!newPassword || newPassword.length < 6) return this._setSpaAccountStatus('Password must be at least 6 characters.', 'error');
 		    if (newPassword !== confirmPassword) return this._setSpaAccountStatus('Passwords do not match.', 'error');
-		    this._showAppLoadingOverlay('Updating password...');
+		    this._showLoadingOverlay('Updating password...');
 		    try {
 		      await firebase.auth().confirmPasswordReset(code, newPassword);
 		      this._setSpaAccountStatus('Password updated. You may now sign in.', 'success');
@@ -1579,7 +1663,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    } catch (err) {
 		      this._setSpaAccountStatus(err?.message || 'Unable to update password.', 'error');
 		    } finally {
-		      this._hideAppLoadingOverlay();
+		      this._hideLoadingOverlay();
 		    }
 		  }
 
@@ -1642,6 +1726,16 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    if (refreshSupportBtn && !refreshSupportBtn.dataset.spaBound) {
 		      refreshSupportBtn.addEventListener('click', () => this._loadAdminSupport());
 		      refreshSupportBtn.dataset.spaBound = '1';
+		    }
+		    const refreshAbuseBtn = document.getElementById('spa-btn-refresh-abuse');
+		    if (refreshAbuseBtn && !refreshAbuseBtn.dataset.spaBound) {
+		      refreshAbuseBtn.addEventListener('click', () => this._loadAdminAbuse());
+		      refreshAbuseBtn.dataset.spaBound = '1';
+		    }
+		    const reportAccountBtn = document.getElementById('spa-btn-report-account');
+		    if (reportAccountBtn && !reportAccountBtn.dataset.spaBound) {
+		      reportAccountBtn.addEventListener('click', () => this._openReportAccountSwal());
+		      reportAccountBtn.dataset.spaBound = '1';
 		    }
 		    const banBtn = document.getElementById('btn-ban-user');
 		    if (banBtn && !banBtn.dataset.spaBound) {
@@ -1738,6 +1832,127 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	  }
 
 
+  _reportAccountSwalHtml() {
+    return `
+      <div class="swal-form-grid">
+        <label class="field">
+          <span class="field-label">Account email</span>
+          <input id="swal-report-account-email" class="input-select swal-report-input" type="email" placeholder="player@example.com">
+        </label>
+        <label class="field">
+          <span class="field-label">Reason</span>
+          <select id="swal-report-account-reason" class="input-select swal-report-input">
+            <option value="">Choose a reason</option>
+            <option value="Harassment">Harassment</option>
+            <option value="Spam">Spam</option>
+            <option value="Multi-accounting">Multi-accounting</option>
+            <option value="Automated abuse">Automated abuse</option>
+            <option value="Other">Other</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">Details (optional)</span>
+          <textarea id="swal-report-account-details" class="input-select swal-report-input" rows="3" maxlength="1000" placeholder="Add any helpful context"></textarea>
+        </label>
+        <p class="account-status" id="swal-report-account-status"></p>
+      </div>`;
+  }
+
+  async _openReportAccountSwal() {
+    const result = await this._showPopup({
+      form: true,
+      title: 'Report an account',
+      text: 'Flag another account for abuse. Reports are reviewed by admins.',
+      html: this._reportAccountSwalHtml(),
+      showCancelButton: true,
+      confirmButtonText: 'Submit report',
+      cancelButtonText: 'Cancel',
+      allowOutsideClick: false,
+      preConfirm: async () => {
+        const root = this._swalContentRoot();
+        if (!root) return false;
+        const email = (root.querySelector('#swal-report-account-email')?.value || '').trim().toLowerCase();
+        const reason = (root.querySelector('#swal-report-account-reason')?.value || '').trim();
+        const details = (root.querySelector('#swal-report-account-details')?.value || '').trim();
+        const statusEl = root.querySelector('#swal-report-account-status');
+        const set = (m, c) => { if (statusEl) { statusEl.textContent = m; statusEl.className = 'account-status ' + c; } };
+        if (!email) { set('Enter the account email.', 'error'); return false; }
+        if (!reason) { set('Choose a reason.', 'error'); return false; }
+        set('Submitting...', '');
+        try {
+          const res = await apiFetch('/api/report-abuse', {
+            method: 'POST', headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ flaggedEmail: email, reason, details }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || 'Failed (' + res.status + ')');
+          return { email, reason, details };
+        } catch (err) {
+          set(err.message || 'Could not submit report.', 'error');
+          return false;
+        }
+      },
+    });
+    if (result.isConfirmed && result.value) {
+      await this._showPopup({ icon: 'success', title: 'Report submitted', text: 'Thank you. Admins will review it.', confirmButtonText: 'OK' });
+    }
+  }
+
+  async _loadAdminAbuse() {
+    const list = this.elAdminAbuseList;
+    if (!list) return;
+    list.innerHTML = '<p class="account-status">Loading...</p>';
+    try {
+      const res = await apiFetch('/api/admin/abuse', { headers: await this._authHeaders({}) });
+      const data = await res.json().catch(() => ({}));
+      const flagged = Array.isArray(data.flagged) ? data.flagged : [];
+      if (!flagged.length) { list.innerHTML = '<p class="account-status">No flagged accounts.</p>'; return; }
+      list.innerHTML = flagged.map((a) => [
+        '<div class="admin-abuse-item" data-uid="' + this._escapeHtml(a.uid || '') + '">',
+        '  <div class="admin-abuse-top">',
+        '    <strong>' + this._escapeHtml(a.email || '') + '</strong>',
+        '    <span class="admin-abuse-plan">' + this._escapeHtml(a.plan || 'free') + '</span>',
+        '    <span class="admin-abuse-score level-' + this._escapeHtml(a.usageLevel || 'none') + '">score ' + Number(a.usageScore || 0).toFixed(1) + ' (' + this._escapeHtml(a.usageLevel || 'none') + ')</span>',
+        '    <span class="admin-abuse-count">' + (a.reportCount || 0) + ' reports</span>',
+        a.banned ? '    <span class="admin-abuse-banned">BANNED</span>' : '',
+        '  </div>',
+        '  <div class="admin-abuse-reasons">' + (a.reasons || []).map((r) => this._escapeHtml(r)).join(' · ') + '</div>',
+        a.usageDetails?.length ? '  <div class="admin-abuse-details">' + a.usageDetails.map((d) => this._escapeHtml(d)).join('<br>') + '</div>' : '',
+        a.multiAccountCount ? '  <div class="admin-abuse-links">Linked accounts: ' + a.multiAccountCount + '</div>' : '',
+        '  <div class="admin-abuse-actions">',
+        '    <button class="btn btn-primary btn-small admin-abuse-ban" type="button" ' + (a.banned ? 'disabled' : '') + '>Ban for abuse</button>',
+        '    <button class="btn btn-secondary btn-small admin-abuse-dismiss" type="button">Dismiss</button>',
+        '  </div>',
+        '</div>',
+      ].join('')).join('');
+      list.querySelectorAll('.admin-abuse-ban').forEach((btn) => {
+        btn.addEventListener('click', () => this._adminAbuseAction(btn.closest('.admin-abuse-item')?.dataset.uid, 'ban-for-abuse'));
+      });
+      list.querySelectorAll('.admin-abuse-dismiss').forEach((btn) => {
+        btn.addEventListener('click', () => this._adminAbuseAction(btn.closest('.admin-abuse-item')?.dataset.uid, 'dismiss'));
+      });
+    } catch (_err) { list.innerHTML = '<p class="account-status error">Could not load flagged accounts.</p>'; }
+  }
+
+  async _adminAbuseAction(uid, action) {
+    if (!uid) return;
+    const status = this.elAdminAbuseStatus;
+    const set = (m, c) => { if (status) { status.textContent = m; status.className = 'account-status ' + c; } };
+    const reason = action === 'ban-for-abuse' ? window.prompt('Ban reason (optional):') || '' : '';
+    set('Working...', '');
+    try {
+      const res = await apiFetch('/api/admin/abuse', {
+        method: 'POST', headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ action, uid, reason }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed (' + res.status + ')');
+      set(action === 'dismiss' ? 'Report dismissed.' : 'Account banned for abuse.', 'success');
+      this._loadAdminAbuse();
+    } catch (err) { set(err.message || 'Action failed.', 'error'); }
+  }
+
+
 	  // Save the username entered on the account page. A valid username is
 	  // required before a public profile can exist/be visited.
 	  async _saveAccountUsername() {
@@ -1814,6 +2029,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      'admin-boost-panel',     // Gift Boost — account modal
 		      'admin-ban-panel',       // Ban / Unban Player
 		      'spa-admin-support-panel', // Support messages
+		      'spa-admin-abuse-panel', // Flagged accounts
 		    ];
 		    adminElementIds.forEach((id) => {
 		      const el = document.getElementById(id);
@@ -1852,27 +2068,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    }
 		  }
 
-		  _clearSavedGames() {
-		    try {
-		      this._forgetSavedGameState('review');
-		      this._forgetSavedGameState('coach');
-		      this._showPopup({
-		        icon: 'success',
-		        title: 'Saved games cleared',
-		        text: 'Stored review and coach games were removed from this device.',
-		      });
-		    } catch (err) {
-		      this._showPopup({ icon: 'error', title: 'Clear failed', text: err.message || 'Unable to clear saved games.' });
-		    }
-		  }
-
 		  _injectClearSavedGamesButton() {
-		    // The Clear Saved Games button now lives in Settings, not the header.
-		    const btn = document.getElementById('btn-clear-saved-games');
-		    if (btn && !btn.dataset.bound) {
-		      btn.addEventListener('click', () => this._clearSavedGames());
-		      btn.dataset.bound = '1';
-		    }
 		    // Clear saved coach chats (localStorage keys per-uid).
 		    const chatBtn = document.getElementById('btn-clear-coach-chats');
 		    if (chatBtn && !chatBtn.dataset.bound) {
@@ -1886,12 +2082,9 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		          }
 		          keys.forEach((k) => localStorage.removeItem(k));
 		        } catch (_) {}
-		        // Reset the in-memory chat state + re-render.
-		        if (window.CoachChat && this.coachChat?.active) {
-		          window.CoachChat.mount(this); // re-mounts → loadForUid → createChat (fresh)
-		        }
-		        const status = document.getElementById('page-status');
-		        if (status) { status.textContent = 'Coach chats cleared.'; status.className = 'account-status success'; }
+		        // Reload so the in-memory chat state is fully reset and any active
+		        // coach UI rebuilds from a clean slate.
+		        window.location.reload();
 		      });
 		      chatBtn.dataset.bound = '1';
 		    }
@@ -1928,6 +2121,9 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      }
 		    }
 
+		    // Track page view via gtag and Firebase Analytics
+		    this._trackPageView(route);
+
 		    if (route === '/incompatible-browser') {
 		      this._hideRoutePages();
 		      this._showRoutePage('incompatible-browser');
@@ -1935,7 +2131,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      document.body.classList.add('in-app-route');
 		      if (this.elMainMenu) this.elMainMenu.hidden = true;
 		      if (this.elMainContent) this.elMainContent.hidden = true;
-		      document.title = 'Unsupported Browser | SiDaStuff Chess';
+		      document.title = 'Unsupported Browser | Sing Chess';
 		      return;
 		    }
 
@@ -1946,7 +2142,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      this._enterInAppLayout();
 		      this._showRoutePage('login');
 		      this._showBannedMessageIfAny();
-		      document.title = 'Sign In | SiDaStuff Chess';
+		      document.title = 'Sign In | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
 		    }
@@ -1962,7 +2158,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      this._applySignupContext();
 		      // (Re)initialize the onboarding wizard to step 1 each time signup is shown.
 		      this._initOnboarding();
-		      document.title = 'Sign Up | SiDaStuff Chess';
+		      document.title = 'Sign Up | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
 		    }
@@ -1970,7 +2166,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    if (route === '/account') {
 		      this._enterInAppLayout();
 		      this._showRoutePage('account');
-		      document.title = 'Account | SiDaStuff Chess';
+		      document.title = 'Account | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
 		    }
@@ -1978,7 +2174,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    if (route === '/settings') {
 		      this._enterInAppLayout();
 		      this._showRoutePage('settings');
-		      document.title = 'Settings | SiDaStuff Chess';
+		      document.title = 'Settings | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
 		    }
@@ -1986,7 +2182,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    if (route === '/auth') {
 		      this._enterInAppLayout();
 		      this._showRoutePage('auth');
-		      document.title = 'Account Help | SiDaStuff Chess';
+		      document.title = 'Account Help | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
 		    }
@@ -1994,7 +2190,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    if (route === '/privacy') {
 		      this._enterInAppLayout();
 		      this._showRoutePage('privacy');
-		      document.title = 'Privacy Policy | SiDaStuff Chess';
+		      document.title = 'Privacy Policy | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
 		    }
@@ -2002,7 +2198,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    if (route === '/terms') {
 		      this._enterInAppLayout();
 		      this._showRoutePage('terms');
-		      document.title = 'Terms of Service | SiDaStuff Chess';
+		      document.title = 'Terms of Service | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
 		    }
@@ -2011,7 +2207,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      this._enterInAppLayout();
 		      this._showRoutePage('contact');
 		      this._initContactPage();
-		      document.title = 'Contact Us | SiDaStuff Chess';
+		      document.title = 'Contact Us | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
 		    }
@@ -2019,7 +2215,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    if (route === '/plans' || route === '/boost') {
 		      this._enterInAppLayout();
 		      this._showRoutePage('boost');
-		      document.title = 'Plans | SiDaStuff Chess';
+		      document.title = 'Plans | Sing Chess';
 		      if (window.SidaBoost?.render) window.SidaBoost.render();
 		      this._updateNavActiveState();
 		      return;
@@ -2030,7 +2226,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      this._hideSettingsModal();
 		      this._hideAccountModal();
 		      this._enterPuzzleMode();
-		      document.title = 'Puzzles | SiDaStuff Chess';
+		      document.title = 'Puzzles | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
 		    }
@@ -2040,7 +2236,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      this._hideSettingsModal();
 		      this._hideAccountModal();
 		      this._enterAnticheatMode();
-		      document.title = 'Anticheat | SiDaStuff Chess';
+		      document.title = 'Anticheat | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
 		    }
@@ -2050,7 +2246,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 			      this._hideSettingsModal();
 			      this._hideAccountModal();
 			      this._enterCoachChat();
-		      document.title = 'Coach | SiDaStuff Chess';
+		      document.title = 'Coach | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
 		    }
@@ -2059,20 +2255,11 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 			      this._hideRoutePages();
 		      this._hideSettingsModal();
 			      this._hideAccountModal();
-			      if (!options.disableRestore) {
-			        const savedReview = this._loadSavedGameState('review');
-			        if (savedReview) {
-			          this._promptSavedGameRestore('review', savedReview);
-			          document.title = 'Review | SiDaStuff Chess';
-			          this._updateNavActiveState();
-			          return;
-			        }
-			      }
 		      // When the coach's game_review tool loads a PGN, it passes skipImport
 		      // so the PGN import modal doesn't appear on top of the loaded game.
 		      if (!options.skipImport) this._showEngineChoiceModal('import');
 		      else this._enterReviewMode();
-		      document.title = 'Review | SiDaStuff Chess';
+		      document.title = 'Review | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
 		    }
@@ -2080,7 +2267,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    if (route === '/404') {
 		      this._enterInAppLayout();
 		      this._showRoutePage('404');
-		      document.title = 'Not found | SiDaStuff Chess';
+		      document.title = 'Not found | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
 		    }
@@ -2092,7 +2279,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      this._enterInAppLayout();
 		      this._showRoutePage('profile');
 		      this._loadPublicProfile(username || '');
-		      document.title = `${username || 'Profile'} | SiDaStuff Chess`;
+		      document.title = `${username || 'Profile'} | Sing Chess`;
 		      this._updateNavActiveState();
 		      return;
 		    }
@@ -2103,7 +2290,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    if (route !== '/index' && route !== '/' && !this._isKnownAppRoute(route)) {
 		      this._enterInAppLayout();
 		      this._showRoutePage('404');
-		      document.title = 'Not found | SiDaStuff Chess';
+		      document.title = 'Not found | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
 		    }
@@ -2113,7 +2300,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    this._hideSettingsModal();
 		    this._hideAccountModal();
 		    this._showMainMenu();
-		    document.title = 'SiDaStuff Chess';
+		    document.title = 'Sing Chess';
 		    this._updateNavActiveState();
 		  }
 
@@ -2185,6 +2372,33 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    };
 	  }
 
+	  _trackPageView(route) {
+	    const pagePath = route || window.location.pathname;
+	    const pageTitle = document.title || 'Sing CHESS';
+
+	    // gtag page view
+	    try {
+	      if (typeof gtag === 'function') {
+	        gtag('config', 'G-TFW7HFWKYP', {
+	          page_path: pagePath,
+	          page_title: pageTitle,
+	          send_page_view: false,
+	        });
+	      }
+	    } catch (e) { /* gtag not loaded */ }
+
+	    // Firebase Analytics page view
+	    try {
+	      if (this.analytics && typeof this.analytics.logEvent === 'function') {
+	        this.analytics.logEvent('page_view', {
+	          page_title: pageTitle,
+	          page_location: window.location.href,
+	          page_path: pagePath,
+	        });
+	      }
+	    } catch (e) { /* Firebase Analytics not available */ }
+	  }
+
 	  _ensureFirebase() {
 	    if (!window.firebase?.initializeApp) return null;
 	    if (!window.firebase.apps?.length) {
@@ -2197,6 +2411,16 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
     } catch (err) {
       console.warn('Could not set Firebase auth persistence:', err);
     }
+
+    // Initialize Firebase Analytics if available
+    try {
+      if (window.firebase.analytics) {
+        this.analytics = window.firebase.analytics();
+      }
+    } catch (err) {
+      console.warn('Firebase Analytics not available:', err);
+    }
+
 return window.firebase;
 	  }
 
@@ -2209,9 +2433,9 @@ return window.firebase;
 	    }
 
 		    this.authState.dbReady = !!firebase.database;
-		    this._showAppLoadingOverlay('Loading profile...');
+		    this._showLoadingOverlay('Loading profile...');
 		    const authInitFallback = setTimeout(() => {
-		      if (!this.authState.initialized) this._hideAppLoadingOverlay();
+		      if (!this.authState.initialized) this._hideLoadingOverlay();
 		    }, 12000);
 		    firebase.auth().onAuthStateChanged(async (user) => {
 		      clearTimeout(authInitFallback);
@@ -2258,7 +2482,7 @@ return window.firebase;
 			      this._refreshPuzzleForCurrentUser();
 			      this._loadSavedUsernames();
 			      this._renderSavedUsernameBar();
-		      this._hideAppLoadingOverlay();
+		      this._hideLoadingOverlay();
 		    });
 		  }
 
@@ -2273,7 +2497,8 @@ return window.firebase;
 			  }
 
 			  _banMessage(reason = '') {
-			    return reason ? `Account banned. Reason: ${reason}` : 'Account banned.';
+			    const base = 'Account Closed. Please contact support for help.';
+			    return reason ? `${base} Reason: ${reason}` : base;
 			  }
 
 			  async _lookupBanReason(email) {
@@ -2410,7 +2635,7 @@ return window.firebase;
   }
 
 			  async _handleBannedSession(reason = '', fallbackMessage = '') {
-			    const message = reason ? this._banMessage(reason) : (fallbackMessage || 'Account banned.');
+			    const message = reason ? this._banMessage(reason) : (fallbackMessage || 'Account Closed. Please contact support for help.');
 			    this._setAccountStatus(message, 'error');
 			    this._stopStatusStream();
 			    const firebase = this._ensureFirebase();
@@ -2639,21 +2864,20 @@ return window.firebase;
 	    }
 	    const chips = [];
 	    if (s.chesscom) {
-	      chips.push(this._savedUsernameChip('chesscom', s.chesscom, '/assets/chesscom.png'));
+	      chips.push(this._savedUsernameChip('chesscom', s.chesscom, ''));
 	    }
 	    if (s.lichess) {
-	      chips.push(this._savedUsernameChip('lichess', s.lichess, '/assets/lichess.png'));
+	      chips.push(this._savedUsernameChip('lichess', s.lichess, ''));
 	    }
 	    this.elSavedUsernameContent.innerHTML = chips.join('');
 	  }
 
-	  _savedUsernameChip(source, username, iconSrc) {
+	  _savedUsernameChip(source, username, _iconSrc) {
 	    const label = source === 'chesscom' ? 'Chess.com' : 'Lichess';
 	    return `
 	      <div class="saved-username-chip" data-source="${source}">
-	        <img src="${iconSrc}" alt="${label}" class="saved-username-icon" loading="lazy">
-	        <span class="saved-username-label">${this._escapeHtml(username)}</span>
-	        <button type="button" class="saved-username-load-btn" data-source="${source}" title="Load ${label} games">
+	        <span class="saved-username-label">Quick load ${label}</span>
+	        <button type="button" class="saved-username-load-btn" data-source="${source}" title="Load ${label} games for ${this._escapeHtml(username)}">
 	          <span class="material-symbols-outlined">download</span>
 	          <span class="btn-label">Load</span>
 	        </button>
@@ -2700,71 +2924,74 @@ return window.firebase;
 	  }
 
 	  _renderLinkUsernameRow() {
-	    // Show a "link this username" row when logged in and on the username import tab.
-	    if (!this.authState?.user) return;
-	    let row = this.elPgnModal?.querySelector('.link-username-row');
-	    const source = this.elImportSource?.value || 'pgn';
-	    const isUsernameMode = source !== 'pgn';
-	    const username = (this.elImportUsername?.value || '').trim();
-	    const label = source === 'chesscom' ? 'Chess.com' : 'Lichess';
-	    const alreadySaved = this.authState.savedUsernames?.[source] === username;
+    // Show a "link this username" row when logged in and on a username import tab.
+    if (!this.authState?.user) return;
+    const modalTool = this._getImportTool('modal');
+    if (!modalTool) return;
+    const activeTab = modalTool.querySelector('.import-tab.active');
+    const source = activeTab?.dataset.importTab || 'lichess';
+    const isUsernameMode = source !== 'pgn';
+    const usernameInput = modalTool.querySelector(`.import-username[data-source="${source}"]`);
+    const username = (usernameInput?.value || '').trim();
+    const label = source === 'chesscom' ? 'Chess.com' : 'Lichess';
+    const alreadySaved = this.authState.savedUsernames?.[source] === username;
 
-	    if (!isUsernameMode || !username) {
-	      if (row) row.remove();
-	      return;
-	    }
+    let row = modalTool.querySelector('.link-username-row');
+    if (!isUsernameMode || !username) {
+      if (row) row.remove();
+      return;
+    }
 
-	    if (!row) {
-	      row = document.createElement('div');
-	      row.className = 'link-username-row';
-	      const grid = this.elPgnModal?.querySelector('.import-source-grid');
-	      if (grid) grid.after(row);
-	    }
+    if (!row) {
+      row = document.createElement('div');
+      row.className = 'link-username-row';
+      modalTool.querySelector('.import-panels')?.after(row);
+    }
 
-	    if (alreadySaved) {
-	      row.innerHTML = `
-	        <span class="link-username-text">
-	          <span class="material-symbols-outlined link-username-icon" style="color:var(--clr-best)">check_circle</span>
-	          ${this._escapeHtml(label)} username <strong>${this._escapeHtml(username)}</strong> is already linked.
-	        </span>`;
-	      row.hidden = false;
-	    } else {
-	      row.innerHTML = `
-	        <span class="link-username-text">
-	          Link this <strong>${this._escapeHtml(label)}</strong> username for faster imports next time?
-	        </span>
-	        <button type="button" class="btn btn-sm btn-link-username" data-link-source="${this._escapeHtml(source)}" data-link-username="${this._escapeHtml(username)}">
-	          <span class="material-symbols-outlined btn-symbol">link</span>
-	          <span class="btn-label">Link</span>
-	        </button>`;
-	      row.hidden = false;
-	    }
-	  }
+    if (alreadySaved) {
+      row.innerHTML = `
+        <span class="link-username-text">
+          <span class="material-symbols-outlined link-username-icon" style="color:var(--clr-best)">check_circle</span>
+          ${this._escapeHtml(label)} username <strong>${this._escapeHtml(username)}</strong> is already linked.
+        </span>`;
+      row.hidden = false;
+    } else {
+      row.innerHTML = `
+        <span class="link-username-text">
+          Link this <strong>${this._escapeHtml(label)}</strong> username for faster imports next time?
+        </span>
+        <button type="button" class="btn btn-sm btn-link-username" data-link-source="${this._escapeHtml(source)}" data-link-username="${this._escapeHtml(username)}">
+          <span class="material-symbols-outlined btn-symbol">link</span>
+          <span class="btn-label">Link</span>
+        </button>`;
+      row.hidden = false;
+    }
+  }
 
-	  _initLinkUsernameRow() {
-	    if (!this.elPgnModal) return;
-	    this.elPgnModal.addEventListener('click', (e) => {
-	      const btn = e.target.closest('.btn-link-username');
-	      if (!btn) return;
-	      e.preventDefault();
-	      e.stopPropagation();
-	      const source = btn.dataset.linkSource;
-	      const username = btn.dataset.linkUsername;
-	      btn.disabled = true;
-	      btn.querySelector('.btn-label').textContent = 'Saving…';
-	      this._saveSavedUsername(source, username).then(() => {
-	        this._renderLinkUsernameRow();
-	        this._showPopup({
-	          icon: 'success',
-	          title: 'Username linked!',
-	          text: `${source === 'chesscom' ? 'Chess.com' : 'Lichess'} username saved for faster imports.`,
-	        });
-	      }).catch(() => {
-	        btn.disabled = false;
-	        btn.querySelector('.btn-label').textContent = 'Link';
-	      });
-	    });
-	  }
+  _initLinkUsernameRow() {
+    if (!this.elPgnModal) return;
+    this.elPgnModal.addEventListener('click', (e) => {
+      const btn = e.target.closest('.btn-link-username');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const source = btn.dataset.linkSource;
+      const username = btn.dataset.linkUsername;
+      btn.disabled = true;
+      btn.querySelector('.btn-label').textContent = 'Saving…';
+      this._saveSavedUsername(source, username).then(() => {
+        this._renderLinkUsernameRow();
+        this._showPopup({
+          icon: 'success',
+          title: 'Username linked!',
+          text: `${source === 'chesscom' ? 'Chess.com' : 'Lichess'} username saved for faster imports.`,
+        });
+      }).catch(() => {
+        btn.disabled = false;
+        btn.querySelector('.btn-label').textContent = 'Link';
+      });
+    });
+  }
 
 	  _renderHomeQuickLoad() {
 	    if (!this.elMainMenu) return;
@@ -2782,15 +3009,13 @@ return window.firebase;
 	    if (s.chesscom) {
 	      chips.push(`
 	        <button type="button" class="home-quick-load-btn" data-source="chesscom" title="Load Chess.com games for ${this._escapeHtml(s.chesscom)}">
-	          <img src="/assets/chesscom.png" alt="Chess.com" class="home-quick-load-icon" loading="lazy">
-	          <span>Chess.com</span>
+	          <span>Quick load Chess.com</span>
 	        </button>`);
 	    }
 	    if (s.lichess) {
 	      chips.push(`
 	        <button type="button" class="home-quick-load-btn" data-source="lichess" title="Load Lichess games for ${this._escapeHtml(s.lichess)}">
-	          <img src="/assets/lichess.png" alt="Lichess" class="home-quick-load-icon" loading="lazy">
-	          <span>Lichess</span>
+	          <span>Quick load Lichess</span>
 	        </button>`);
 	    }
 	    quickLoadButtons.innerHTML = chips.join('');
@@ -2809,46 +3034,39 @@ return window.firebase;
 	    });
 	  }
 
-	  async _quickLoadSavedUsername(source) {
-	    const s = this.authState.savedUsernames || {};
-	    const username = s[source];
-	    if (!username) return;
-	    const modalWasOpen = this.elPgnModal?.style.display === 'flex';
-	    if (!modalWasOpen) this._showPgnModal();
-	    // Align the import-source dropdown with the platform we're loading so
-	    // the UI (and any subsequent "Load games" click) matches. This must
-	    // happen before switching tabs so the tab handler keeps this source.
-	    if (this.elImportSource) {
-	      this.elImportSource.value = source;
-	    }
-	    const siteLabel = source === 'chesscom' ? 'Chess.com' : 'Lichess';
-	    this._setImportStatus(`Loading ${siteLabel} games for ${username}…`, 'loading');
-	    // Show a clear loading popup so the user sees the fetch is in progress,
-	    // whether they kicked it off from the home screen or the import modal.
-	    const closeLoading = this._showLoadingPopup(`Loading ${siteLabel} games…`);
-	    try {
-	      const games = source === 'chesscom'
-	        ? await this._fetchChessComGames(username, 10)
-	        : await this._fetchLichessGames(username, 10);
-	      if (!games.length) {
-	        this._setImportStatus('No recent games were found for that user.', 'error');
-	        return;
-	      }
-	      this._setImportStatus(`Showing the last ${games.length} games for ${username}. Click one to load it.`, 'success');
-	      this._renderImportResults(games);
-	      // Switch to username tab so the grid is visible
-	      const tabs = this.elPgnModal?.querySelector('.import-tabs');
-	      if (tabs) {
-	        tabs.querySelector('[data-import-tab="username"]')?.click();
-	      }
-	      this._syncImportMode();
-	    } catch (err) {
-	      console.error('Quick load failed:', err);
-	      this._setImportStatus(err.message || 'Could not load games.', 'error');
-	    } finally {
-	      closeLoading();
-	    }
-	  }
+  async _quickLoadSavedUsername(source) {
+    const s = this.authState.savedUsernames || {};
+    const username = s[source];
+    if (!username) return;
+    const modalWasOpen = this.elPgnModal?.style.display === 'flex';
+    if (!modalWasOpen) this._showPgnModal();
+    // Switch to the matching source tab in every import-tool instance.
+    document.querySelectorAll('.import-tool').forEach((tool) => {
+      const tab = tool.querySelector(`.import-tab[data-import-tab="${source}"]`);
+      if (tab) tab.click();
+    });
+    const siteLabel = source === 'chesscom' ? 'Chess.com' : 'Lichess';
+    this._setImportStatus(`Loading ${siteLabel} games for ${username}…`, 'loading');
+    // Show a clear loading popup so the user sees the fetch is in progress,
+    // whether they kicked it off from the home screen or the import modal.
+    const closeLoading = this._showLoadingPopup(`Loading ${siteLabel} games…`);
+    try {
+      const games = source === 'chesscom'
+        ? await this._fetchChessComGames(username, 10)
+        : await this._fetchLichessGames(username, 10);
+      if (!games.length) {
+        this._setImportStatus('No recent games were found for that user.', 'error');
+        return;
+      }
+      this._setImportStatus(`Showing the last ${games.length} games for ${username}. Click one to load it.`, 'success');
+      this._renderImportResults(games);
+    } catch (err) {
+      console.error('Quick load failed:', err);
+      this._setImportStatus(err.message || 'Could not load games.', 'error');
+    } finally {
+      closeLoading();
+    }
+  }
 
 		  _applyProfileToPuzzleMode(profile) {
 		    if (!profile) return;
@@ -3184,7 +3402,7 @@ _syncAccountUi() {
 	      throw new Error(message);
 	    }
 
-		    this._showAppLoadingOverlay(this.authMode === 'signup' ? 'Creating account...' : 'Signing in...');
+		    this._showLoadingOverlay(this.authMode === 'signup' ? 'Creating account...' : 'Signing in...');
 		    if (fields?.statusEl) {
 		      fields.statusEl.textContent = 'Working...';
 	      fields.statusEl.className = 'account-status';
@@ -3194,7 +3412,27 @@ _syncAccountUi() {
 	    try {
 	      let credential;
 	      if (this.authMode === 'signup') {
-	        credential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+	        // reCAPTCHA v3 + server-side verify gate. Firebase auth runs
+        // client-side, so we can't intercept the actual createUser call —
+        // but we CAN reject this client before it makes the Firebase
+        // call, which stops commodity bots. Server: server/api/signup-verify.js.
+        if (fields?.statusEl) {
+          fields.statusEl.textContent = 'Verifying…';
+          fields.statusEl.className = 'account-status';
+        } else {
+          this._setAccountStatus('Verifying…');
+        }
+        const recaptchaToken = await window.recaptchaLib.executeRecaptcha('signup');
+        const verifyRes = await apiFetch('/api/signup-verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, recaptchaToken }),
+        });
+        if (!verifyRes.ok) {
+          const verifyData = await verifyRes.json().catch(() => ({}));
+          throw new Error(verifyData.error || `Captcha verification failed (${verifyRes.status}).`);
+        }
+        credential = await firebase.auth().createUserWithEmailAndPassword(email, password);
 	        this.authState.user = credential.user;
 	        const displayName = username || (email.split('@')[0] || 'Player');
 	        await credential.user.updateProfile({ displayName });
@@ -3243,7 +3481,7 @@ _syncAccountUi() {
 		      }
 		      throw err;
 		    } finally {
-		      this._hideAppLoadingOverlay();
+		      this._hideLoadingOverlay();
 		    }
 		  }
 
@@ -3335,26 +3573,37 @@ _syncAccountUi() {
 		  }
 
 		  _syncServerStrongToggle() {
-    // Boost OR Max (Max inherits all Boost perks). Use the tier helper, not an
-    // exact `=== 'boost'` check, so Max can use the stronger server review too.
+    const signedIn = !!this.authState?.user;
     const hasBoost = this._isPaidOrAbove('boost');
-    const showInReview = this.engineSettings.analysisLocation === 'server' && document.body.dataset.mode === 'review';
-	    if (this.elServerBoostToggle) {
-	      this.elServerBoostToggle.classList.toggle('boost-locked', !hasBoost);
-	      this.elServerBoostToggle.style.display = showInReview ? '' : 'none';
-	      this.elServerBoostToggle.title = hasBoost ? '' : 'Plans unlocks stronger server review.';
-	    }
-    const strongOn = hasBoost && !!this.elServerStrongReview?.checked;
-    if (this.elServerStrongNote) this.elServerStrongNote.hidden = !strongOn;
-    const lockIcon = document.getElementById('boost-lock-icon');
-    if (lockIcon) lockIcon.style.display = hasBoost ? 'none' : '';
-    if (!hasBoost && this.elServerStrongReview) {
-      this.elServerStrongReview.checked = false;
-      this.elServerStrongReview.disabled = true;
-	      this.engineSettings.serverStrongReview = false;
-    } else if (hasBoost && this.elServerStrongReview) {
-      this.elServerStrongReview.disabled = false;
+    const showInReview = this.engineSettings.analysisLocation === 'server'
+      && document.body.dataset.mode === 'review'
+      && signedIn;
+    if (this.elServerBoostToggle) {
+      this.elServerBoostToggle.style.display = showInReview ? '' : 'none';
     }
+    // Clamp strength: without boost, strong is unavailable
+    let strength = this.engineSettings.serverStrength || 'normal';
+    if (strength === 'strong' && !hasBoost) {
+      strength = 'normal';
+      this.engineSettings.serverStrength = 'normal';
+    }
+    this._updateStrengthSlider(strength, hasBoost);
+  }
+
+  _updateStrengthSlider(strength, hasBoost) {
+    const notes = {
+      fast: 'Fast review skips deep re-analysis and uses a lower depth. Some results may be inaccurate.',
+      normal: 'Normal review uses two-pass analysis (quick-scan + deep on critical moments).',
+      strong: 'Strong review uses higher depth for more accurate results. Requires Boost or above.',
+    };
+    // Update chip radio
+    const chip = this.elStrengthChips?.querySelector(`input[value="${strength}"]`);
+    if (chip) chip.checked = true;
+    // Update note
+    if (this.elServerStrengthNote) {
+      this.elServerStrengthNote.textContent = notes[strength] || notes.normal;
+    }
+    this._persistEngineSettings();
   }
 
 		  _enterAnticheatMode() {
@@ -3404,6 +3653,7 @@ this._syncAnticheatForm();
 
 		  _syncPuzzlePanel() {
 		    if (!this.elPuzzleCard) return;
+    const heavyBusy = this._isBusyWithHeavyAction();
 		    const mode = this.puzzleMode;
 		    const currentPuzzleId = mode.current?.puzzle?.id || '';
 		    const alreadyAttempted = !!(currentPuzzleId && mode.attemptedPuzzleIds?.has(currentPuzzleId));
@@ -3433,7 +3683,7 @@ this._syncAnticheatForm();
 		    if (this.elBtnPuzzleDaily) this.elBtnPuzzleDaily.disabled = !!mode.loading;
 				    if (this.elBtnPuzzleRetry) this.elBtnPuzzleRetry.disabled = !mode.current || !!mode.loading || alreadyAttempted || mode.solved;
 				    if (this.elBtnPuzzleHint) this.elBtnPuzzleHint.disabled = !mode.current || mode.loading || mode.solved || mode.failed;
-			    if (this.elBtnPuzzleReview) this.elBtnPuzzleReview.disabled = this.gameMoves.length === 0 || this.isAnalyzing || (!mode.solved && !mode.failed);
+			    if (this.elBtnPuzzleReview) this.elBtnPuzzleReview.disabled = heavyBusy || this.gameMoves.length === 0 || this.isAnalyzing || (!mode.solved && !mode.failed);
 	    if (this.elPuzzleTags) {
 	      if (mode.loading) {
 	        this.elPuzzleTags.innerHTML = this._renderSkeletonLines(4, 'puzzle-tag-skeleton');
@@ -3496,6 +3746,16 @@ this._syncAnticheatForm();
 	    this.elBtnMenuPuzzles?.addEventListener('click', () => this._navigateTo('/puzzles', { disableRestore: true }));
 	    this.elBtnMenuAnticheat?.addEventListener('click', () => this._navigateTo('/anticheat', { disableRestore: true }));
     this.elBtnMenuBoost?.addEventListener('click', () => this._navigateTo('/plans', { disableRestore: true }));
+    // Unified import-tool controls (home + modal share the same component classes)
+    this._initImportToolTabs();
+    document.querySelectorAll('.import-tool').forEach((tool) => {
+      const scope = tool.dataset.importScope || 'modal';
+      tool.querySelector('.import-load-btn')?.addEventListener('click', () => this._handleImportToolLoadPgn(scope));
+      tool.querySelector('.import-sample-btn')?.addEventListener('click', () => this._handleImportToolSample(scope));
+      tool.querySelectorAll('.import-load-username-btn').forEach((btn) => {
+        btn.addEventListener('click', () => this._handleImportToolLoadUsername(scope, btn.dataset.source));
+      });
+    });
     // (engine-choice modal handlers removed — modal was dead UI, never displayed)
 	    this.elBtnEngineChoiceConfirm?.addEventListener('click', () => this._confirmEngineChoice());
 	    this.elEngineChoiceModule?.addEventListener('change', () => {
@@ -3583,9 +3843,8 @@ this._syncAnticheatForm();
     this.elSettingsModal.addEventListener('click', (e) => {
       if (e.target === this.elSettingsModal) this._hideSettingsModal();
     });
-    this.elBtnPgnLoad.addEventListener('click', () => this._loadPgn());
-    this.elBtnImportUsername.addEventListener('click', () => this._loadGamesByUsername());
-    this.elImportSource.addEventListener('change', () => this._syncImportMode());
+    // Opening explorer source toggle (Masters/Lichess) + filter chips.
+    this._initOpeningControls();
 
 	    this.elBtnCoach.addEventListener('click', () => this._navigateTo('/coach'));
     this.elBtnCoachStart.addEventListener('click', () => this._toggleCoachMode());
@@ -3618,8 +3877,19 @@ document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
 // (Legacy elBtnAnticheatRun binding removed; the source cards above + popup
 //  drive the run. The legacy `btn-anticheat-run` button no longer exists.)
 	    this.elBtnReview.addEventListener('click', () => this._startReview());
+	    if (this.elBtnStopReview) {
+	      this.elBtnStopReview.addEventListener('click', () => {
+	        if (this._reviewAbortController) {
+	          this._reviewAbortController.abort();
+	        }
+	        if (this.elBtnStopReview) this.elBtnStopReview.style.display = 'none';
+	        this.elReviewBtnText.textContent = 'Stopping...';
+	      });
+	    }
 	    this.elBtnLineExplorer?.addEventListener('click', () => this._exploreLineFromCurrentMove());
-	    this.elBtnReturnExplorer?.addEventListener('click', () => this._returnFromLineExplorer());
+	    this.elBtnReturnExplorer?.addEventListener('click', () => this._handleReturnButton());
+	    this.elBtnInsightCoach?.addEventListener('click', () => this._askCoachForMove());
+	    this.elBtnGameCoach?.addEventListener('click', () => this._askCoachForGame());
 	    this.elBtnReset.addEventListener('click', () => this._resetGame());
     this.elEngineSource.addEventListener('change', () => this._handleEngineSourceChange());
 	    this.elEngineModule.addEventListener('change', () => this._handleEngineModuleChange());
@@ -3630,17 +3900,20 @@ document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
 	      this._syncServerStrongToggle();
 	      this._renderIdleEngineInfo();
 	    });
-		    this.elServerStrongReview?.addEventListener('change', () => {
-		      if (!this._isPaidOrAbove('boost')) {
-		        this.elServerStrongReview.checked = false;
-		        this.engineSettings.serverStrongReview = false;
-		        this._syncServerStrongToggle();
-		        this._navigateTo('/plans');
-		        return;
-		      }
-		      this.engineSettings.serverStrongReview = this.elServerStrongReview.checked;
-		      this._syncServerStrongToggle();
-		    });
+		    // Server strength chip selector
+	    if (this.elStrengthChips) {
+	      this.elStrengthChips.addEventListener('change', (e) => {
+	        const strength = e.target?.value;
+	        if (!strength) return;
+	        if (strength === 'strong' && !this._isPaidOrAbove('boost')) {
+	          e.target.checked = false;
+	          this._navigateTo('/plans');
+	          return;
+	        }
+	        this.engineSettings.serverStrength = strength;
+	        this._syncServerStrongToggle();
+	      });
+	    }
 
     this.elBtnFlip.addEventListener('click', () => this.board.flip());
     this.elBtnFirst.addEventListener('click', () => this._goToMove(-1));
@@ -3788,8 +4061,6 @@ document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
 		    this._hideRoutePages();
 		    if (this.elMainMenu) this.elMainMenu.hidden = false;
 		    this._renderHomeQuickLoad();
-		    this._renderOnboardingProgress();
-		    this._renderHomeContinueCard();
 		    this._loadHomeStats();
 		    if (this.elMainContent) this.elMainContent.hidden = false;
 		    document.body.classList.add('menu-active');
@@ -3812,55 +4083,6 @@ document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
       state[key] = true;
       window.localStorage.setItem('sidastuff.onboarding', JSON.stringify(state));
     } catch (_) {}
-  }
-
-  _renderOnboardingProgress() {
-    if (!this.elOnboardingProgress) return;
-    const state = this._onboardingState();
-    const steps = [
-      { key: 'review', el: 'review' },
-      { key: 'savedUsername', el: 'save' },
-      { key: 'solvedPuzzle', el: 'puzzle' },
-    ];
-    // "save" also counts once the user has an account (their progress is then persisted server-side)
-    const saveDone = !!state.savedUsername || !!this.authState.user;
-    const doneCount = (state.review ? 1 : 0) + (saveDone ? 1 : 0) + (state.solvedPuzzle ? 1 : 0);
-    // Hide once the visitor has finished everything — don't nag returning users.
-    if (doneCount >= steps.length) {
-      this.elOnboardingProgress.hidden = true;
-      return;
-    }
-    this.elOnboardingProgress.hidden = false;
-    steps.forEach((step) => {
-      const el = this.elOnboardingProgress.querySelector(`.onboarding-step[data-step="${step.el}"]`);
-      if (!el) return;
-      const isDone = step.key === 'savedUsername' ? saveDone : !!state[step.key];
-      el.classList.toggle('done', isDone);
-    });
-    // Never start cold at 0%: once any step is done, seed at a visible floor.
-    const pct = doneCount === 0 ? 8 : Math.round((doneCount / steps.length) * 100);
-    if (this.elOnboardingFill) this.elOnboardingFill.style.width = `${pct}%`;
-    if (this.elOnboardingLabel) {
-      const remaining = steps.length - doneCount;
-      this.elOnboardingLabel.textContent = doneCount === 0
-        ? `Quick setup — ${remaining} short steps to your first review`
-        : `${doneCount} of ${steps.length} done — ${remaining} to go`;
-    }
-  }
-
-  _renderHomeContinueCard() {
-    if (!this.elHomeContinueReview) return;
-    let saved = null;
-    try { saved = this._loadSavedGameState('review'); } catch (_) {}
-    if (!saved || !saved.gameMoves || !saved.gameMoves.length) {
-      this.elHomeContinueReview.hidden = true;
-      return;
-    }
-    this.elHomeContinueReview.hidden = false;
-    if (this.elHomeContinueMeta) {
-      const total = saved.gameMoves.length;
-      this.elHomeContinueMeta.textContent = `${total} moves analyzed`;
-    }
   }
 
   _renderHomeStreak() {
@@ -3954,12 +4176,116 @@ document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
       if (!res.ok) throw new Error('stats unavailable');
       const s = (await res.json())?.stats || {};
       this.elHomeStats.dataset.loaded = 'true';
-      setText(this.elHomeStatReviews, this._formatPublicStat(Number(s.movesAnalyzed ?? s.gamesAnalyzed) || 0));
-      setText(this.elHomeStatPuzzles, this._formatPublicStat(Number(s.puzzlesSolved) || 0));
-      setText(this.elHomeStatCoaches, this._formatPublicStat(Number(s.coachGamesPlayed) || 0));
+      const reviews = this._formatPublicStat(Number(s.movesAnalyzed ?? s.gamesAnalyzed) || 0);
+      const puzzles = this._formatPublicStat(Number(s.puzzlesSolved) || 0);
+      const coaches = this._formatPublicStat(Number(s.coachGamesPlayed) || 0);
+      setText(this.elHomeStatReviews, reviews);
+      setText(this.elHomeStatPuzzles, puzzles);
+      setText(this.elHomeStatCoaches, coaches);
+      // Mirror the same numbers into the About section below.
+      setText(this.elHomeAboutReviews, reviews);
+      setText(this.elHomeAboutPuzzles, puzzles);
+      setText(this.elHomeAboutCoaches, coaches);
     } catch (_) {
       // Leave the em-dash placeholders visible (cards already read "—").
     }
+  }
+
+  // ── Unified import-tool component (home + modal) ───────────────────
+  // Both the home page and the PGN modal now use the same tabbed markup.
+  // This single set of helpers drives tab switching, PGN loading, username
+  // loading, and sample loading for every .import-tool instance.
+
+  _initImportToolTabs() {
+    document.querySelectorAll('.import-tool').forEach((tool) => {
+      const tabs = tool.querySelectorAll('.import-tab');
+      const panels = tool.querySelectorAll('.import-panel');
+      if (!tabs.length || !panels.length) return;
+
+      tabs.forEach((tab) => {
+        tab.addEventListener('click', () => {
+          const source = tab.dataset.importTab;
+          tabs.forEach((t) => {
+            t.classList.toggle('active', t === tab);
+            t.setAttribute('aria-selected', String(t === tab));
+          });
+          panels.forEach((panel) => {
+            panel.classList.toggle('active', panel.dataset.importPanel === source);
+          });
+          // Focus the first input of the newly shown panel.
+          const activePanel = tool.querySelector(`.import-panel[data-import-panel="${source}"]`);
+          const focusable = activePanel?.querySelector('input, textarea, select');
+          if (focusable) try { focusable.focus({ preventScroll: true }); } catch (_) {}
+        });
+      });
+    });
+  }
+
+  _getImportTool(scope) {
+    return document.querySelector(`.import-tool[data-import-scope="${scope}"]`);
+  }
+
+  _setImportToolStatus(scope, message, kind = '') {
+    const tool = this._getImportTool(scope);
+    const status = tool?.querySelector('.import-status');
+    if (!status) return;
+    status.textContent = message || '';
+    status.className = `import-status ${kind}`.trim();
+  }
+
+  _getImportToolUsername(scope, source) {
+    const tool = this._getImportTool(scope);
+    return tool?.querySelector(`.import-username[data-source="${source}"]`);
+  }
+
+  _getImportToolLimit(scope, source) {
+    const tool = this._getImportTool(scope);
+    const panel = tool?.querySelector(`.import-panel[data-import-panel="${source}"]`);
+    return panel?.querySelector('.import-limit');
+  }
+
+  _handleImportToolLoadPgn(scope) {
+    const tool = this._getImportTool(scope);
+    const pgn = (tool?.querySelector('.import-pgn-input')?.value || '').trim();
+    if (!pgn) {
+      this._setImportToolStatus(scope, 'Paste a PGN first.', 'error');
+      return;
+    }
+    this._setImportToolStatus(scope, 'Loading game…', 'loading');
+    const modalTool = this._getImportTool('modal');
+    const modalPgnInput = modalTool?.querySelector('.import-pgn-input');
+    if (modalPgnInput) modalPgnInput.value = pgn;
+    this._enterReviewMode();
+    this._showPgnModal();
+    try {
+      this._loadPgn();
+      this._setImportToolStatus(scope, this.elPgnModal?.style.display !== 'none' ? 'Pick a game from the list.' : '', this.elPgnModal?.style.display !== 'none' ? 'success' : '');
+    } catch (err) {
+      this._setImportToolStatus(scope, err.message || 'Could not load PGN.', 'error');
+    }
+  }
+
+  _handleImportToolLoadUsername(scope, source) {
+    const username = (this._getImportToolUsername(scope, source)?.value || '').trim();
+    const limit = parseInt(this._getImportToolLimit(scope, source)?.value || '10', 10);
+    if (!username) {
+      this._setImportToolStatus(scope, 'Enter a username first.', 'error');
+      return;
+    }
+    this._setImportToolStatus(scope, 'Loading games…', 'loading');
+    this._enterReviewMode();
+    this._showPgnModal();
+    this._loadGamesByUsername(source, username, limit)
+      .then(() => this._setImportToolStatus(scope, 'Pick a game from the list.', 'success'))
+      .catch((err) => this._setImportToolStatus(scope, err.message || 'Could not load games.', 'error'));
+  }
+
+  _handleImportToolSample(scope) {
+    const tool = this._getImportTool(scope);
+    if (tool?.querySelector('.import-pgn-input')) {
+      tool.querySelector('.import-pgn-input').value = this._samplePgn();
+    }
+    this._handleImportToolLoadPgn(scope);
   }
 
 	  async _initEngine() {
@@ -3972,7 +4298,7 @@ document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
 	    }
 
 	    this._setEngineControlsDisabled(true);
-	    this._showEngineLoadingOverlay('Preparing engine settings...');
+	    this._showLoadingOverlay('Preparing engine settings...');
 	    this.elEngineStatus.textContent = `${moduleConfig.engineLabel}: Loading`;
     this.elEngineStatus.classList.remove('ready');
     this._setEngineLoadProgress(5, 'Preparing engine settings...');
@@ -4097,7 +4423,7 @@ document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
     } finally {
 	      if (initToken === this.engineInitToken) {
 	        this.board.clearLoading();
-	        this._hideEngineLoadingOverlay();
+	        this._hideLoadingOverlay();
 	        this._setEngineControlsDisabled(this.isAnalyzing);
 	        this._syncActionButtons();
 	      }
@@ -4184,32 +4510,25 @@ document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
 	    this.elEngineLoadProgress.classList.toggle('ready', pct >= 100);
 	    this.elEngineLoadProgressFill.style.width = `${pct}%`;
 	    this.elEngineLoadProgress.title = message || `${pct}%`;
-	    if (this.elEngineLoadingFill) this.elEngineLoadingFill.style.width = `${pct}%`;
-	    if (this.elEngineLoadingText) this.elEngineLoadingText.textContent = message || `${pct}%`;
+	    if (this.elLoadingBarFill) this.elLoadingBarFill.style.width = `${pct}%`;
+	    if (this.elLoadingText) this.elLoadingText.textContent = message || `${pct}%`;
 	  }
 
-			  _showEngineLoadingOverlay(message = 'Preparing Stockfish...') {
-			    if (!this.elEngineLoadingOverlay) return;
-			    if (document.body.classList.contains('menu-active') && !document.body.dataset.page) {
-			      if (this.elEngineLoadingText) this.elEngineLoadingText.textContent = message;
-			      return;
-			    }
-		    this.elEngineLoadingOverlay.style.display = 'flex';
-		    if (this.elEngineLoadingText) this.elEngineLoadingText.textContent = message;
+			  _showLoadingOverlay(message = 'Loading...') {
+		    if (!this.elLoadingOverlay) return;
+		    this.elLoadingOverlay.hidden = false;
+		    if (this.elLoadingText) this.elLoadingText.textContent = message;
+		    if (this.elLoadingBarFill) this.elLoadingBarFill.style.width = '0%';
 		  }
 
-		  _hideEngineLoadingOverlay() {
-		    if (this.elEngineLoadingOverlay) this.elEngineLoadingOverlay.style.display = 'none';
+		  _hideLoadingOverlay() {
+		    if (this.elLoadingOverlay) this.elLoadingOverlay.hidden = true;
 		  }
 
-		  _showAppLoadingOverlay(message = 'Loading...') {
-		    if (!this.elAppLoadingOverlay) return;
-		    this.elAppLoadingOverlay.style.display = 'flex';
-		    if (this.elAppLoadingText) this.elAppLoadingText.textContent = message;
-		  }
-
-		  _hideAppLoadingOverlay() {
-		    if (this.elAppLoadingOverlay) this.elAppLoadingOverlay.style.display = 'none';
+		  _setLoadingProgress(pct) {
+		    if (this.elLoadingBarFill) {
+		      this.elLoadingBarFill.style.width = clamp(pct, 0, 100) + '%';
+		    }
 		  }
 
   _preloadSounds(onProgress) {
@@ -4260,10 +4579,11 @@ document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
 			// Guests always run reviews in the browser (server review needs a UID),
 			// so they need the browser engine regardless of analysisLocation.
 			const needsBrowserEngine = !serverReview || !this.authState?.user;
-		    this.elBtnReview.disabled = this.isAnalyzing || this.gameMoves.length === 0 || (needsBrowserEngine && !engineReady);
+    const heavyBusy = this._isBusyWithHeavyAction();
+		    this.elBtnReview.disabled = heavyBusy || this.isAnalyzing || this.gameMoves.length === 0 || (needsBrowserEngine && !engineReady);
 		    if (this.elBtnExportPgn) this.elBtnExportPgn.disabled = this.gameMoves.length === 0;
 		    if (this.elBtnExportFen) this.elBtnExportFen.disabled = this.isAnalyzing;
-	    if (this.elBtnCoachStart) this.elBtnCoachStart.disabled = this.isAnalyzing || !engineReady;
+	    if (this.elBtnCoachStart) this.elBtnCoachStart.disabled = heavyBusy || this.isAnalyzing || !engineReady;
     if (this.elBtnCoachTakeback) {
       this.elBtnCoachTakeback.disabled = !this.coachMode.active || this.gameMoves.length === 0;
     }
@@ -4518,12 +4838,11 @@ document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
     if (tabs) {
       tabs.querySelector('[data-import-tab="pgn"]')?.click();
     }
-    this._syncImportMode();
     // Value-before-signup: if the user came from the "Try a sample review" CTA
     // (or is a guest), pre-fill a sample PGN so the first review is one click.
     this._maybePrefillSamplePgn();
-    this._bindPgnSampleButton();
-    this.elPgnInput?.focus();
+    const modalTool = this._getImportTool('modal');
+    modalTool?.querySelector('.import-pgn-input')?.focus();
   }
 
   // A short, famous game (Opera Game, 1858) — short enough to review fast,
@@ -4533,15 +4852,17 @@ document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
   }
 
   _maybePrefillSamplePgn() {
-    if (!this.elPgnInput) return;
+    const modalTool = this._getImportTool('modal');
+    const pgnInput = modalTool?.querySelector('.import-pgn-input');
+    if (!pgnInput) return;
     const params = new URLSearchParams(window.location.search);
     const isDemo = params.get('demo') === '1';
     // Only pre-fill when empty (never overwrite a user's paste) and only for
     // guests or explicit demo links — logged-in users with their own games
     // don't need the sample.
-    if (this.elPgnInput.value.trim()) return;
+    if (pgnInput.value.trim()) return;
     if (isDemo || !this.authState.user) {
-      this.elPgnInput.value = this._samplePgn();
+      pgnInput.value = this._samplePgn();
       // Clear the demo flag from the URL so it doesn't re-trigger on refresh.
       if (isDemo) {
         params.delete('demo');
@@ -4552,14 +4873,7 @@ document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
   }
 
   _bindPgnSampleButton() {
-    if (!this.elBtnPgnSample || this.elBtnPgnSample.dataset.bound) return;
-    this.elBtnPgnSample.dataset.bound = '1';
-    this.elBtnPgnSample.addEventListener('click', () => {
-      if (this.elPgnInput) {
-        this.elPgnInput.value = this._samplePgn();
-        this.elPgnInput.focus();
-      }
-    });
+    // Sample button is now handled by the unified import-tool listeners.
   }
 
   _hidePgnModal() {
@@ -4859,6 +5173,8 @@ _showPuzzleSuccessOverlay() {
 	    }
 	    // Stop an in-flight anticheat run if the user left Anticheat mid-check.
 	    this._stopAnticheatRun();
+	    // Hide the opening section — it's only relevant for game review.
+	    if (this.elOpeningInfo) this.elOpeningInfo.style.display = 'none';
 		    this.puzzleMode.active = true;
 		    this.anticheatMode.active = false;
 			    this._initPuzzleLevelRow();
@@ -5870,6 +6186,7 @@ _showPuzzleSuccessOverlay() {
 		  _classificationGlyph(classification) {
 		    const key = this._classificationKey(classification);
 		    if (classification?.iconType === 'material') return classification.icon || '';
+		    if (classification?.iconType === 'image') return ''; // rendered as <img> via _classificationIconHtml
 		    return {
 		      BRILLIANT: '!!',
 		      GREAT: '!',
@@ -5885,8 +6202,19 @@ _showPuzzleSuccessOverlay() {
 		    const key = this._classificationKey(classification).toLowerCase();
 		    const iconKind = classification?.iconType === 'material'
 		      ? 'material-symbols-outlined classification-material-icon'
+		      : classification?.iconType === 'image'
+		      ? 'classification-image-icon'
 		      : 'classification-text-icon';
 		    return `${baseClass} classification-mark ${iconKind}${key ? ` classification-${key}` : ''}`;
+		  }
+
+		  _classificationIconHtml(classification, baseClass) {
+		    const cls = this._classificationIconClass(classification, baseClass);
+		    if (classification?.iconType === 'image') {
+		      const src = `/assets/icons/${classification.icon}.png`;
+		      return `<span class="${cls}" aria-hidden="true"><img src="${src}" alt="" class="classification-img"></span>`;
+		    }
+		    return `<span class="${cls}" style="background:${classification.color}" aria-hidden="true">${this._classificationGlyph(classification)}</span>`;
 		  }
 
 	  _hexToRgb(hex) {
@@ -5945,7 +6273,7 @@ _showPuzzleSuccessOverlay() {
 		      });
 		    }
 		    return this._moveHighlightsForSquares(result.moveUci.substring(0, 2), result.moveUci.substring(2, 4), {
-		      color: this._mixColor(result.classification?.color, '#ffffff', 0.72),
+		      color: this._mixColor(result.classification?.color, '#ffffff', 0.5),
 		      ringColor: result.classification?.color,
 		    });
 		  }
@@ -6400,93 +6728,13 @@ _showPuzzleSuccessOverlay() {
     this._syncCoachControls();
   }
 
-	  _ensureImportModalTabs() {
-	    const modal = this.elPgnModal;
-	    const body = modal?.querySelector('.modal-body');
-	    if (!body || body.querySelector('.import-tabs')) return;
-	    const grid = body.querySelector('.import-source-grid');
-	    const textarea = body.querySelector('#pgn-input');
-	    const divider = body.querySelector('.modal-divider');
-	    const status = body.querySelector('#import-status');
-	    const results = body.querySelector('#import-results');
-	    if (!grid || !textarea) return;
+  _ensureImportModalTabs() {
+    // The modal HTML is now pre-tabbed; nothing to restructure at runtime.
+  }
 
-	    const tabs = document.createElement('div');
-	    tabs.className = 'import-tabs';
-	    tabs.setAttribute('role', 'tablist');
-	    tabs.innerHTML = `
-	      <button type="button" class="import-tab active" data-import-tab="pgn" role="tab">Paste PGN</button>
-	      <button type="button" class="import-tab" data-import-tab="username" role="tab">From username</button>`;
-
-	    const panelPgn = document.createElement('div');
-	    panelPgn.className = 'import-panel import-panel-pgn active';
-	    panelPgn.dataset.importPanel = 'pgn';
-	    panelPgn.appendChild(textarea);
-
-	    const panelUsername = document.createElement('div');
-	    panelUsername.className = 'import-panel import-panel-username';
-	    panelUsername.dataset.importPanel = 'username';
-	    panelUsername.appendChild(grid);
-	    if (status) panelUsername.appendChild(status);
-	    if (results) panelUsername.appendChild(results);
-
-	    if (divider) divider.remove();
-	    body.insertBefore(tabs, body.firstChild);
-	    body.appendChild(panelPgn);
-	    body.appendChild(panelUsername);
-
-	    tabs.querySelectorAll('.import-tab').forEach((tab) => {
-	      tab.addEventListener('click', () => {
-	        const mode = tab.dataset.importTab;
-	        tabs.querySelectorAll('.import-tab').forEach((entry) => entry.classList.toggle('active', entry === tab));
-	        body.querySelectorAll('.import-panel').forEach((panel) => {
-	          panel.classList.toggle('active', panel.dataset.importPanel === mode);
-	        });
-	        if (this.elImportSource) {
-	          if (mode === 'pgn') {
-	            this.elImportSource.value = 'pgn';
-	          } else {
-	            // Preserve the current username source (lichess or chesscom)
-	            // instead of always forcing lichess — otherwise quick-loading
-	            // Chess.com games from a saved username would flip the dropdown
-	            // to Lichess.
-	            const current = this.elImportSource.value;
-	            this.elImportSource.value = (current === 'chesscom' || current === 'lichess') ? current : 'lichess';
-	          }
-	        }
-	        this._syncImportMode();
-	        if (mode === 'pgn') this.elPgnInput?.focus();
-	        else this.elImportUsername?.focus();
-	      });
-	    });
-
-	    this.elImportSource?.addEventListener('change', () => {
-	      const isPgn = this.elImportSource.value === 'pgn';
-	      tabs.querySelector('[data-import-tab="pgn"]')?.classList.toggle('active', isPgn);
-	      tabs.querySelector('[data-import-tab="username"]')?.classList.toggle('active', !isPgn);
-	      body.querySelector('.import-panel-pgn')?.classList.toggle('active', isPgn);
-	      body.querySelector('.import-panel-username')?.classList.toggle('active', !isPgn);
-	    });
-	  }
-
-	  _syncImportMode() {
-	    if (!this.elImportSource || !this.elBtnImportUsername) return;
-	    const isPgnMode = this.elImportSource.value === 'pgn';
-	    const label = this.elBtnImportUsername.querySelector('.btn-label');
-	    if (label) label.textContent = 'Load games';
-	    this.elImportUsername.disabled = isPgnMode;
-	    this.elImportLimit.disabled = isPgnMode;
-	    if (this.elImportUsername.parentElement) {
-	      this.elImportUsername.parentElement.hidden = isPgnMode;
-	    }
-	    if (this.elImportLimit.parentElement) {
-	      this.elImportLimit.parentElement.hidden = isPgnMode;
-	    }
-	    const footer = this.elPgnModal?.querySelector('.modal-footer');
-	    if (footer) footer.hidden = !isPgnMode;
-	    // Re-render the link-username row when source or mode changes
-	    this._renderLinkUsernameRow();
-	  }
+  _syncImportMode() {
+    // No-op: the new tabbed import UI handles mode switching via CSS/JS.
+  }
 
 	  // The inline anticheat form (source dropdown + username + limit) was replaced
 // by the 3 source cards + SweetAlert popup. These hidden inputs are kept only
@@ -6942,7 +7190,8 @@ _showPuzzleSuccessOverlay() {
 	  }
 
   _loadPgn() {
-    const pgn = this.elPgnInput.value.trim();
+    const modalTool = this._getImportTool('modal');
+    const pgn = (modalTool?.querySelector('.import-pgn-input')?.value || '').trim();
     if (!pgn) return;
     try {
       const games = this._splitPgnGames(pgn);
@@ -6961,14 +7210,14 @@ _showPuzzleSuccessOverlay() {
       }
       this._loadPgnText(pgn);
       this._hidePgnModal();
-	    } catch (err) {
-	      this._showPopup({
-	        icon: 'error',
-	        title: 'Could not load PGN',
-	        text: err.message,
-	      });
-	    }
-	  }
+    } catch (err) {
+      this._showPopup({
+        icon: 'error',
+        title: 'Could not load PGN',
+        text: err.message,
+      });
+    }
+  }
 
   _loadPgnText(pgnText, headers = {}) {
     const chess = new Chess();
@@ -7110,14 +7359,18 @@ _showPuzzleSuccessOverlay() {
   }
 
   _setImportStatus(message, kind = 'idle') {
-    if (!this.elImportStatus) return;
-    this.elImportStatus.textContent = message || '';
-    this.elImportStatus.className = `import-status ${kind}`.trim();
+    const modalTool = this._getImportTool('modal');
+    const status = modalTool?.querySelector('.import-status') || this.elImportStatus;
+    if (!status) return;
+    status.textContent = message || '';
+    status.className = `import-status ${kind}`.trim();
   }
 
   _renderImportResults(items) {
-    if (!this.elImportResults) return;
-    this.elImportResults.innerHTML = '';
+    const modalTool = this._getImportTool('modal');
+    const results = modalTool?.querySelector('.import-results') || this.elImportResults;
+    if (!results) return;
+    results.innerHTML = '';
 
     if (!items || items.length === 0) {
       return;
@@ -7135,36 +7388,33 @@ _showPuzzleSuccessOverlay() {
         try {
           this._loadPgnText(item.pgn, item.headers || {});
           this._hidePgnModal();
-	        } catch (err) {
-	          this._showPopup({
-	            icon: 'error',
-	            title: 'Could not load PGN',
-	            text: err.message,
-	          });
-	        }
-	      });
-      this.elImportResults.appendChild(button);
+        } catch (err) {
+          this._showPopup({
+            icon: 'error',
+            title: 'Could not load PGN',
+            text: err.message,
+          });
+        }
+      });
+      results.appendChild(button);
     }
   }
 
-  async _loadGamesByUsername() {
-    const username = (this.elImportUsername?.value || '').trim();
-    const source = this.elImportSource?.value || 'pgn';
-    const limit = parseInt(this.elImportLimit?.value || '10', 10);
-
-    if (source === 'pgn') {
-      this._loadPgn();
-      return;
-    }
+  async _loadGamesByUsername(source, username, limit) {
+    source = source || 'lichess';
+    username = (username || '').trim();
+    limit = parseInt(limit || '10', 10);
 
     if (!username) {
       this._setImportStatus('Enter a username first.', 'error');
-      return;
+      throw new Error('Username required');
     }
 
     const siteLabel = source === 'chesscom' ? 'Chess.com' : 'Lichess';
     this._setImportStatus(`Loading ${siteLabel} games...`, 'loading');
-    this.elBtnImportUsername.disabled = true;
+    const tool = this._getImportTool('modal');
+    const btn = tool?.querySelector(`.import-load-username-btn[data-source="${source}"]`);
+    if (btn) btn.disabled = true;
     this._renderImportResults([]);
     const closeLoading = this._showLoadingPopup(`Loading ${siteLabel} games…`);
 
@@ -7185,9 +7435,10 @@ _showPuzzleSuccessOverlay() {
     } catch (err) {
       console.error('Username import failed:', err);
       this._setImportStatus(err.message || 'Could not load games for that user.', 'error');
+      throw err;
     } finally {
       closeLoading();
-      this.elBtnImportUsername.disabled = false;
+      if (btn) btn.disabled = false;
     }
   }
 
@@ -7219,26 +7470,36 @@ _showPuzzleSuccessOverlay() {
     const proxied = await this._fetchRecentGamesViaServer('chesscom', username, limit);
     if (proxied) return proxied;
 
+    // Browser-direct fallback (server proxy unavailable). Bounded: only the
+    // most recent MAX_MONTHS archives, fetched in PARALLEL, each with a
+    // per-request timeout so a single hung month can't freeze the popup.
+    const MAX_MONTHS = 6;
+    const ARCHIVE_TIMEOUT = 12000;
+    const MONTH_TIMEOUT = 12000;
+
     const archiveUrl = `https://api.chess.com/pub/player/${encodeURIComponent(username)}/games/archives`;
-    const archiveResponse = await fetch(archiveUrl, { mode: 'cors' });
+    const archiveResponse = await this._fetchWithTimeout(archiveUrl, { mode: 'cors' }, ARCHIVE_TIMEOUT);
     if (!archiveResponse.ok) {
       throw new Error(`Chess.com responded with ${archiveResponse.status}`);
     }
 
     const archiveData = await archiveResponse.json();
-    const archives = Array.isArray(archiveData.archives) ? archiveData.archives.slice().reverse() : [];
+    const archives = (Array.isArray(archiveData.archives) ? archiveData.archives.slice().reverse() : [])
+      .slice(0, MAX_MONTHS);
+
+    // Fetch the capped months concurrently; a failed/timed-out month yields no
+    // games instead of aborting the whole load (Promise.allSettled).
+    const settled = await Promise.allSettled(
+      archives.map((monthUrl) =>
+        this._fetchWithTimeout(monthUrl, { mode: 'cors' }, MONTH_TIMEOUT)
+          .then((r) => (r && r.ok ? r.json().catch(() => null) : null))
+      )
+    );
+
     const games = [];
-    const monthGameLimit = Math.max(limit, 20);
-
-    for (const monthUrl of archives) {
-      if (games.length >= monthGameLimit) break;
-
-      const monthResponse = await fetch(monthUrl, { mode: 'cors' });
-      if (!monthResponse.ok) continue;
-
-      const monthData = await monthResponse.json();
-      const monthGames = Array.isArray(monthData.games) ? monthData.games : [];
-
+    for (const result of settled) {
+      if (result.status !== 'fulfilled' || !result.value) continue;
+      const monthGames = Array.isArray(result.value.games) ? result.value.games : [];
       for (const chessComGame of monthGames) {
         if (!chessComGame?.pgn) continue;
         const game = this._gameSummaryFromPgn(chessComGame.pgn, {
@@ -7260,10 +7521,29 @@ _showPuzzleSuccessOverlay() {
     return this._sortImportedGamesByRecent(games).slice(0, limit);
   }
 
+  // fetch() with an AbortController-backed timeout. A hung host rejects in
+  // `timeoutMs` instead of stalling the caller forever (which froze the
+  // chess.com load popup and the opening-explorer spinner). Resolves/rejects
+  // like a normal fetch; the timer is cleared on settle.
+  async _fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } catch (err) {
+      if (controller.signal.aborted) throw new Error(`Request timed out after ${timeoutMs}ms`);
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async _fetchRecentGamesViaServer(source, username, limit) {
     try {
       const params = new URLSearchParams({ source, username, limit: String(limit) });
-	const response = await apiFetch(`/api/recent-games?${params.toString()}`);
+	// Bounded timeout: if the serverless proxy hangs, fail fast to the
+	// (now-bounded) browser fallback instead of freezing the popup.
+	const response = await this._fetchWithTimeout(`/api/recent-games?${params.toString()}`, { headers: { Accept: 'application/json' }, cache: 'no-store' }, 15000);
       if (!response.ok) return null;
       const data = await response.json();
       if (!Array.isArray(data.games)) return null;
@@ -7324,10 +7604,11 @@ _showPuzzleSuccessOverlay() {
 			    }
 		    if (this.coachMode.active && !this._isCoachHumanTurn()) return;
 
-    // If we're in a finished review (analysisResults exists) and not already in explore line mode,
-    // entering a move should start explore line mode
+    // If the user is viewing a "Explore Best Move" preview, exit it first so
+    // the move they play branches off the correct main-line position.
+    if (this.bestMovePreview) this._exitBestMovePreview();
+
     const isFinishedReview = this.analysisResults && this.analysisResults.length > 0;
-    const shouldEnterExploreLine = isFinishedReview && !this.exploreLineMode && !this.explorerReturnState;
 
     const fenBefore = this.chess.fen();
     const promotion = this._isPromotionMove(from, to) ? await this._requestPromotionPiece() : undefined;
@@ -7340,7 +7621,7 @@ _showPuzzleSuccessOverlay() {
     // If the played move matches the NEXT move of the reviewed main line, just
     // advance to it (like clicking "Next") instead of branching into explore
     // line. Undo the trial move and navigate forward.
-    if (isFinishedReview && !this.exploreLineMode && !this.explorerReturnState) {
+    if (isFinishedReview && this.activeLine.kind === 'main') {
       const nextIndex = this.currentMoveIndex + 1;
       const nextMainSan = this.originalGameMoves[nextIndex];
       if (nextMainSan && this.analyzer._sameMoveSan(move.san, nextMainSan)) {
@@ -7348,6 +7629,17 @@ _showPuzzleSuccessOverlay() {
         this._goToMove(nextIndex);
         return;
       }
+    }
+
+    // Sub-line (variation) creation: if we're in a finished review AND the
+    // played move is NOT the next main-line move, capture it as a variation
+    // hanging off the current main-line parent index (or extend the active
+    // sub-line). The sub-line gets live engine analysis and is shown in the
+    // move list with a delete (×) icon. This replaces the old "explore line"
+    // mode that temporarily clobbered the main line.
+    if (isFinishedReview) {
+      this._undoTrialAndBranchToSubLine({ move, from, to, promotion });
+      return;
     }
 
     if (this.currentMoveIndex < this.gameMoves.length - 1) {
@@ -7359,9 +7651,10 @@ _showPuzzleSuccessOverlay() {
     this.currentMoveIndex = this.gameMoves.length - 1;
     this._resetCoachHint();
     this.board.setChessInstance(this.chess);
+    this.board.skipNextSlide();
     this._updateBoard();
     this._updateCurrentMoveIndicator();
-    this.board.setHighlights([{ square: move.from, type: 'highlight' }, { square: move.to, type: 'highlight' }]);
+    this.board.setHighlights([{ square: move.from, type: 'highlight', color: this._mixColor('#2F6F9F', '#ffffff', 0.5), ringColor: '#2F6F9F' }, { square: move.to, type: 'highlight', color: this._mixColor('#2F6F9F', '#ffffff', 0.5), ringColor: '#2F6F9F' }]);
     this.board.clearBestMoveArrow();
 
     this._invalidateAnalysisResults({ skipBoardRefresh: true });
@@ -7385,11 +7678,6 @@ _showPuzzleSuccessOverlay() {
     }
     if (this.coachMode.active) {
       this._handleCoachHumanMove(move, liveResultPromise);
-    }
-
-    // If we were in a finished review and made a move, enter explore line mode
-    if (shouldEnterExploreLine) {
-      this._enterExploreLineMode();
     }
   }
 
@@ -7417,7 +7705,10 @@ _showPuzzleSuccessOverlay() {
     const isCheckmate = posAfter.in_checkmate();
     const adjustedScoreAfter = isCheckmate ? (isWhitePlaying ? 10000 : -10000) : scoreAfter;
 
-    const cpLoss = this.analyzer._cpLoss(scoreBefore, adjustedScoreAfter, isWhitePlaying);
+    // cpLoss-vs-best: lines[0].cp is already White-absolute here (see _analyzeMoveAtDepth);
+    // don't double-convert via whiteAbsCp (matches how _gapToSecond consumes it just below).
+    const bestLineCp = lines[0] ? lines[0].cp : scoreBefore;
+    const cpLoss = this.analyzer._cpLoss(scoreBefore, bestLineCp, adjustedScoreAfter, isWhitePlaying);
     const phase = this.analyzer._phaseFromFen(fenBefore, movePly);
 
     const secondLine = lines.length > 1 ? lines[1] : null;
@@ -7944,6 +8235,10 @@ _showPuzzleSuccessOverlay() {
 		    this.analysisResults = null;
 		    this.explorerReturnState = null;
     this.exploreLineMode = false;
+    this.subLines = new Map();
+    this.activeLine = { kind: 'main', index: -1 };
+    this.bestMovePreview = null;
+    this._lastInsightResult = null;
 		    if (this.elReviewBtnText) this.elReviewBtnText.textContent = 'Start Review';
     this.liveMoveResults = [];
 	    this.currentMoveIndex = -1;
@@ -8034,6 +8329,10 @@ _showPuzzleSuccessOverlay() {
 		    this.currentMoveIndex = -1;
 		    this.explorerReturnState = null;
     this.exploreLineMode = false;
+    this.subLines = new Map();
+    this.activeLine = { kind: 'main', index: -1 };
+    this.bestMovePreview = null;
+    this._lastInsightResult = null;
 	    this._resetCoachHint();
 	    this.analysisResults = null;
 	    if (this.elReviewBtnText) this.elReviewBtnText.textContent = 'Start Review';
@@ -8084,234 +8383,9 @@ _showPuzzleSuccessOverlay() {
     this._saveGameState();
   }
 
-  _loadSavedGameState(type) {
-    try {
-      const key = type === 'coach' ? 'sidastuff.coachGame' : 'sidastuff.reviewGame';
-      const raw = localStorage.getItem(key);
-      if (!raw) return null;
-	      const state = JSON.parse(raw);
-	      const MAX_AGE = 12 * 60 * 60 * 1000;
-	      const isCoach = type === 'coach' && (state?.headers?.Event === 'Coach' || state?.coachMode);
-	      if ((!state?.moves?.length && !isCoach) || (Date.now() - (state.savedAt || 0)) >= MAX_AGE) return null;
-	      return state;
-    } catch (_) { return null; }
+_saveGameState() {
+    // Resume game feature removed — no-op to keep callers intact.
   }
-
-  _saveGameState() {
-    try {
-      const isCoach = this.gameHeaders?.Event === 'Coach';
-      const key = isCoach ? 'sidastuff.coachGame' : 'sidastuff.reviewGame';
-      if (!this.gameMoves.length && !isCoach) {
-        localStorage.removeItem(key);
-        this._forgetReviewSnapshot(isCoach);
-        return;
-      }
-	      const state = {
-	        moves: this.gameMoves.slice(),
-	        headers: this.gameHeaders || {},
-	        initialFen: this.initialFen,
-	        currentMoveIndex: this.currentMoveIndex,
-	        savedAt: Date.now(),
-        hasReviewSnapshot: this._saveReviewSnapshot(isCoach),
-	      };
-      if (isCoach) {
-        state.coachMode = {
-          elo: this.coachMode.elo,
-          humanColor: this.coachMode.humanColor,
-          aiAdjust: this.coachMode.aiAdjust,
-          adjustStyle: this.coachMode.adjustStyle,
-        };
-      }
-      localStorage.setItem(key, JSON.stringify(state));
-    } catch (_) {}
-  }
-
-	  _restoreGameState() {}
-
-  // Persist the full review snapshot (analysis results + summaries) in a
-  // separate localStorage key so a reload restores the completed review, not
-  // just the move list. Stored separately because results+PVs can be large.
-  _reviewSnapshotKey(isCoach = false) {
-    return isCoach ? 'sidastuff.coachReviewSnapshot' : 'sidastuff.reviewSnapshot';
-  }
-
-  _saveReviewSnapshot(isCoach = false) {
-    try {
-      const key = this._reviewSnapshotKey(isCoach);
-      if (!Array.isArray(this.analysisResults) || this.analysisResults.length === 0) {
-        localStorage.removeItem(key);
-        return false;
-      }
-      // Strip the non-serializable classification object; we rehydrate it from
-      // classificationKey on load. Also drop verbose PV strings to save space.
-      const slim = this.analysisResults.map((entry) => {
-        if (!entry) return entry;
-        // eslint-disable-next-line no-unused-vars
-        const { classification, alternatives, ...rest } = entry;
-        return rest;
-      });
-      const snapshot = {
-        results: slim,
-        opening: this.analysisResults.opening || null,
-        criticalMoments: (this.analysisResults.criticalMoments || []).map((entry) => {
-          if (!entry) return entry;
-          // eslint-disable-next-line no-unused-vars
-          const { classification, ...rest } = entry;
-          return rest;
-        }),
-        whiteAccuracy: this.analysisResults.whiteAccuracy,
-        blackAccuracy: this.analysisResults.blackAccuracy,
-        whiteAcpl: this.analysisResults.whiteAcpl,
-        blackAcpl: this.analysisResults.blackAcpl,
-        whiteCaps: this.analysisResults.whiteCaps,
-        blackCaps: this.analysisResults.blackCaps,
-        phaseSummary: this.analysisResults.phaseSummary || null,
-        savedAt: Date.now(),
-      };
-      localStorage.setItem(key, JSON.stringify(snapshot));
-      return true;
-    } catch (_) {
-      // Most likely a quota-exceeded error on large games; the moves are still
-      // saved by _saveGameState, just without the analysis snapshot.
-      return false;
-    }
-  }
-
-  _loadReviewSnapshot(isCoach = false) {
-    try {
-      const key = this._reviewSnapshotKey(isCoach);
-      const raw = localStorage.getItem(key);
-      if (!raw) return null;
-      const snapshot = JSON.parse(raw);
-      if (!snapshot || !Array.isArray(snapshot.results)) return null;
-      const MAX_AGE = 12 * 60 * 60 * 1000;
-      if (Date.now() - (snapshot.savedAt || 0) >= MAX_AGE) return null;
-      // Rehydrate the classification object from the persisted key.
-      const results = snapshot.results.map((entry) => (entry
-        ? {
-          ...entry,
-          classification: MoveClassification[entry.classificationKey] || MoveClassification.GOOD,
-          alternatives: entry.alternatives || [],
-        }
-        : entry));
-      results.opening = snapshot.opening || null;
-      results.criticalMoments = (snapshot.criticalMoments || []).map((entry) => (entry
-        ? { ...entry, classification: MoveClassification[entry.classificationKey] || MoveClassification.GOOD }
-        : entry));
-      results.whiteAccuracy = snapshot.whiteAccuracy;
-      results.blackAccuracy = snapshot.blackAccuracy;
-      results.whiteAcpl = snapshot.whiteAcpl;
-      results.blackAcpl = snapshot.blackAcpl;
-      results.whiteCaps = snapshot.whiteCaps;
-      results.blackCaps = snapshot.blackCaps;
-      results.phaseSummary = snapshot.phaseSummary || null;
-      results.statsRecorded = true; // already recorded on the server, don't double-count
-      return results;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  _forgetReviewSnapshot(isCoach = false) {
-    try {
-      localStorage.removeItem(this._reviewSnapshotKey(isCoach));
-    } catch (_) {}
-  }
-
-	  _savedGameStorageKey(type) {
-	    return type === 'coach' ? 'sidastuff.coachGame' : 'sidastuff.reviewGame';
-	  }
-
-	  _forgetSavedGameState(type) {
-	    try {
-	      localStorage.removeItem(this._savedGameStorageKey(type));
-	      this._forgetReviewSnapshot(type === 'coach');
-	    } catch (_) {}
-	  }
-
-	  _savedGameRestoreHtml(type, state = {}) {
-	    const label = type === 'coach' ? 'Coach game' : 'Review game';
-	    const moves = Array.isArray(state.moves) ? state.moves.length : 0;
-	    const savedDate = state.savedAt ? new Date(state.savedAt).toLocaleString() : 'recently';
-	    const headers = state.headers || {};
-	    const white = headers.White || (type === 'coach' ? 'You/Coach' : 'White');
-	    const black = headers.Black || (type === 'coach' ? 'Coach/You' : 'Black');
-	    return `
-	      <div class="restore-game-popup">
-	        <div class="restore-game-title">${this._escapeHtml(label)}</div>
-	        <div class="restore-game-row"><span>Players</span><strong>${this._escapeHtml(`${white} vs ${black}`)}</strong></div>
-	        <div class="restore-game-row"><span>Moves</span><strong>${moves}</strong></div>
-	        <div class="restore-game-row"><span>Saved</span><strong>${this._escapeHtml(savedDate)}</strong></div>
-	      </div>`;
-	  }
-
-	  async _promptSavedGameRestore(type, state) {
-	    const isCoach = type === 'coach';
-	    const result = await this._showPopup({
-	      form: true,
-	      icon: 'question',
-	      title: isCoach ? 'Continue coach game?' : 'Continue review?',
-	      html: this._savedGameRestoreHtml(type, state),
-	      confirmButtonText: isCoach ? 'Resume coach' : 'Resume review',
-	      showCancelButton: true,
-	      cancelButtonText: isCoach ? 'New coach game' : 'Import new game',
-	      allowOutsideClick: false,
-	      reverseButtons: true,
-	    });
-
-	    if (result.isConfirmed) {
-	      if (isCoach) {
-	        this._restoreSavedCoachGame(state);
-	      } else {
-	        this._restoreSavedReviewGame(state);
-	      }
-	      return;
-	    }
-
-	    this._forgetSavedGameState(type);
-	    if (isCoach) {
-	      this._showEngineChoiceModal('coach');
-	    } else {
-	      this._showEngineChoiceModal('import');
-	    }
-	  }
-
-	  _restoreSavedCoachGame(state) {
-	    this._loadGame(state.moves || [], state.headers || { Event: 'Coach' });
-	    if (state.coachMode) {
-	      Object.assign(this.coachMode, state.coachMode, {
-	        active: true,
-	        thinking: false,
-	        gameOverCelebrated: false,
-	      });
-	    } else {
-	      this.coachMode.active = true;
-	      this.coachMode.thinking = false;
-	    }
-	    const restoreIndex = Number.isInteger(state.currentMoveIndex) ? state.currentMoveIndex : this.gameMoves.length - 1;
-	    this._goToMove(restoreIndex);
-	    this._enterCoachMode();
-	  }
-
-	  _restoreSavedReviewGame(state) {
-	    // Read the snapshot BEFORE _loadGame: _loadGame sets analysisResults=null
-	    // and calls _saveGameState() at its tail, which would delete the
-	    // persisted snapshot key before we could read it back (losing accuracy,
-	    // classifications, eval graph, critical moments).
-	    const snapshot = state.hasReviewSnapshot ? this._loadReviewSnapshot(false) : null;
-	    this._loadGame(state.moves || [], state.headers || {});
-	    if (snapshot) {
-	      this.analysisResults = snapshot;
-	      this._showReviewSummary();
-	      this._renderCriticalMoments();
-	      this._renderPostReviewEvalPanel?.();
-	      // Only (re)render the opening card from a saved snapshot that actually
-	      // carries one; otherwise leave the async Lichess-driven card in place.
-	      if (snapshot && snapshot.opening) this._showOpeningInfo(snapshot.opening);
-	    }
-	    if (Number.isInteger(state.currentMoveIndex)) this._goToMove(state.currentMoveIndex);
-	    this._enterReviewMode();
-	  }
 
 	  _currentPgn() {
 	    const headers = { ...(this.gameHeaders || {}) };
@@ -8364,6 +8438,16 @@ _showPuzzleSuccessOverlay() {
 	  _goToMove(index) {
     if (index < -1) index = -1;
     if (index >= this.gameMoves.length) index = this.gameMoves.length - 1;
+    // Navigation buttons/keys operate on the main line. If the cursor is
+    // currently inside a sub-line (or a best-move preview), snap back to the
+    // main line first so the index resolves against gameMoves, not the
+    // variation. We clear the sub/preview state and fall through to the normal
+    // main-line navigation below.
+    if (this.bestMovePreview) { this.bestMovePreview = null; this._setExplorerHint(''); }
+    if (this.activeLine && this.activeLine.kind === 'sub') {
+      this.activeLine = { kind: 'main', index };
+      if (this.elBtnReturnExplorer) this.elBtnReturnExplorer.hidden = !this.explorerReturnState;
+    }
     if (index === this.currentMoveIndex) return;
 
     this.currentMoveIndex = index;
@@ -8385,6 +8469,7 @@ _showPuzzleSuccessOverlay() {
     }
 
     this.board.setChessInstance(this.chess);
+    this.board.animateNextUpdate();
     this._updateBoard();
 
 	    const result = this.analysisResults?.[index] || this.liveMoveResults?.[index];
@@ -8405,7 +8490,7 @@ _showPuzzleSuccessOverlay() {
 		    if (highlights.length === 0 && lastMoveFrom && lastMoveTo) {
 		      highlights.push(...this._moveHighlightsForSquares(lastMoveFrom, lastMoveTo, this._isCoachMoveIndex(index)
 		        ? { color: '#D9ECFF', ringColor: '#2F6F9F' }
-		        : {}));
+		        : { color: this._mixColor('#2F6F9F', '#ffffff', 0.5), ringColor: '#2F6F9F' }));
 		    }
 		    if (result && index >= 0 && !result.isCoachMove) {
 		      if (result.bestMove && result.bestMove !== result.moveUci) {
@@ -8427,7 +8512,12 @@ _showPuzzleSuccessOverlay() {
 	      this._drawEvalGraph();
 	      if (!result.isCoachMove) {
 	        this._applyBestMoveArrow(result, { allowOnQuiet: false });
-	        this._showMoveBadge(result.classification, result.moveUci ? result.moveUci.substring(2, 4) : null);
+	        // Only show badge when we have a real eval and classification
+	        if (result.evalAfter != null && result.classification) {
+	          this._showMoveBadge(result.classification, result.moveUci ? result.moveUci.substring(2, 4) : null);
+	        } else {
+	          this.elMoveBadge.style.display = 'none';
+	        }
 	        this._renderMoveInsights(result);
 	      }
 	      this._showEngineLine(result);
@@ -8663,32 +8753,20 @@ _showPuzzleSuccessOverlay() {
     }
 
     if (targetSquare && this.board.container) {
-      const sqEl = this.board.container.querySelector(`[data-square="${targetSquare}"]`);
-      if (sqEl && this.board.wrapper) {
-        const boardRect = this.board.wrapper.getBoundingClientRect();
-        const sqRect = sqEl.getBoundingClientRect();
-        const inset = Math.max(9, sqRect.width * 0.18);
-        const left = sqRect.right - boardRect.left - inset;
-        const top = sqRect.top - boardRect.top + inset;
-        this.elMoveBadge.style.left = left + 'px';
-        this.elMoveBadge.style.top = top + 'px';
-        this.elMoveBadge.style.right = 'auto';
-        this.elMoveBadge.style.transform = 'translate(-50%, -50%)';
-      }
+      this._positionBadge(targetSquare);
     }
 
     this.elMoveBadge.style.display = 'flex';
-    const badgeRgb = this._hexToRgb(classification.color);
-    this.elMoveBadge.style.setProperty('--badge-color', classification.color);
-    if (badgeRgb) {
-      this.elMoveBadge.style.setProperty('--badge-rgb', `${badgeRgb.r}, ${badgeRgb.g}, ${badgeRgb.b}`);
-    }
-    this.elMoveBadge.style.background = classification.color;
-    this.elMoveBadge.style.color = '#fff';
+    this.elMoveBadge.style.background = '';
+    this.elMoveBadge.style.color = '';
     this.elMoveBadge.title = classification.name;
     this.elMoveBadge.setAttribute('aria-label', classification.name);
     this.elBadgeIcon.className = this._classificationIconClass(classification, 'badge-icon');
-    this.elBadgeIcon.textContent = classification.icon;
+    if (classification.iconType === 'image') {
+      this.elBadgeIcon.innerHTML = `<img src="/assets/icons/${classification.icon}.png" alt="" class="classification-img">`;
+    } else {
+      this.elBadgeIcon.textContent = classification.icon;
+    }
     this.elBadgeText.textContent = '';
 
     // No special animation or treatment for Brilliant/Great/Blunder — every
@@ -8700,6 +8778,24 @@ _showPuzzleSuccessOverlay() {
     if (!options.suppressFlash) {
       this._flashBoard(classification);
     }
+  }
+
+  _positionBadge(targetSquare) {
+    const sqEl = this.board.container?.querySelector(`[data-square="${targetSquare}"]`);
+    if (!sqEl || !this.board.wrapper) return;
+    const boardRect = this.board.wrapper.getBoundingClientRect();
+    const sqRect = sqEl.getBoundingClientRect();
+    if (!sqRect.width || !sqRect.height) {
+      requestAnimationFrame(() => this._positionBadge(targetSquare));
+      return;
+    }
+    const inset = Math.max(9, sqRect.width * 0.18);
+    const left = sqRect.right - boardRect.left - inset;
+    const top = sqRect.top - boardRect.top + inset;
+    this.elMoveBadge.style.left = left + 'px';
+    this.elMoveBadge.style.top = top + 'px';
+    this.elMoveBadge.style.right = 'auto';
+    this.elMoveBadge.style.transform = 'translate(-50%, -50%)';
   }
 
   _refreshMoveBadgePosition() {
@@ -8802,7 +8898,98 @@ _showPuzzleSuccessOverlay() {
       }
 
       this.elMoveList.appendChild(row);
+
+      // Emit sub-lines that hang off either cell of this row. We render
+      // sub-lines for the white cell (i) first, then black (i+1), so the
+      // visual stack reads in move order.
+      this._renderSubLinesForIndex(i);
+      if (i + 1 < this.gameMoves.length) this._renderSubLinesForIndex(i + 1);
     }
+  }
+
+  // Helper: append any sub-line rows that hang off `parentIndex` to the list.
+  // No-op if no sub-lines exist for that index.
+  _renderSubLinesForIndex(parentIndex) {
+    if (!this.subLines.has(parentIndex)) return;
+    const subs = this.subLines.get(parentIndex) || [];
+    for (let s = 0; s < subs.length; s++) {
+      this.elMoveList.appendChild(this._createSubLineRow(parentIndex, s, subs[s]));
+    }
+  }
+
+  // Build the DOM for one sub-line: a 'var' label, clickable move spans, and
+  // a delete (×) button. Each sub-line hangs off a single main-line index;
+  // multiple parallel sub-lines can exist for the same parent.
+  _createSubLineRow(parentIndex, subIndex, sub) {
+    const row = document.createElement('div');
+    row.className = 'sub-line-row';
+    row.dataset.parentIndex = String(parentIndex);
+    row.dataset.subIndex = String(subIndex);
+
+    const cell = document.createElement('div');
+    cell.className = 'sub-line-cell';
+
+    const label = document.createElement('span');
+    label.className = 'sub-line-label';
+    label.textContent = 'var';
+    cell.appendChild(label);
+
+    const moves = (sub && sub.moves) || [];
+    moves.forEach((moveSan, mIdx) => {
+      const moveSpan = document.createElement('span');
+      moveSpan.className = 'sub-line-move';
+      moveSpan.dataset.parentIndex = String(parentIndex);
+      moveSpan.dataset.subIndex = String(subIndex);
+      moveSpan.dataset.moveIndex = String(mIdx);
+      moveSpan.setAttribute('role', 'button');
+      moveSpan.tabIndex = 0;
+      moveSpan.setAttribute('aria-label', `Go to sub-line move ${moveSan}`);
+
+      const text = document.createElement('span');
+      text.textContent = moveSan;
+      moveSpan.appendChild(text);
+
+      const result = sub.results && sub.results[mIdx];
+      if (result && result.evalAfter !== undefined) {
+        const evalEl = document.createElement('span');
+        evalEl.className = 'sub-line-move-eval';
+        evalEl.textContent = this.analyzer.formatScore(result.evalAfter);
+        moveSpan.appendChild(evalEl);
+      }
+
+      // Active state.
+      if (this.activeLine
+        && this.activeLine.kind === 'sub'
+        && this.activeLine.parentIndex === parentIndex
+        && this.activeLine.subIndex === subIndex
+        && this.activeLine.moveIndex === mIdx) {
+        moveSpan.classList.add('active');
+      }
+
+      const goToSub = () => this._goToLine({ kind: 'sub', parentIndex, subIndex, moveIndex: mIdx });
+      moveSpan.addEventListener('click', goToSub);
+      moveSpan.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        goToSub();
+      });
+      cell.appendChild(moveSpan);
+    });
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'sub-line-delete';
+    delBtn.textContent = '×';
+    delBtn.title = 'Delete variation';
+    delBtn.setAttribute('aria-label', 'Delete variation');
+    delBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      this._deleteSubLine(parentIndex, subIndex);
+    });
+    cell.appendChild(delBtn);
+
+    row.appendChild(cell);
+    return row;
   }
 
 	  _createMoveCell(index, moveSan) {
@@ -8828,10 +9015,17 @@ _showPuzzleSuccessOverlay() {
 	      const cls = result.classification;
 	      const icon = document.createElement('span');
 	      icon.className = this._classificationIconClass(cls, 'move-icon');
-	      icon.style.background = cls.color;
-	      icon.textContent = this._classificationGlyph(cls);
 	      icon.setAttribute('aria-hidden', 'true');
 	      icon.setAttribute('title', `${cls.name} move`);
+	      if (cls.iconType === 'image') {
+	        const img = document.createElement('img');
+	        img.src = `/assets/icons/${cls.icon}.png`;
+	        img.alt = '';
+	        img.className = 'classification-img';
+	        icon.appendChild(img);
+	      } else {
+	        icon.textContent = this._classificationGlyph(cls);
+	      }
 	      cell.appendChild(icon);
 	      cell.title = `${cls.name} | CP loss: ${Math.round(result.cpLoss || 0)}`;
 	      cell.setAttribute('aria-label', `Go to move ${moveSan}. ${cls.name}. CP loss ${Math.round(result.cpLoss || 0)}`);
@@ -8846,7 +9040,10 @@ _showPuzzleSuccessOverlay() {
 	      cell.appendChild(evalEl);
 	    }
 
-	    const goToMove = () => this._goToMove(index);
+	    // Route clicks through _goToLine so activeLine bookkeeping is consistent
+	    // for main-line and sub-line navigation. Jumping to a main move while on
+	    // a sub-line snaps the cursor back to the main line.
+	    const goToMove = () => this._goToLine({ kind: 'main', index });
 	    cell.addEventListener('click', goToMove);
 	    cell.addEventListener('keydown', (event) => {
 	      if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -8854,17 +9051,32 @@ _showPuzzleSuccessOverlay() {
 	      goToMove();
 	    });
 
-    if (index === this.currentMoveIndex) cell.classList.add('active');
+    // Active state: a main cell is .active only when activeLine is on main.
+    if (index === this.currentMoveIndex
+      && (!this.activeLine || this.activeLine.kind === 'main')) {
+      cell.classList.add('active');
+    }
     return cell;
   }
 
 	  _updateActiveMoveInList() {
-	    const cells = this.elMoveList.querySelectorAll('.move-cell');
+    const cells = this.elMoveList.querySelectorAll('.move-cell');
+    const onMain = !this.activeLine || this.activeLine.kind === 'main';
     cells.forEach((cell) => {
-      cell.classList.toggle('active', parseInt(cell.dataset.moveIndex, 10) === this.currentMoveIndex);
+      cell.classList.toggle('active', onMain && parseInt(cell.dataset.moveIndex, 10) === this.currentMoveIndex);
     });
 
-    const active = this.elMoveList.querySelector('.move-cell.active');
+    const subMoves = this.elMoveList.querySelectorAll('.sub-line-move');
+    subMoves.forEach((m) => {
+      const isActive = this.activeLine
+        && this.activeLine.kind === 'sub'
+        && parseInt(m.dataset.parentIndex, 10) === this.activeLine.parentIndex
+        && parseInt(m.dataset.subIndex, 10) === this.activeLine.subIndex
+        && parseInt(m.dataset.moveIndex, 10) === this.activeLine.moveIndex;
+      m.classList.toggle('active', !!isActive);
+    });
+
+    const active = this.elMoveList.querySelector('.move-cell.active, .sub-line-move.active');
     if (!active) return;
 
     const container = this.elMoveList;
@@ -8876,9 +9088,9 @@ _showPuzzleSuccessOverlay() {
     if (activeTop < scrollTop) {
       container.scrollTop = activeTop;
     } else if (activeTop + activeHeight > scrollTop + containerHeight) {
-	      container.scrollTop = activeTop + activeHeight - containerHeight;
-	    }
-	  }
+      container.scrollTop = activeTop + activeHeight - containerHeight;
+    }
+  }
 
 		  _previewReviewPosition(index) {
 		    let target = index;
@@ -8903,7 +9115,7 @@ _showPuzzleSuccessOverlay() {
 		    this.board.setHighlights(lastMoveFrom && lastMoveTo
 		      ? this._moveHighlightsForSquares(lastMoveFrom, lastMoveTo, this._isCoachMoveIndex(target)
 		        ? { color: '#D9ECFF', ringColor: '#2F6F9F' }
-		        : {})
+		        : { color: this._mixColor('#2F6F9F', '#ffffff', 0.5), ringColor: '#2F6F9F' })
 		      : []);
 	    this.board.clearBestMoveArrow();
 	    this.elMoveBadge.style.display = 'none';
@@ -9020,6 +9232,7 @@ _showPuzzleSuccessOverlay() {
 		  }
 		
 			  async _startReview() {
+    if (!this._canStartHeavyAction('review', 'Game Review')) return;
 		const serverReview = this.engineSettings.analysisLocation === 'server';
 	    if (this.isAnalyzing || this.gameMoves.length === 0 || (!serverReview && !this.engine?.ready)) return;
 	    let forceBrowserReview = false;
@@ -9047,23 +9260,31 @@ _showPuzzleSuccessOverlay() {
 	      });
 	      return;
 	    }
-	
+
+    this._setBusyAction('review');
 	    this.isAnalyzing = true;
     this.liveEvalToken += 1; this.liveDepthToken += 1;
     this._syncActionButtons();
     this._setEngineControlsDisabled(true);
 	    this.analyzer.setReviewProfile(this._getReviewProfile());
 	    this.elReviewBtnText.textContent = 'Analyzing...';
-				    this.elProgressBar.style.display = 'block';
+				    if (this.elProgressBar) this.elProgressBar.style.display = 'block';
 				    // Seed at a visible floor so the bar never reads as "stuck at 0"
 				    // the instant the user clicks (progress-bar motivation).
-				    this.elProgressFill.style.width = '4%';
+				    if (this.elProgressFill) this.elProgressFill.style.width = '4%';
 				    if (this.elReviewProgressStep) this.elReviewProgressStep.hidden = false;
+				    if (this.elReviewProgressPct) {
+				      this.elReviewProgressPct.hidden = false;
+				      this.elReviewProgressPct.textContent = '0%';
+				    }
 				    this._showReviewLoadingSkeleton();
 				    this.board.setLoading(null, 'Reviewing game');
 		    const updateReviewProgress = (current, total, message) => {
 		      const pct = Math.round((current / Math.max(1, total - 1)) * 100);
-		      this.elProgressFill.style.width = clamp(pct, 0, 100) + '%';
+		      if (this.elProgressFill) this.elProgressFill.style.width = clamp(pct, 0, 100) + '%';
+		      if (this.elReviewProgressPct) {
+		        this.elReviewProgressPct.textContent = `${clamp(pct, 0, 100)}%`;
+		      }
 		      if (this.elReviewProgressStep) {
 		        this.elReviewProgressStep.textContent = `Analyzing move ${Math.max(1, current)} of ${total}`;
 		      }
@@ -9113,6 +9334,8 @@ _showPuzzleSuccessOverlay() {
 				          this.analysisResults = await this._analyzeGameOnServer();
 						        } catch (serverErr) {
 					          console.warn('Server analysis failed:', serverErr);
+					          // User cancelled — don't fallback to browser, just bail out
+					          if (/cancelled/i.test(serverErr.message || '')) throw serverErr;
 					          if (serverErr?.code === 'quota_exceeded' || /Free plan includes 3 server game reviews/i.test(serverErr.message || '')) {
 					            const choice = await this._showUsageLimitPopup('serverReviews');
 					            if (choice !== 'browser') throw serverErr;
@@ -9143,9 +9366,10 @@ _showPuzzleSuccessOverlay() {
 			        );
 	      }
 
-				      // Re-render the opening card only if a server analysis result
-				      // carried one; otherwise the async Lichess lookup owns the card.
-				      if (this.analysisResults && this.analysisResults.opening) this._showOpeningInfo(this.analysisResults.opening);
+				      // Refresh the opening card so book classification is applied to the
+				      // now-populated analysis results. The async Lichess lookup will
+				      // call _showOpeningInfo → _applyOpeningToResults when it resolves.
+				      this._refreshOpeningCard();
 				      await this._sprintReviewPlaybackTo(this.gameMoves.length - 1, { minDelay: 6, maxDelay: 22 });
 			      this._showReviewSummary();
 	      this._renderMoveList();
@@ -9162,11 +9386,13 @@ _showPuzzleSuccessOverlay() {
 	      });
 			    } finally {
 				      this.isAnalyzing = false;
+    this._setBusyAction(null);
 				      this._stopReviewPlayback();
 			      this._setEngineControlsDisabled(false);
 			      this._syncActionButtons();
 			      this.elReviewBtnText.textContent = this.analysisResults ? 'Re-analyze Game' : 'Start Review';
-		      this.elProgressBar.style.display = 'none';
+		      if (this.elProgressBar) this.elProgressBar.style.display = 'none';
+		      if (this.elReviewProgressPct) this.elReviewProgressPct.hidden = true;
 		      if (!this.analysisResults) {
 		        this._clearReviewExtras();
 		        this.elReviewSummary.style.display = 'none';
@@ -9178,9 +9404,16 @@ _showPuzzleSuccessOverlay() {
 			  async _analyzeGameOnServer() {
 				    const reviewProfile = this._getReviewProfile();
 				    this.elReviewBtnText.textContent = 'Sending to Server...';
-		    this.elProgressFill.style.width = '8%';
+		    if (this.elProgressFill) this.elProgressFill.style.width = '8%';
+		    if (this.elReviewProgressPct) {
+		      this.elReviewProgressPct.hidden = false;
+		      this.elReviewProgressPct.textContent = '8%';
+		    }
 		    const controller = new AbortController();
-			    const timeout = setTimeout(() => controller.abort(), 180000);
+		    this._reviewAbortController = controller;
+		    this._reviewAbortControllerAbortedByTimeout = false;
+		    if (this.elBtnStopReview) this.elBtnStopReview.style.display = '';
+			    const timeout = setTimeout(() => { this._reviewAbortControllerAbortedByTimeout = true; controller.abort(); }, 180000);
 			    // No _startReviewPlayback here: the streaming endpoint emits per-move
 			    // progress events and _readServerAnalysisStream drives the playback,
 			    // progress bar, and board overlay itself — a second playback loop
@@ -9197,23 +9430,15 @@ _showPuzzleSuccessOverlay() {
 			          headers: this.gameHeaders || {},
 			          initialFen: this.initialFen,
 				          profile: (() => {
-				            // Boost "stronger" review always uses the Thorough tier
-				            // (depth 18 / ~2s), regardless of the user's selected
-				            // review strength. Otherwise send the resolved profile
-				            // (tier or advanced override). The server clamps + maps
-				            // these onto its review profile (analyze.js).
-				            const strong = !!this.engineSettings.serverStrongReview && this._isPaidOrAbove('boost');
-				            const tier = strong
-				              ? (window.getReviewStrengthTier ? window.getReviewStrengthTier('thorough') : getReviewStrengthTier('thorough'))
-				              : reviewProfile;
-				            return {
-				              key: strong ? 'thorough' : reviewProfile.key,
-				              strength: strong ? 'strong' : 'standard',
-				              depth: tier.depth,
-				              multiPv: tier.multiPv,
-				              timeoutMs: tier.timeoutMs,
-				              serverEngine: strong ? 'full' : 'lite',
-				            };
+				            const serverStrength = this.engineSettings.serverStrength || 'normal';
+				            if (serverStrength === 'fast') {
+				              return { key: 'fast', strength: 'fast', depth: 10, multiPv: 2, timeoutMs: 3000, serverEngine: 'lite' };
+				            }
+				            if (serverStrength === 'strong' && this._isPaidOrAbove('boost')) {
+				              const tier = window.getReviewStrengthTier ? window.getReviewStrengthTier('thorough') : getReviewStrengthTier('thorough');
+				              return { key: 'thorough', strength: 'strong', depth: tier.depth, multiPv: tier.multiPv, timeoutMs: tier.timeoutMs, serverEngine: 'full' };
+				            }
+				            return { key: reviewProfile.key, strength: 'standard', depth: reviewProfile.depth, multiPv: reviewProfile.multiPv, timeoutMs: reviewProfile.timeoutMs, serverEngine: 'lite' };
 				          })()
 			        }),
 			      });
@@ -9222,7 +9447,8 @@ _showPuzzleSuccessOverlay() {
 			        throw new Error(text || `Server analysis failed with ${response.status}`);
 			      }
 			      const data = await this._readServerAnalysisStream(response, controller.signal);
-			      this.elProgressFill.style.width = '100%';
+			      if (this.elProgressFill) this.elProgressFill.style.width = '100%';
+			      if (this.elReviewProgressPct) this.elReviewProgressPct.textContent = '100%';
 			      // The streaming endpoint emits an 'error' event (which
 			      // _readServerAnalysisStream re-throws) when the Stockfish warm-up
 			      // fails or the engine misbehaves, so these guards on the final
@@ -9238,10 +9464,18 @@ _showPuzzleSuccessOverlay() {
 			      }
 			      return this._serverAnalysisResultsFromData(data);
 			    } catch (err) {
-			      if (err.name === 'AbortError') throw new Error('Server review timed out.');
+			      if (err.name === 'AbortError') {
+			        if (this._reviewAbortController?.signal.aborted && !this._reviewAbortControllerAbortedByTimeout) {
+			          throw new Error('Server review cancelled.');
+			        }
+			        throw new Error('Server review timed out.');
+			      }
 			      throw err;
 			    } finally {
 			      clearTimeout(timeout);
+			      this._reviewAbortController = null;
+			      this._reviewAbortControllerAbortedByTimeout = false;
+			      if (this.elBtnStopReview) this.elBtnStopReview.style.display = 'none';
 			    }
 				  }
 
@@ -9250,6 +9484,10 @@ _showPuzzleSuccessOverlay() {
 				    const decoder = new TextDecoder();
 				    let buffer = '';
 				    let finalData = null;
+				    // Track the furthest progress reached so the board overlay
+				    // percentage never jumps backwards (mid/deep passes refine
+				    // critical moments scattered through the game).
+				    let maxPct = 0;
 				    const handleEvent = (raw) => {
 				      const lines = raw.split(/\r?\n/);
 				      let event = 'message';
@@ -9273,17 +9511,32 @@ _showPuzzleSuccessOverlay() {
 				      } else if (event === 'progress') {
 				        const completed = Math.max(0, Number(data.completed) || 0);
 				        const total = Math.max(1, Number(data.total) || 1);
-				        const pct = 10 + Math.round((completed / total) * 84);
-				        this.elProgressFill.style.width = `${clamp(pct, 10, 96)}%`;
+				        // Map the game move index to a percentage: move 1 = 1%,
+				        // final move = 100%. Falls back to the per-pass count when
+				        // the server doesn't send moveIndex/totalMoves.
+				        const totalMoves = Math.max(1, Number(data.totalMoves) || total);
+				        const moveIndex = Number.isFinite(Number(data.moveIndex))
+				          ? Math.max(0, Math.min(Number(data.moveIndex), totalMoves - 1))
+				          : completed;
+				        // Move 1 = 1%, final move = 100% (linear across the game).
+				        const pct = Math.max(maxPct, totalMoves > 1
+				          ? 1 + Math.round((moveIndex / (totalMoves - 1)) * 99)
+				          : 100);
+				        maxPct = pct;
+				        if (this.elProgressFill) this.elProgressFill.style.width = `${clamp(pct, 1, 100)}%`;
+				        if (this.elReviewProgressPct) {
+				          this.elReviewProgressPct.hidden = false;
+				          this.elReviewProgressPct.textContent = `${clamp(pct, 1, 100)}%`;
+				        }
 				        this.elReviewBtnText.textContent = 'Reviewing Game';
 				        // Mirror onto the on-board overlay (centered, with progress).
-				        this.board.setLoadingProgress(clamp(pct, 0, 100), `Reviewing ${completed}/${total}`);
-				        this._sprintReviewPlaybackTo(completed - 1, { minDelay: 12, maxDelay: 58 });
+				        this.board.setLoadingProgress(clamp(pct, 1, 100), `Reviewing move ${moveIndex + 1} of ${totalMoves}`);
+				        this._sprintReviewPlaybackTo(moveIndex, { minDelay: 12, maxDelay: 58 });
 				        this._updateLiveEvalPanel({
 				          busy: true,
 				          score: null,
-				          line: 'Reviewing Game',
-				          meta: `${completed}/${total} positions`,
+				          line: data.label || 'Reviewing Game',
+				          meta: `Move ${moveIndex + 1} of ${totalMoves}`,
 				        });
 				      } else if (event === 'complete') {
 				        finalData = data;
@@ -9348,6 +9601,7 @@ _showPuzzleSuccessOverlay() {
     }
 
     this.elOpeningInfo.style.display = 'flex';
+    this.elOpeningName.classList.remove('loading');
     this.elOpeningName.textContent = `${opening.name}${opening.eco ? ` (${opening.eco})` : ''}`;
     // Stats (White/Draw/Black from Lichess) if present.
     if (opening.stats) {
@@ -9357,6 +9611,63 @@ _showPuzzleSuccessOverlay() {
       this.elOpeningStats.hidden = true;
       this.elOpeningStats.innerHTML = '';
     }
+    this._showOpeningControls();
+
+    // Apply book classification: reclassify moves within the opening ply
+    // as BOOK (they follow a known opening line). This runs after the
+    // Lichess opening data arrives so isInBook gates work correctly even
+    // though detectOpening() is a no-op during analysis.
+    this._applyOpeningToResults(opening);
+  }
+
+  /**
+   * Reclassify moves that are within the matched opening line as BOOK.
+   * Opening data from the Lichess explorer carries a `ply` value that tells
+   * us how many half-moves are in the recognised book line. Since
+   * detectOpening() is a no-op during analysis, we apply this post-hoc.
+   *
+   * A move is stamped BOOK when:
+   *  - Its index is strictly less than opening.ply
+   *  - Its cpLoss is <= 30 (small eval wobble, not a real opening mistake)
+   *  - The opponent didn't just blunder (we don't hide a follow-up error)
+   *
+   * This mirrors the logic in chess-core.js classifyMove() for the BOOK
+   * case, but runs after the fact so the async Lichess data doesn't have
+   * to be available during the analysis loop.
+   */
+  _applyOpeningToResults(opening) {
+    const bookPly = opening.bookPly || opening.ply || 0;
+    if (!bookPly || bookPly < 2) return;
+
+    // Apply to stored analysis results (browser or server).
+    const applyToArray = (arr) => {
+      if (!Array.isArray(arr)) return;
+      for (let i = 0; i < Math.min(arr.length, bookPly); i++) {
+        const result = arr[i];
+        if (!result || result.classificationKey === 'BOOK') continue;
+
+        // Mirror the classifyMove gates: isInBook + low cpLoss + !opponentJustBlundered
+        const cpLoss = Math.abs(result.cpLoss || 0);
+        if (cpLoss <= 30 && !result.opponentJustBlundered) {
+          result.isInBook = true;
+          result.classification = MoveClassification.BOOK;
+          result.classificationKey = 'BOOK';
+        }
+      }
+    };
+
+    // Apply to analysis results (the full game review).
+    if (this.analysisResults && Array.isArray(this.analysisResults)) {
+      applyToArray(this.analysisResults);
+    }
+
+    // Apply to live results (in-game analysis).
+    if (this.liveMoveResults && Array.isArray(this.liveMoveResults)) {
+      applyToArray(this.liveMoveResults);
+    }
+
+    // Re-render the move list so BOOK badges appear.
+    this._renderMoveList();
   }
 
   // Show the opening card in a loading state while the Lichess lookup is in
@@ -9367,11 +9678,76 @@ _showPuzzleSuccessOverlay() {
     this.elOpeningName.textContent = 'Looking up opening…';
     this.elOpeningStats.hidden = true;
     this.elOpeningStats.innerHTML = '';
+    this._showOpeningControls();
+  }
+
+  // Reveal the source toggle (+ filters when Lichess is selected) and sync the
+  // active button/chip states to the current selection.
+  _showOpeningControls() {
+    if (!this.elOpeningControls) return;
+    this._renderOpeningControls();
+    this.elOpeningControls.hidden = false;
+  }
+
+  // Sync the toggle/chips to this._openingSource / this._openingFilters, then
+  // show/hide the filter row (Lichess only).
+  _renderOpeningControls() {
+    if (!this.elOpeningControls) return;
+    const source = this._openingSource || 'masters';
+    this.elOpeningControls.querySelectorAll('.opening-source-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.source === source);
+    });
+    if (this.elOpeningFilters) {
+      this.elOpeningFilters.hidden = source !== 'lichess';
+      const filters = this._openingFilters || { speeds: [], ratings: [] };
+      this.elOpeningFilters.querySelectorAll('.opening-chips').forEach((group) => {
+        const key = group.dataset.filter; // 'speeds' | 'ratings'
+        const selected = new Set((filters[key] || []).map(String));
+        group.querySelectorAll('.opening-chip').forEach((chip) => {
+          chip.classList.toggle('active', selected.has(chip.dataset.val));
+        });
+      });
+    }
+  }
+
+  // One-time bind for the source toggle + filter chips. Switching source or a
+  // filter re-runs the lookup for the current game with the new selection.
+  _initOpeningControls() {
+    if (!this.elOpeningControls) return;
+    this.elOpeningControls.querySelectorAll('.opening-source-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const next = btn.dataset.source || 'masters';
+        if (next === this._openingSource) return;
+        this._openingSource = next;
+        try { localStorage.setItem('openingSource', next); } catch (_) {}
+        this._renderOpeningControls();
+        this._refreshOpeningCard();
+      });
+    });
+    if (this.elOpeningFilters) {
+      this.elOpeningFilters.querySelectorAll('.opening-chip').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          const group = chip.closest('.opening-chips');
+          const key = group.dataset.filter; // 'speeds' | 'ratings'
+          const val = key === 'ratings' ? parseInt(chip.dataset.val, 10) : chip.dataset.val;
+          const arr = this._openingFilters[key] || [];
+          const idx = arr.indexOf(val);
+          if (idx >= 0) arr.splice(idx, 1); else arr.push(val);
+          // Keep a stable order for cache keys + readability.
+          if (key === 'ratings') arr.sort((a, b) => a - b);
+          else arr.sort();
+          try { localStorage.setItem('openingFilters', JSON.stringify(this._openingFilters)); } catch (_) {}
+          this._renderOpeningControls();
+          this._refreshOpeningCard();
+        });
+      });
+    }
   }
 
   _openingStatsHtml(stats) {
+    const noun = this._openingSource === 'lichess' ? 'lichess games' : 'master games';
     const cell = (label, pct, cls) => `<span class="opening-stat ${cls}"><span class="opening-stat-val">${pct}%</span><span class="opening-stat-label">${label}</span></span>`;
-    return `<span class="opening-stat-total">${(stats.total || 0).toLocaleString()} master games</span>`
+    return `<span class="opening-stat-total">${(stats.total || 0).toLocaleString()} ${noun}</span>`
       + cell('White', stats.whitePct ?? 0, 'owin')
       + cell('Draw', stats.drawsPct ?? 0, 'odraw')
       + cell('Black', stats.blackPct ?? 0, 'oloss');
@@ -9393,55 +9769,147 @@ _showPuzzleSuccessOverlay() {
     return uci;
   }
 
-  // Look up the opening name + W/D/B stats from the Lichess Masters explorer
-  // (via our /api/opening-explorer proxy). Cached per UCI sequence. Returns an
-  // opening object shaped for _showOpeningInfo ({name, eco, stats}) or null.
+  // Look up the opening name + W/D/B stats from the Lichess explorer
+  // (via our /api/opening-explorer proxy). Cached per (uci-sequence + source +
+  // filters) so switching source/filters re-fetches. Returns an opening object
+  // shaped for _showOpeningInfo ({name, eco, stats}) or null. The fetch has a
+  // bounded timeout so a hung explorer host can never spin the card forever.
+  // Minimum total game count from the Lichess explorer for a position to be
+  // considered "in the opening book." Positions with very few games are likely
+  // beyond the main theoretical line, even if the explorer returns an opening
+  // name for them.
+  static get MIN_BOOK_GAMES() { return 10; }
+
+  // Probe a single position with `probePly` half-moves and return the total
+  // game count from the explorer, or -1 on failure. Used by _determineBookPly
+  // to binary-search for the true opening boundary.
+  async _probeOpeningTotal(sanMoves, probePly, source, filters) {
+    const play = this._sanMovesToUciPlay(sanMoves, probePly);
+    if (!play) return -1;
+    const key = `${play}|${source}|${(filters.speeds || []).join(',')}|${(filters.ratings || []).join(',')}`;
+    // Reuse main cache if available.
+    if (this._openingCache.has(key)) {
+      const cached = this._openingCache.get(key);
+      if (cached && cached.stats) return cached.stats.total;
+      return -1;
+    }
+    try {
+      const params = new URLSearchParams({ play, variant: source });
+      if (source === 'lichess') {
+        if (filters.speeds && filters.speeds.length) params.set('speeds', filters.speeds.join(','));
+        if (filters.ratings && filters.ratings.length) params.set('ratings', filters.ratings.join(','));
+      }
+      const res = await this._fetchWithTimeout(
+        `/api/opening-explorer?${params.toString()}`,
+        { headers: { Accept: 'application/json' }, cache: 'no-store' },
+        8000
+      );
+      if (!res.ok) return -1;
+      const data = await res.json();
+      return (data && typeof data.total === 'number') ? data.total : -1;
+    } catch (_) {
+      return -1;
+    }
+  }
+
+  // Binary-search the true opening book depth (in plies) by probing the Lichess
+  // explorer with progressively shorter move sequences. A position is considered
+  // "in book" if its total game count >= MIN_BOOK_GAMES. This prevents moves
+  // past the main opening line from being classified as BOOK just because they
+  // happen to have low cpLoss.
+  async _determineBookPly(sanMoves, maxPly) {
+    if (maxPly <= 4) return maxPly;
+    const source = this._openingSource || 'masters';
+    const filters = this._openingFilters || { speeds: [], ratings: [] };
+    let lo = 2, hi = maxPly;
+    // Binary search for the largest ply where total >= MIN_BOOK_GAMES.
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      const total = await this._probeOpeningTotal(sanMoves, mid, source, filters);
+      if (total >= ChessReviewApp.MIN_BOOK_GAMES) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return lo;
+  }
+
   async _fetchOpeningFromLichess(sanMoves, ply) {
     const play = this._sanMovesToUciPlay(sanMoves, ply);
     if (!play) return null;
-    if (this._openingCache.has(play)) return this._openingCache.get(play);
+    const source = this._openingSource || 'masters';
+    const filters = this._openingFilters || { speeds: [], ratings: [] };
+    const cacheKey = `${play}|${source}|${(filters.speeds || []).join(',')}|${(filters.ratings || []).join(',')}`;
+    if (this._openingCache.has(cacheKey)) return this._openingCache.get(cacheKey);
     try {
-      const res = await apiFetch(`/api/opening-explorer?play=${encodeURIComponent(play)}`, { headers: { Accept: 'application/json' }, cache: 'no-store' });
-      if (!res.ok) { this._openingCache.set(play, null); return null; }
+      const params = new URLSearchParams({ play, variant: source });
+      if (source === 'lichess') {
+        if (filters.speeds && filters.speeds.length) params.set('speeds', filters.speeds.join(','));
+        if (filters.ratings && filters.ratings.length) params.set('ratings', filters.ratings.join(','));
+      }
+      const res = await this._fetchWithTimeout(`/api/opening-explorer?${params.toString()}`, { headers: { Accept: 'application/json' }, cache: 'no-store' }, 8000);
+      if (!res.ok) { this._openingCache.set(cacheKey, null); return null; }
       const data = await res.json();
-      if (!data || data.error || !data.opening) { this._openingCache.set(play, null); return null; }
+      // Lichess variant may return null opening name (only stats); still show stats.
       const opening = {
-        name: data.opening.name,
-        eco: data.opening.eco,
+        name: (data && data.opening && data.opening.name) || (source === 'lichess' ? 'Lichess games' : ''),
+        eco: (data && data.opening && data.opening.eco) || '',
         ply,
-        stats: { total: data.total, whitePct: data.whitePct, drawsPct: data.drawsPct, blackPct: data.blackPct },
+        // bookPly will be refined below via binary search — starts equal to ply.
+        bookPly: ply,
+        stats: { total: (data && data.total) || 0, whitePct: (data && data.whitePct) || 0, drawsPct: (data && data.drawsPct) || 0, blackPct: (data && data.blackPct) || 0 },
       };
-      this._openingCache.set(play, opening);
+      // If there's truly no data (empty counts AND no name), treat as no opening.
+      if (!opening.stats.total && !opening.name) { this._openingCache.set(cacheKey, null); return null; }
+      // Refine the book ply by probing shorter move sequences. This avoids
+      // classifying natural middlegame moves (e.g. a simple queen trade) as
+      // "book" just because they happen to have low cpLoss. The binary search
+      // makes at most ceil(log2(ply)) = ~4 extra API calls, which are cached.
+      opening.bookPly = await this._determineBookPly(sanMoves, ply);
+      this._openingCache.set(cacheKey, opening);
       return opening;
     } catch (_) {
-      this._openingCache.set(play, null);
+      this._openingCache.set(cacheKey, null);
       return null;
     }
   }
 
   // Drive the opening card for the currently loaded game: show a loading state,
   // fetch from Lichess, then render. Called after a game loads and after
-  // analysis completes. The Masters explorer is an OPENING tool — it names the
-  // opening from the first ~10-16 plies, so we cap the lookup there. Sending a
-  // full 90-ply game (a) is pointless (the name doesn't change past the opening)
-  // and (b) makes Lichess reject the query. 16 plies covers any main-line name.
+  // analysis completes. The explorer is an OPENING tool — it names the opening
+  // from the first ~10-16 plies, so we cap the lookup there. 16 plies covers any
+  // main-line name. try/finally GUARANTEES the loading spinner is cleared even
+  // if the fetch hangs (paired with the bounded timeout in the fetch).
   async _refreshOpeningCard() {
     const OPENING_PLY = 16;
     const moves = this.gameMoves || [];
     if (!moves.length) { this._showOpeningInfo(null); return; }
     const ply = Math.min(OPENING_PLY, moves.length);
-    // Guard against stale lookups racing a new game load.
+    // Guard against stale lookups racing a new game load / source switch.
     const token = (this._openingToken = (this._openingToken || 0) + 1);
     const play = this._sanMovesToUciPlay(moves, ply);
-    const cached = play ? this._openingCache.get(play) : null;
+    const source = this._openingSource || 'masters';
+    const filters = this._openingFilters || { speeds: [], ratings: [] };
+    const cacheKey = `${play}|${source}|${(filters.speeds || []).join(',')}|${(filters.ratings || []).join(',')}`;
+    const cached = play ? this._openingCache.get(cacheKey) : null;
     if (cached) { if (token === this._openingToken) this._showOpeningInfo(cached); return; }
     this._showOpeningLoading();
-    const opening = await this._fetchOpeningFromLichess(moves, ply);
-    if (token !== this._openingToken) return; // a newer load superseded us
-    if (opening) this._showOpeningInfo(opening);
-    else {
-      this.elOpeningName.classList.remove('loading');
-      this.elOpeningInfo.style.display = 'none';
+    try {
+      const opening = await this._fetchOpeningFromLichess(moves, ply);
+      if (token !== this._openingToken) return; // a newer load superseded us
+      if (opening) this._showOpeningInfo(opening);
+      else {
+        this.elOpeningName.classList.remove('loading');
+        this.elOpeningInfo.style.display = 'none';
+      }
+    } catch (_) {
+      // Fetch threw (timeout/network). If we're still the active lookup, clear
+      // the spinner + hide the card so it never spins forever.
+      if (token === this._openingToken) {
+        this.elOpeningName.classList.remove('loading');
+        this.elOpeningInfo.style.display = 'none';
+      }
     }
   }
 
@@ -9572,7 +10040,7 @@ _showPuzzleSuccessOverlay() {
 	      .map(([key, label]) => {
 	        const cls = MoveClassification[key];
 	        return `<div class="summary-count-row" title="${cls.description}" aria-label="${counts[key]} ${label} moves">
-	          <span class="${this._classificationIconClass(cls, 'dot')}" style="background:${cls.color}" aria-hidden="true">${this._classificationGlyph(cls)}</span>
+	          ${this._classificationIconHtml(cls, 'dot')}
 	          <span class="label">${label}</span>
 	          <span class="count">${counts[key]}</span>
 	        </div>`;
@@ -9618,7 +10086,7 @@ _showPuzzleSuccessOverlay() {
       btn.className = 'critical-item';
 	      btn.type = 'button';
 	      btn.innerHTML = `
-	        <span class="${this._classificationIconClass(moment.classification, 'critical-badge')}" style="background:${moment.classification.color}" aria-hidden="true">${this._classificationGlyph(moment.classification)}</span>
+	        ${this._classificationIconHtml(moment.classification, 'critical-badge')}
 	        <span class="critical-text">${moment.moveNumber}${moment.isWhite ? '. ' : '... '}${moment.moveSan}</span>
 	        <span class="critical-loss">${Math.round(moment.cpLoss)} cp</span>
 	      `;
@@ -9649,21 +10117,17 @@ _showPuzzleSuccessOverlay() {
 	    if (this.elInsightEndgameRow) this.elInsightEndgameRow.hidden = true;
 	    if (this.elInsightEndgame) this.elInsightEndgame.textContent = '--';
 	    this.elInsightCoach.textContent = '';
+	    if (this.elInsightCoachResult) { this.elInsightCoachResult.hidden = true; this.elInsightCoachResult.innerHTML = ''; }
 	    if (this.elBtnLineExplorer) this.elBtnLineExplorer.disabled = true;
-    if (this.elBtnReturnExplorer) this.elBtnReturnExplorer.hidden = !this.explorerReturnState && !this.exploreLineMode;
+    {
+      const inSub = this.activeLine && this.activeLine.kind === 'sub';
+      if (this.elBtnReturnExplorer) this.elBtnReturnExplorer.hidden = !this.explorerReturnState && !inSub;
+    }
     this.elInsightAlternatives.innerHTML = '';
     if (this.elInsightGate) this.elInsightGate.hidden = true;
   }
 
-  // Bind the insight-gate "Maybe later" dismiss (once). Per-browser dismissal.
-  _bindInsightGateClose() {
-    if (!this.elInsightGateClose || this.elInsightGateClose.dataset.bound) return;
-    this.elInsightGateClose.dataset.bound = '1';
-    this.elInsightGateClose.addEventListener('click', () => {
-      if (this.elInsightGate) this.elInsightGate.hidden = true;
-      try { window.localStorage.setItem('sidastuff.insightGateDismissed', '1'); } catch (_) {}
-    });
-  }
+  // (Removed: insight-gate "Maybe later" dismiss — gate now always shows for guests.)
 
   // Re-evaluate the move-insights gate when auth state changes (e.g. after
   // sign-in): if a move is selected, re-render it so locked content opens.
@@ -9688,28 +10152,21 @@ _showPuzzleSuccessOverlay() {
     if (this.elInsightEmpty) this.elInsightEmpty.style.display = 'none';
 
     // Feature gate: guests see only a teaser (move + classification) with a
-    // sign-up prompt; the detailed rows, coach text, Explore Line, and Top
-    // Engine Lines stay locked until they sign in. Respect a per-browser
-    // dismissal so it doesn't nag. NEVER show the gate while auth is still
-    // resolving — a signed-in user's authState.user can be null on first paint
+    // sign-up prompt; the detailed rows, coach text, Explore Best Move, and Top
+    // Engine Lines stay locked until they sign in. The gate always shows for
+    // guests (no dismissal). NEVER show the gate while auth is still resolving
+    // — a signed-in user's authState.user can be null on first paint
     // (Firebase onAuthStateChanged is async), and we re-render on resolve.
     const gateState = this._authGateState();
     if (gateState === 'guest') {
-      let dismissed = false;
-      try { dismissed = window.localStorage.getItem('sidastuff.insightGateDismissed') === '1'; } catch (_) {}
       if (this.elInsightContent) this.elInsightContent.style.display = 'none';
       if (this.elInsightGate) {
-        this.elInsightGate.hidden = dismissed;
-        if (!dismissed) {
-          if (this.elInsightGateMove) {
-            this.elInsightGateMove.textContent = `${result.moveNumber}${result.isWhite ? '. ' : '... '}${result.moveSan || result.move}`;
-          }
-          if (this.elInsightGateClass) {
-            this.elInsightGateClass.textContent = result.classification.name;
-            this.elInsightGateClass.style.background = result.classification.color;
-            this.elInsightGateClass.style.color = '#fff';
-          }
-          this._bindInsightGateClose();
+        this.elInsightGate.hidden = false;
+        if (this.elInsightGateMove) {
+          this.elInsightGateMove.textContent = `${result.moveNumber}${result.isWhite ? '. ' : '... '}${result.moveSan || result.move}`;
+        }
+        if (this.elInsightGateClass) {
+          this.elInsightGateClass.textContent = result.classification.name;
         }
       }
       return;
@@ -9754,8 +10211,17 @@ _showPuzzleSuccessOverlay() {
     if (this.elBtnLineExplorer) {
       this.elBtnLineExplorer.disabled = !result.bestMove || result.bestMove === result.moveUci;
       this.elBtnLineExplorer.dataset.moveIndex = String(result.moveIndex);
+      // Remember the active result context so "Explore Best Move" works for
+      // sub-line moves too (where the result lives in a sub-line, not in
+      // analysisResults/liveMoveResults).
+      this._lastInsightResult = result;
     }
-    if (this.elBtnReturnExplorer) this.elBtnReturnExplorer.hidden = !this.explorerReturnState && !this.exploreLineMode;
+    // "Back to Main Line" is visible while viewing a sub-line or a best-move
+    // preview; hidden on the main line.
+    if (this.elBtnReturnExplorer) {
+      const inSub = this.activeLine && this.activeLine.kind === 'sub';
+      this.elBtnReturnExplorer.hidden = !this.bestMovePreview && !inSub;
+    }
 
     this._renderAlternatives(result);
   }
@@ -9776,24 +10242,19 @@ _showPuzzleSuccessOverlay() {
     this.elInsightAlternatives.innerHTML = `<div class="alt-title">Top Engine Lines</div>${rows}`;
   }
 
-	  async _exploreLineFromCurrentMove() {
+	  // "Explore Best Move": show the engine's recommended move on the board as
+	  // a read-only preview of the position AFTER it. No new moves can be played
+	  // from it — the user is just looking. Clicking elsewhere (another move in
+	  // the list, the board, "Back to Main Line") exits the preview. This does
+	  // NOT enter explore-line mode or modify the move list.
+	  _exploreLineFromCurrentMove() {
 	    const index = Number(this.elBtnLineExplorer?.dataset.moveIndex ?? this.currentMoveIndex);
-	    const result = this.analysisResults?.[index] || this.liveMoveResults?.[index];
+	    // Prefer the insight result stored at render time — works for sub-line
+	    // moves whose result isn't in analysisResults/liveMoveResults.
+	    const result = this._lastInsightResult
+	      || this.analysisResults?.[index]
+	      || this.liveMoveResults?.[index];
 	    if (!result?.bestMove || result.bestMove === result.moveUci || !result.fen) return;
-	    if (!this.explorerReturnState) {
-	      this.explorerReturnState = {
-	        gameMoves: this.gameMoves.slice(),
-	        originalGameMoves: this.originalGameMoves.slice(),
-	        initialFen: this.initialFen,
-	        gameHeaders: { ...(this.gameHeaders || {}) },
-	        analysisResults: this.analysisResults,
-	        liveMoveResults: this.liveMoveResults.slice(),
-	        liveEvalHistory: this.liveEvalHistory.slice(),
-	        currentMoveIndex: this.currentMoveIndex,
-	        coachMode: { ...this.coachMode },
-	        boardFlipped: this.board.flipped,
-	      };
-	    }
 
 	    const branch = new Chess(result.fen);
 	    const move = branch.move({
@@ -9803,32 +10264,305 @@ _showPuzzleSuccessOverlay() {
 	    });
 	    if (!move) return;
 
-	    const prefix = this.gameMoves.slice(0, Math.max(0, index));
-	    this.gameMoves = [...prefix, move.san];
-	    this.chess = new Chess(this.initialFen);
-	    for (const san of this.gameMoves) this.chess.move(san, { sloppy: true });
-	    this.currentMoveIndex = this.gameMoves.length - 1;
-	    // NOTE: keep the review UI (summary, critical moments, insights) visible
-	    // during explore line — the user is just exploring a branch and can click
-	    // "Back to Review" to return. Only clear the per-move live results so the
-	    // engine evaluates the branched position fresh.
-	    this.liveMoveResults = [];
-	    this.liveEvalHistory = [];
-    this.exploreLineMode = true;
-    if (this.elBtnReturnExplorer) this.elBtnReturnExplorer.hidden = false;
-    this._setExplorerHint(`Exploring ${move.san} — play moves to analyze the branch, or click Back to Review.`);
-    this.board.setChessInstance(this.chess);
-    this._updateBoard();
-    this._renderMoveList();
-    this._updateCurrentMoveIndicator();
-    this._updateGameStatus();
-    this.board.setHighlights([{ square: move.from, type: 'best-from' }, { square: move.to, type: 'best-to' }]);
-    this._requestLiveEvaluation(`Exploring ${move.san}`, {
-      fenBefore: result.fen,
-      fenAfter: this.chess.fen(),
-      moveObj: move,
-      moveIndex: this.currentMoveIndex,
-    });
+	    // Show the post-best-move position as a transient preview. We swap the
+	    // board's chess instance to the position AFTER the best move so the
+	    // user sees what the engine recommends, but we do NOT advance
+	    // currentMoveIndex or change gameMoves — exiting the preview restores
+	    // the main-line board state. `bestMovePreview` holds the saved state
+	    // needed for _exitBestMovePreview().
+	    if (!this.bestMovePreview) {
+	      this.bestMovePreview = {
+	        savedChess: this.chess,
+	        savedIndex: this.currentMoveIndex,
+	        savedActiveLine: this.activeLine ? { ...this.activeLine } : { kind: 'main', index: this.currentMoveIndex },
+	      };
+	    }
+	    this.chess = branch;
+	    this.board.setChessInstance(this.chess);
+	    this._updateBoard();
+	    this.board.setHighlights([
+	      { square: move.from, type: 'best-from' },
+	      { square: move.to, type: 'best-to' },
+	    ]);
+	    this._setExplorerHint(`Best move: ${move.san}. This is a preview — click the board or a move to return.`);
+	    if (this.elBtnReturnExplorer) this.elBtnReturnExplorer.hidden = false;
+	    // Run a live evaluation on the explored position so the user sees
+	    // engine lines and feedback for the best-move continuation.
+	    this._requestLiveEvaluation(`Exploring ${move.san}`, {
+	      fenBefore: result.fen,
+	      fenAfter: this.chess.fen(),
+	      moveObj: move,
+	      moveIndex: index,
+	    });
+	  }
+
+	  // Exit the "Explore Best Move" preview and restore the main-line board.
+	  _exitBestMovePreview() {
+	    if (!this.bestMovePreview) return;
+	    const saved = this.bestMovePreview;
+	    this.bestMovePreview = null;
+	    this.chess = saved.savedChess;
+	    this.currentMoveIndex = saved.savedIndex;
+	    if (saved.savedActiveLine) this.activeLine = { ...saved.savedActiveLine };
+	    this.board.setChessInstance(this.chess);
+	    this._updateBoard();
+	    this._setExplorerHint('');
+	    const inSub = this.activeLine && this.activeLine.kind === 'sub';
+	    if (this.elBtnReturnExplorer) this.elBtnReturnExplorer.hidden = !this.explorerReturnState && !inSub;
+	    // Re-apply the highlights/insights for the restored position.
+	    if (inSub) {
+	      // We were previewing from a sub-line move: re-run sub-line navigation.
+	      this._goToLine({
+	        kind: 'sub',
+	        parentIndex: this.activeLine.parentIndex,
+	        subIndex: this.activeLine.subIndex,
+	        moveIndex: this.activeLine.moveIndex,
+	      });
+	    } else {
+	      const idx = this.currentMoveIndex;
+	      this.currentMoveIndex = -2;
+	      this._goToMove(idx);
+	    }
+	  }
+
+  // ── Coach overview (per-move + game-wide) ──────────────────────────────
+  // Sends compact review data to /api/coach/overview (fast model, quota-gated)
+  // and streams a short, plain-language explanation. Skeleton while loading;
+  // a "Chat more" button hands off to a new seeded coach chat.
+
+  // Compact per-move context for the overview prompt (only what the prompt
+  // needs — keeps the payload tiny vs. shipping the full result objects).
+  _compactMove(result) {
+    if (!result) return null;
+    return {
+      moveNumber: result.moveNumber,
+      isWhite: !!result.isWhite,
+      moveSan: result.moveSan || result.move || '',
+      classificationKey: result.classificationKey,
+      evalBefore: result.evalBefore,
+      evalAfter: result.evalAfter,
+      swing: result.swing,
+      cpLoss: result.cpLoss,
+      bestMoveSan: result.bestMoveSan,
+      phase: result.phase,
+      fen: result.fen,
+    };
+  }
+
+  // Compact game context: summary + the most critical moves' data.
+  _compactGame() {
+    const results = this.analysisResults || [];
+    const criticalMoments = Array.isArray(results.criticalMoments) ? results.criticalMoments : [];
+    const critical = criticalMoments.slice(0, 6)
+      .map((m) => this._compactMove(m))
+      .filter(Boolean);
+    return {
+      moves: (this.gameMoves || []).slice(0, 200),
+      headers: this.gameHeaders || {},
+      opening: results.opening || null,
+      whiteAccuracy: results.whiteAccuracy,
+      blackAccuracy: results.blackAccuracy,
+      whiteAcpl: results.whiteAcpl,
+      blackAcpl: results.blackAcpl,
+      criticalMoments: critical,
+      // results array the move-scope prompt indexes into (compact each entry)
+      results: results.map((r) => this._compactMove(r)).filter(Boolean),
+    };
+  }
+
+  // Shared driver: show skeleton in `target`, stream tokens, render + Chat-more.
+  // `scope` is 'move' | 'game'; `extra` carries moveIndex for move scope.
+  async _streamCoachOverview(target, scope, extra = {}, _retryCount = 0) {
+    if (!target) return;
+    const token = (this._coachOverviewToken = (this._coachOverviewToken || 0) + 1);
+    // Abort any in-flight overview request (per-element controller).
+    if (this._coachOverviewController) { try { this._coachOverviewController.abort(); } catch (_) {} }
+
+    const game = this._compactGame();
+    if (!game.results.length) {
+      this._showCoachQuotaOrError(target, 'Run a review first, then ask the coach.');
+      return;
+    }
+
+    target.hidden = false;
+    target.innerHTML = this._coachSkeletonHtml();
+
+    const controller = new AbortController();
+    this._coachOverviewController = controller;
+    let text = '';
+    let cameBackEmpty = false;
+    try {
+      const res = await window.apiFetch('/api/coach/overview', {
+        method: 'POST',
+        headers: await this._authHeaders({ 'Content-Type': 'application/json', Accept: 'text/event-stream' }),
+        signal: controller.signal,
+        cache: 'no-store',
+        body: JSON.stringify(Object.assign({ scope, game }, extra)),
+      });
+      if (!res.ok) {
+        const msg = await res.text().catch(() => '');
+        throw new Error(msg || `Coach failed (${res.status})`);
+      }
+      await this._readCoachOverviewStream(res, {
+        onToken: (t) => { if (token !== this._coachOverviewToken) return; text += t; this._renderCoachOverviewText(target, text, false); },
+        onQuota: (data) => { if (token !== this._coachOverviewToken) return; this._showCoachQuotaOrError(target, data && data.error); },
+        onError: (data) => { if (token !== this._coachOverviewToken) return; this._onCoachOverviewError(target, data, scope, extra, _retryCount, controller); return; },
+      });
+      if (token === this._coachOverviewToken && text) {
+        this._renderCoachOverviewText(target, text, true);
+      }
+    } catch (err) {
+      if (controller.signal.aborted) return; // superseded by a newer request
+      // empty_reply is handled by the stream error handler above; other errors
+      // that reach here are network/fetch-level failures.
+      if (err && err.message && err.message.includes('empty_reply')) return;
+      this._showCoachQuotaOrError(target, err && err.message ? err.message : 'Coach is unavailable. Try again.');
+    }
+  }
+
+  // Handle overview stream errors. empty_reply auto-retries once; others show
+  // the error UI. Returns true if the error was handled (no further action needed).
+  _onCoachOverviewError(target, data, scope, extra, retryCount, controller) {
+    if (controller.signal.aborted) return;
+    if (data && data.code === 'empty_reply') {
+      if (retryCount < 1) {
+        console.log('[coach] empty reply, retrying once');
+        this._streamCoachOverview(target, scope, extra, retryCount + 1);
+        return;
+      }
+      this._showCoachQuotaOrError(target, 'No explanation right now — the coach came back empty. Try again in a moment.');
+      return;
+    }
+    this._showCoachQuotaOrError(target, data && (data.error || data.code));
+  }
+
+  // Minimal SSE reader for the overview endpoint (init|token|done|error).
+  async _readCoachOverviewStream(res, { onToken, onQuota, onError }) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        // Flush any remaining data in the buffer (the last event may not have
+        // a trailing \n\n, causing the stream to cut off mid-response).
+        if (buf.trim()) {
+          const lines = buf.split('\n');
+          let event = 'message';
+          const dataLines = [];
+          for (const line of lines) {
+            if (line.startsWith('event:')) event = line.slice(6).trim();
+            else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+          }
+          if (dataLines.length) {
+            let data = {};
+            try { data = JSON.parse(dataLines.join('\n')); } catch (_) {}
+            if (event === 'token' && data.text) onToken(data.text);
+            else if (event === 'error') {
+              if (data.code === 'quota_exceeded') onQuota(data);
+              else onError(data);
+            }
+          }
+        }
+        break;
+      }
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        let event = 'message';
+        let dataStr = '';
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
+        }
+        let data = {};
+        try { data = dataStr ? JSON.parse(dataStr) : {}; } catch (_) {}
+        if (event === 'token' && data.text) onToken(data.text);
+        else if (event === 'error') {
+          if (data.code === 'quota_exceeded') onQuota(data);
+          else onError(data);
+        }
+      }
+    }
+  }
+
+  _coachSkeletonHtml() {
+    return `<div class="coach-skeleton">${this._renderSkeletonLines(3, 'coach-skeleton-line')}</div>`;
+  }
+
+  // Render the streaming/done overview text + a Chat-more button when done.
+  // Renders markdown (the coach responds in GFM) — reuses the same
+  // renderMarkdown logic as the coach chat for consistency.
+  _renderCoachOverviewText(target, text, done) {
+    const chatMore = done
+      ? `<button class="btn btn-secondary btn-small coach-chat-more" type="button"><span class="btn-content"><span class="material-symbols-outlined btn-symbol">forum</span><span class="btn-label">Chat more</span></span></button>`
+      : '';
+    const rendered = this._renderMarkdown(text);
+    target.innerHTML = `<div class="coach-overview-text${done ? '' : ' streaming'}">${rendered}${done ? '' : '<span class="coach-cursor"></span>'}</div>${chatMore}`;
+    if (done) {
+      const btn = target.querySelector('.coach-chat-more');
+      if (btn) btn.addEventListener('click', () => this._openCoachChatWithGame(text));
+    }
+  }
+
+  // Render markdown text for coach overview (mirrors coach-chat.js renderMarkdown).
+  _renderMarkdown(md) {
+    const text = String(md || '');
+    let html;
+    try {
+      if (window.marked && window.DOMPurify) {
+        html = window.marked.parse(text, { breaks: true, gfm: true });
+        html = window.DOMPurify.sanitize(html, {
+          ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):)/i,
+          USE_PROFILES: { html: true },
+        });
+      } else {
+        html = this._escapeHtml(text).replace(/\n/g, '<br>');
+      }
+    } catch (_) {
+      html = this._escapeHtml(text).replace(/\n/g, '<br>');
+    }
+    return html;
+  }
+
+  // Quota/error display. quota_exceeded gets a SweetAlert2 popup (per spec).
+  _showCoachQuotaOrError(target, message) {
+    if (target) target.innerHTML = `<div class="coach-overview-error">${this._escapeHtml(message || 'Coach is unavailable.')}</div>`;
+    if (/token|quota/i.test(message || '')) {
+      try {
+        window.Swal?.fire({
+          icon: 'warning',
+          title: 'Out of Coach tokens',
+          text: message || "You've used all your daily Coach tokens. They reset at midnight UTC — or upgrade for more.",
+          confirmButtonText: 'OK',
+        });
+      } catch (_) {}
+    }
+  }
+
+  _askCoachForMove() {
+    if (!this.elInsightCoachResult) return;
+    const idx = this.currentMoveIndex;
+    if (idx == null || !this.analysisResults?.[idx]) return;
+    this._streamCoachOverview(this.elInsightCoachResult, 'move', { moveIndex: idx });
+  }
+
+  _askCoachForGame() {
+    if (!this.elGameCoachResult) return;
+    if (!this.analysisResults || !this.analysisResults.length) return;
+    this._streamCoachOverview(this.elGameCoachResult, 'game', {});
+  }
+
+  // Hand off to a new coach chat seeded with the reviewed game + the overview
+  // as the first assistant message. Stashed for mount() to consume after nav.
+  _openCoachChatWithGame(overviewText) {
+    this._pendingCoachSeed = {
+      reviewContext: this._compactGame(),
+      firstAssistant: overviewText || '',
+    };
+    this._navigateTo('/coach');
   }
 
   // Lightweight explorer hint shown in the insights panel during explore-line
@@ -9838,83 +10572,392 @@ _showPuzzleSuccessOverlay() {
   }
 
 
-  _enterExploreLineMode() {
-    if (this.exploreLineMode) return;
-    if (!this.explorerReturnState) {
-      this.explorerReturnState = {
-        gameMoves: this.gameMoves.slice(),
-        originalGameMoves: this.originalGameMoves.slice(),
-        initialFen: this.initialFen,
-        gameHeaders: { ...(this.gameHeaders || {}) },
-        analysisResults: this.analysisResults,
-        liveMoveResults: this.liveMoveResults.slice(),
-        liveEvalHistory: this.liveEvalHistory.slice(),
-        currentMoveIndex: this.currentMoveIndex,
-        coachMode: { ...this.coachMode },
-        boardFlipped: this.board.flipped,
-      };
+  // ── Sub-lines (variations) ────────────────────────────────────────────
+  // When the user plays a move that isn't the next main-line move during a
+  // finished review, we capture it as a variation hanging off the current
+  // main-line parent index. The variation gets live engine analysis (isolated
+  // from this.liveMoveResults / analysisResults so the main review is never
+  // corrupted). Multiple parallel variations can exist per parent. Each
+  // sub-line carries its own list of moves, per-move results, and eval history.
+
+  // Undo the trial move already pushed onto this.chess by _handleBoardMove,
+  // then start (or extend) a sub-line from the branched position.
+  _undoTrialAndBranchToSubLine({ move, from, to, promotion }) {
+    // this.chess already has the trial move applied; capture the FENs we need.
+    const fenAfter = this.chess.fen();
+    this.chess.undo();
+    const fenBefore = this.chess.fen();
+
+    // Determine where the sub-line hangs off.
+    let parentIndex;
+    let subIndex;
+    let branchFen;
+    let prependSans;
+
+    if (this.activeLine.kind === 'sub') {
+      // Extending the active sub-line: append to its moves from its current
+      // cursor position.
+      parentIndex = this.activeLine.parentIndex;
+      subIndex = this.activeLine.subIndex;
+      const subs = this.subLines.get(parentIndex) || [];
+      const sub = subs[subIndex];
+      if (!sub) return;
+      // Truncate the sub-line to the current cursor + 1, then append.
+      const cursor = this.activeLine.moveIndex;
+      sub.moves = sub.moves.slice(0, cursor + 1);
+      sub.results = (sub.results || []).slice(0, cursor + 1);
+      sub.evalHistory = (sub.evalHistory || []).slice(0, cursor + 1);
+      sub.moves.push(move.san);
+      // Rebuild the branch chess from the parent main-line position.
+      branchFen = this._fenAtMainLineIndex(parentIndex);
+      prependSans = sub.moves.slice(0, -1);
+      this.activeLine.moveIndex = sub.moves.length - 1;
+    } else {
+      // Starting a brand-new sub-line off the current main-line move.
+      parentIndex = this.currentMoveIndex;
+      branchFen = this._fenAtMainLineIndex(parentIndex);
+      prependSans = [];
+      const subs = this.subLines.get(parentIndex) || [];
+      subIndex = subs.length;
+      subs.push({ moves: [move.san], results: [], evalHistory: [] });
+      this.subLines.set(parentIndex, subs);
+      this.activeLine = { kind: 'sub', parentIndex, subIndex, moveIndex: 0 };
     }
-    this.exploreLineMode = true;
-    // Keep the review UI (summary, critical moments, insights) visible —
-    // explore line is a side branch, not a coach game. Only clear the live
-    // per-move results so the engine evaluates the branched position fresh.
-    this.liveMoveResults = [];
-    this.liveEvalHistory = [];
-    if (this.elBtnReturnExplorer) this.elBtnReturnExplorer.hidden = false;
-    this._setExplorerHint('Explore Line mode — play moves to analyze the branch, or click Back to Review.');
+
+    // Rebuild this.chess to the branched position (parent + prepend + new move).
+    const branch = new Chess(branchFen);
+    for (const san of prependSans) {
+      if (!branch.move(san, { sloppy: true })) { return; }
+    }
+    const replayed = branch.move({ from, to, promotion }, { sloppy: true });
+    if (!replayed) { return; }
+    this.chess = branch;
+
+    this._renderMoveList();
     this.board.setChessInstance(this.chess);
     this._updateBoard();
-    this._renderMoveList();
     this._updateCurrentMoveIndicator();
-    this._updateGameStatus();
-    this._requestLiveEvaluation('Explore Line mode active', {
-      fenBefore: this.chess.fen(),
-      fenAfter: this.chess.fen(),
-      moveObj: null,
-      moveIndex: this.currentMoveIndex,
+    this.board.setHighlights([{ square: move.from, type: 'highlight' }, { square: move.to, type: 'highlight' }]);
+    if (this.elBtnReturnExplorer) this.elBtnReturnExplorer.hidden = false;
+    this._setExplorerHint(`Variation: ${move.san}. Click Back to Main Line or press the × icon to remove it.`);
+    this._playMoveSound(move, this.activeLine.moveIndex);
+    this._analyzeSubLinePosition({
+      parentIndex: this.activeLine.parentIndex,
+      subIndex: this.activeLine.subIndex,
+      moveIndex: this.activeLine.moveIndex,
+      fenBefore,
+      fenAfter,
+      moveObj: move,
     });
   }
 
-  _returnFromLineExplorer() {
-    const saved = this.explorerReturnState;
-    if (!saved) return;
-    this.liveEvalToken += 1;
+  // Compute the FEN at the end of main-line index `index` (-1 = initial fen).
+  _fenAtMainLineIndex(index) {
+    const c = new Chess(this.initialFen);
+    const moves = this.originalGameMoves.slice(0, Math.max(0, index + 1));
+    for (const san of moves) {
+      if (!c.move(san, { sloppy: true })) break;
+    }
+    return c.fen();
+  }
+
+  // Run an isolated engine analysis for one sub-line move and store the result
+  // inside the sub-line (NOT in this.liveMoveResults). Renders the move list
+  // (to update the eval) and the insights panel for the active sub-line move.
+  async _analyzeSubLinePosition({ parentIndex, subIndex, moveIndex, fenBefore, fenAfter, moveObj }) {
+    if (!this.engine?.ready) return;
+    const token = ++this.liveEvalToken;
     this.liveDepthToken += 1;
-    this.explorerReturnState = null;
-    this.exploreLineMode = false;
-    this.gameMoves = saved.gameMoves.slice();
-    this.originalGameMoves = saved.originalGameMoves.slice();
-    this.initialFen = saved.initialFen;
-    this.gameHeaders = { ...(saved.gameHeaders || {}) };
-    this.analysisResults = saved.analysisResults;
-    this.liveMoveResults = saved.liveMoveResults.slice();
-    this.liveEvalHistory = saved.liveEvalHistory.slice();
-    this.coachMode = { ...saved.coachMode };
-    this.board.flipped = saved.boardFlipped;
-    this.chess = new Chess(this.initialFen);
-    for (const san of this.gameMoves) this.chess.move(san, { sloppy: true });
-    // Restore to the move the user was viewing when they entered explore mode.
-    const restoreIndex = Number.isInteger(saved.currentMoveIndex)
-      ? Math.min(Math.max(-1, saved.currentMoveIndex), this.gameMoves.length - 1)
-      : this.gameMoves.length - 1;
-    // Force _goToMove to execute by starting from a differing index; otherwise
-    // its `index === currentMoveIndex` early-return skips re-rendering the
-    // per-move panel (insights, eval bar, best-move arrow) — the visible
-    // symptom of "Back to Review does nothing."
-    this.currentMoveIndex = -2;
+    this.engine.interrupt?.();
+    const reviewProfile = this._getReviewProfile();
+    const depth = reviewProfile.depth;
+    const multiPv = reviewProfile.multiPv;
+    const timeoutMs = Math.max(6000, reviewProfile.timeoutMs);
+
+    this._updateLiveEvalPanel({
+      busy: true,
+      score: null,
+      line: `Analyzing ${moveObj.san}`,
+      meta: `Depth ${depth} | waiting for Stockfish...`,
+    });
+    this.board.setLoading(null, 'Analyzing variation');
+
+    try {
+      const result = await this._buildSubLineResult({ fenBefore, fenAfter, moveObj, moveIndex, depth, multiPv, timeoutMs });
+      if (token !== this.liveEvalToken) return;
+      const subs = this.subLines.get(parentIndex) || [];
+      const sub = subs[subIndex];
+      if (!sub) return;
+      sub.results[moveIndex] = result;
+      sub.evalHistory[moveIndex] = result.evalAfter;
+
+      // Only update the board/UI if the user is still on this sub-line move.
+      if (this.activeLine.kind === 'sub'
+        && this.activeLine.parentIndex === parentIndex
+        && this.activeLine.subIndex === subIndex
+        && this.activeLine.moveIndex === moveIndex) {
+        this._applyBestMoveArrow(result);
+        this.board.setHighlights(this._moveHighlightsForResult(result));
+        this._showMoveBadge(result.classification, moveObj.to);
+        this._renderMoveInsights(result);
+        this._showEngineLine(result);
+        this._updateEvalBar(result.evalAfter);
+        this._updateLiveEvalPanel({
+          busy: false,
+          score: result.evalAfter,
+          line: `${result.classification.name}: ${moveObj.san}`,
+          meta: `Best: ${result.bestMoveSan || '--'} | Depth ${result.depth || depth}`,
+        });
+        this.board.clearLoading();
+      }
+      this._renderMoveList();
+      this._updateActiveMoveInList();
+    } catch (err) {
+      if (token !== this.liveEvalToken) return;
+      this.board.clearLoading();
+      this._updateLiveEvalPanel({
+        busy: false,
+        score: null,
+        line: 'Variation analysis failed.',
+        meta: err.message,
+      });
+    }
+  }
+
+  // Build a per-move result for a sub-line move. Isolated from
+  // _buildLiveMoveResult (which writes into this.liveMoveResults) so sub-line
+  // analysis never corrupts the main review.
+  async _buildSubLineResult({ fenBefore, fenAfter, moveObj, moveIndex, depth, multiPv, timeoutMs }) {
+    const isWhiteToMoveBefore = fenBefore.split(' ')[1] === 'w';
+    const isWhitePlaying = isWhiteToMoveBefore;
+    const playedUci = moveObj.from + moveObj.to + (moveObj.promotion || '');
+
+    // Evaluate the position before and after the move (and the best line).
+    const beforeRes = await this.engine.evaluate(fenBefore, depth, timeoutMs);
+    const beforeCp = this.analyzer.whiteAbsCp(
+      this.analyzer.normalizeScore(beforeRes.score || 0, beforeRes.scoreType || 'cp', isWhiteToMoveBefore),
+      fenBefore
+    );
+    const multiAfter = await this.engine.evaluateMultiPV(fenAfter, depth, multiPv, timeoutMs);
+    // The after-position is from the opponent's perspective; normalize.
+    const isWhiteToMoveAfter = fenAfter.split(' ')[1] === 'w';
+    let lines = (multiAfter.lines || []).map((line) => {
+      const pvTokens = (line.pv || '').split(/\s+/).filter(Boolean);
+      const mv = pvTokens.length > 0 ? pvTokens[0] : '';
+      const cp = this.analyzer.whiteAbsCp(
+        this.analyzer.normalizeScore(line.score || 0, line.scoreType || 'cp', isWhiteToMoveAfter),
+        fenAfter
+      );
+      return {
+        cp, move: mv, pvUci: line.pv || '', pvSan: this.analyzer._lineToSan(fenAfter, line.pv || '', 8), depth: line.depth || 0,
+      };
+    }).filter((l) => !!l.move);
+    lines = this.analyzer._orderLinesForSide ? this.analyzer._orderLinesForSide(lines, isWhiteToMoveAfter) : lines;
+    if (!lines.length) {
+      const afterRes = await this.engine.evaluate(fenAfter, depth, timeoutMs);
+      const cp = this.analyzer.whiteAbsCp(
+        this.analyzer.normalizeScore(afterRes.score || 0, afterRes.scoreType || 'cp', isWhiteToMoveAfter),
+        fenAfter
+      );
+      lines.push({ cp, move: afterRes.bestMove || '', pvUci: afterRes.pv || '', pvSan: this.analyzer._lineToSan(fenAfter, afterRes.pv || '', 8), depth: afterRes.depth || 0 });
+    }
+    const afterCp = lines[0]?.cp ?? beforeCp;
+
+    // Best line eval of the BEFORE position (what the engine recommended).
+    const multiBefore = await this.engine.evaluateMultiPV(fenBefore, depth, multiPv, timeoutMs);
+    let beforeLines = (multiBefore.lines || []).map((line) => {
+      const pvTokens = (line.pv || '').split(/\s+/).filter(Boolean);
+      const mv = pvTokens.length > 0 ? pvTokens[0] : '';
+      const cp = this.analyzer.whiteAbsCp(
+        this.analyzer.normalizeScore(line.score || 0, line.scoreType || 'cp', isWhiteToMoveBefore),
+        fenBefore
+      );
+      return {
+        cp, move: mv, pvUci: line.pv || '', pvSan: this.analyzer._lineToSan(fenBefore, line.pv || '', 8), depth: line.depth || 0,
+      };
+    }).filter((l) => !!l.move);
+    beforeLines = this.analyzer._orderLinesForSide ? this.analyzer._orderLinesForSide(beforeLines, isWhiteToMoveBefore) : beforeLines;
+    const bestLineCp = beforeLines[0]?.cp ?? beforeCp;
+    const bestMove = beforeLines[0]?.move || beforeRes.bestMove || '';
+    const bestMoveSan = bestMove ? this.analyzer.uciToSan(fenBefore, bestMove) : '--';
+
+    const cpLoss = this.analyzer._cpLoss(beforeCp, bestLineCp, afterCp, isWhitePlaying);
+    const playerEdgeBefore = isWhitePlaying ? beforeCp : -beforeCp;
+    const playerEdgeAfter = isWhitePlaying ? afterCp : -afterCp;
+    const playerRating = 1200;
+    const expectedLoss = this.analyzer.expectedPointLoss(playerEdgeBefore, playerEdgeAfter, playerRating);
+
+    const fenObj = { parentIndex: -1, isInBook: false };
+    const classification = this.analyzer.classifyMove({
+      movePly: moveIndex + 1,
+      moveSan: moveObj.san,
+      moveUci: playedUci,
+      fenBefore,
+      numLegalMoves: 0,
+      isCheckmate: new Chess(fenAfter).in_checkmate(),
+      isPieceSacrifice: false,
+      playerEdgeBefore,
+      playerEdgeAfter,
+      cpLoss,
+      isBestMove: playedUci === bestMove,
+      scoreBefore: beforeCp,
+      scoreAfter: afterCp,
+      phase: this.analyzer._phaseFromFen(fenBefore, moveIndex + 1),
+      playerRating,
+      isInBook: false,
+    });
+    const classificationKey = this.analyzer.getClassificationKey(classification);
+    const alternatives = beforeLines.slice(0, multiPv).map((line, idx) => ({
+      rank: idx + 1,
+      moveUci: line.move,
+      moveSan: this.analyzer.uciToSan(fenBefore, line.move),
+      eval: line.cp,
+      evalText: this.analyzer.formatScore(line.cp),
+      pvSan: line.pvSan,
+    }));
+    const phase = this.analyzer._phaseFromFen(fenBefore, moveIndex + 1);
+
+    return {
+      move: moveObj.san,
+      moveSan: moveObj.san,
+      moveUci: playedUci,
+      moveIndex,
+      moveNumber: Math.floor(moveIndex / 2) + 1,
+      isWhite: isWhitePlaying,
+      classification,
+      classificationKey,
+      evalBefore: beforeCp,
+      evalAfter: afterCp,
+      swing: afterCp - beforeCp,
+      cpLoss,
+      expectedLoss,
+      playerRating,
+      playerEdgeBefore,
+      playerEdgeAfter,
+      bestMove,
+      bestMoveSan,
+      bestMovePv: '',
+      bestMovePvSan: beforeLines[0]?.pvSan || '',
+      alternatives,
+      depth,
+      fen: fenBefore,
+      fenAfter,
+      phase,
+      planTags: [],
+      mateThreat: this.analyzer._mateThreat(fenAfter),
+      endgameNotes: [],
+      isCriticalMoment: expectedLoss >= 0.08 || cpLoss >= 120,
+      severityScore: 0,
+      isCoachMove: false,
+      coachText: this.analyzer._coachingText({
+        classification, cpLoss, expectedLoss, isBestMove: playedUci === bestMove,
+        bestMoveSan, bestMove, opponentBestMove: '', opponentBestMoveSan: '',
+        moveUci: playedUci, moveSan: moveObj.san, movePly: moveIndex + 1,
+        scoreBefore: beforeCp, scoreAfter: afterCp, isWhite: isWhitePlaying,
+        playerRating, playerEdgeBefore, playerEdgeAfter, opponentJustBlundered: false,
+        priorOpponentMoveSan: '', priorOpponentThreat: false, mateThreat: null,
+        opponentPvSan: '', fenBefore, fenAfter,
+      }),
+    };
+  }
+
+  // Navigate to a main-line move or a sub-line move. Used by the move list
+  // click handlers (both .move-cell and .sub-line-move).
+  _goToLine(target) {
+    if (target.kind === 'main') {
+      // If a "Explore Best Move" preview is showing, exit it first so the
+      // navigation restores the real board state.
+      if (this.bestMovePreview) {
+        this.bestMovePreview = null;
+        this._setExplorerHint('');
+      }
+      this._returnToMainLine(target.index);
+      return;
+    }
+    // Sub-line navigation.
+    const { parentIndex, subIndex, moveIndex } = target;
+    const subs = this.subLines.get(parentIndex) || [];
+    const sub = subs[subIndex];
+    if (!sub) return;
+    // Rebuild chess to the sub-line position.
+    const branchFen = this._fenAtMainLineIndex(parentIndex);
+    const branch = new Chess(branchFen);
+    const slice = sub.moves.slice(0, moveIndex + 1);
+    let lastMove = null;
+    for (const san of slice) { lastMove = branch.move(san, { sloppy: true }); }
+    this.chess = branch;
+    this.activeLine = { kind: 'sub', parentIndex, subIndex, moveIndex };
+    // Keep currentMoveIndex on the parent so main-line nav restores correctly.
+    this.currentMoveIndex = parentIndex;
+    this.bestMovePreview = null;
     this.board.setChessInstance(this.chess);
     this._updateBoard();
-    this._renderMoveList();
     this._updateCurrentMoveIndicator();
+    if (lastMove) {
+      this.board.setHighlights([{ square: lastMove.from, type: 'highlight', color: this._mixColor('#2F6F9F', '#ffffff', 0.5), ringColor: '#2F6F9F' }, { square: lastMove.to, type: 'highlight', color: this._mixColor('#2F6F9F', '#ffffff', 0.5), ringColor: '#2F6F9F' }]);
+    }
+    const result = sub.results[moveIndex];
+    if (result) {
+      this._applyBestMoveArrow(result);
+      this.board.setHighlights(this._moveHighlightsForResult(result));
+      this._showMoveBadge(result.classification, result.moveUci?.slice(2, 4));
+      this._renderMoveInsights(result);
+      this._showEngineLine(result);
+      this._updateEvalBar(result.evalAfter);
+    } else {
+      this.board.clearBestMoveArrow();
+      this._renderMoveInsights(null);
+    }
+    if (this.elBtnReturnExplorer) this.elBtnReturnExplorer.hidden = false;
+    this._setExplorerHint('Viewing a variation. Click Back to Main Line to return.');
+    this._renderMoveList();
+    this._updateActiveMoveInList();
     this._updateGameStatus();
-    this._syncCoachVisibility();
-    this._syncCoachControls();
-    if (this.elReviewBtnText) this.elReviewBtnText.textContent = 'Re-analyze Game';
-    this._showReviewSummary();
-    this._renderCriticalMoments();
-    this._goToMove(restoreIndex);
-    if (this.elBtnReturnExplorer) this.elBtnReturnExplorer.hidden = true;
-    this._saveGameState();
+  }
+
+  // Delete a sub-line variation. If the user was viewing it, return to the
+  // main line at the parent move.
+  _deleteSubLine(parentIndex, subIndex) {
+    const subs = this.subLines.get(parentIndex) || [];
+    if (subIndex < 0 || subIndex >= subs.length) return;
+    subs.splice(subIndex, 1);
+    if (subs.length === 0) this.subLines.delete(parentIndex);
+    else this.subLines.set(parentIndex, subs);
+    // Re-index the activeLine if needed.
+    if (this.activeLine.kind === 'sub' && this.activeLine.parentIndex === parentIndex) {
+      if (this.activeLine.subIndex === subIndex) {
+        this._returnToMainLine(parentIndex);
+      } else if (this.activeLine.subIndex > subIndex) {
+        this.activeLine.subIndex -= 1;
+      }
+    }
+    this._renderMoveList();
+    this._updateActiveMoveInList();
+  }
+
+  // Return the board cursor to the main line. If `index` is provided, navigate
+  // to that main-line move; otherwise use the active sub-line's parent.
+  _returnToMainLine(index) {
+    const wasInSub = this.activeLine.kind === 'sub';
+    const parentIndex = Number.isInteger(index) ? index : (wasInSub ? this.activeLine.parentIndex : this.currentMoveIndex);
+    this.activeLine = { kind: 'main', index: parentIndex };
+    this._setExplorerHint('');
+    // Force _goToMove to re-render by nudging the index.
+    this.currentMoveIndex = -2;
+    if (this.elBtnReturnExplorer) this.elBtnReturnExplorer.hidden = !this.bestMovePreview;
+    this._goToMove(parentIndex);
+  }
+
+  // The "Back to Main Line" button serves double duty: it exits a sub-line OR
+  // exits the "Explore Best Move" preview.
+  _handleReturnButton() {
+    if (this.bestMovePreview) {
+      this._exitBestMovePreview();
+      return;
+    }
+    if (this.activeLine.kind === 'sub') {
+      this._returnToMainLine();
+    }
   }
 
   _browserMeetsRequirements() {
@@ -9970,3 +11013,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Expose the SPA app to other scripts (e.g. boost.js) so they can navigate in-page.
   window.SidaApp = window.app;
 });
+
+
+

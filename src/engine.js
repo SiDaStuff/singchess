@@ -4,8 +4,8 @@ const ENGINE_CATALOG = Object.freeze({
     modules: [
       {
         key: 'lite-single',
-        label: 'Stockfish 18 Lite',
-        engineLabel: 'Stockfish 18 Lite',
+        label: 'Stockfish 18 Lite WASM',
+        engineLabel: 'Stockfish 18 Lite WASM',
         jsPath: window.__API_BASE + '/vendor/stockfish/stockfish-18-lite-single.js',
         wasmPath: window.__API_BASE + '/vendor/stockfish/stockfish-18-lite-single.wasm',
         hash: 256,
@@ -15,8 +15,8 @@ const ENGINE_CATALOG = Object.freeze({
       },
       {
         key: 'full-single',
-        label: 'Stockfish 18',
-        engineLabel: 'Stockfish 18',
+        label: 'Stockfish 18 Full WASM',
+        engineLabel: 'Stockfish 18 Full WASM',
         jsPath: window.__API_BASE + '/vendor/stockfish/stockfish-18-single.js',
         wasmPath: window.__API_BASE + '/vendor/stockfish/stockfish-18-single.wasm',
         hash: 512,
@@ -90,7 +90,15 @@ class UciEngine {
   }
 
   async _evaluate(fen, depth = 18, timeoutMs = 20000) {
-    if (!this.ready) throw new Error('Engine not ready');
+    if (!this.ready) {
+      // If crashed, try one auto-restart before giving up
+      if (this.crashedError) {
+        const restarted = await this._restartAfterCrash();
+        if (!restarted) throw this.crashedError || new Error('Engine not ready');
+      } else {
+        throw new Error('Engine not ready');
+      }
+    }
 
     this._cancelActiveSearch();
     this._safeStop();
@@ -152,12 +160,111 @@ class UciEngine {
     });
   }
 
+  /**
+   * Evaluate a position with iterative deepening — no fixed depth limit.
+   * Uses `go infinite` so Stockfish keeps searching deeper until the timeout.
+   * Calls `onDepth(info)` on every depth increase so the UI can show progress.
+   * Returns the final result (same shape as evaluate()).
+   */
+  async evaluateInfinite(fen, timeoutMs = 20000, onDepth = null) {
+    return this._runExclusive(() => this._evaluateInfinite(fen, timeoutMs, onDepth));
+  }
+
+  async _evaluateInfinite(fen, timeoutMs = 20000, onDepth = null) {
+    if (!this.ready) {
+      if (this.crashedError) {
+        const restarted = await this._restartAfterCrash();
+        if (!restarted) throw this.crashedError || new Error('Engine not ready');
+      } else {
+        throw new Error('Engine not ready');
+      }
+    }
+
+    this._cancelActiveSearch();
+    this._safeStop();
+    try { this._send('setoption name MultiPV value 1'); } catch (_) {}
+    await this._waitForReady(timeoutMs);
+
+    return new Promise((resolve, reject) => {
+      let bestInfo = null;
+      let lastReportedDepth = 0;
+      let timer = null;
+      let hardTimer = null;
+      let settled = false;
+
+      const finish = (bestMove = '') => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        if (hardTimer) clearTimeout(hardTimer);
+        this._removeMessageHandler(handler);
+        if (this.activeSearch?.handler === handler) {
+          this.activeSearch = null;
+        }
+        resolve({
+          score: bestInfo ? bestInfo.score : 0,
+          scoreType: bestInfo ? bestInfo.scoreType : 'cp',
+          bestMove,
+          pv: bestInfo ? bestInfo.pv : '',
+          depth: bestInfo ? bestInfo.depth : 0,
+          timedOut: !bestMove,
+        });
+      };
+
+      const handler = (msg) => {
+        if (msg.startsWith('info') && msg.includes('depth')) {
+          const info = this._parseInfo(msg);
+          if (info && info.depth) {
+            bestInfo = info;
+            // Notify caller on every depth increase
+            if (onDepth && info.depth > lastReportedDepth) {
+              lastReportedDepth = info.depth;
+              onDepth({
+                score: info.score,
+                scoreType: info.scoreType,
+                pv: info.pv,
+                depth: info.depth,
+                seldepth: info.seldepth,
+                nps: info.nps,
+                nodes: info.nodes,
+                time: info.time,
+              });
+            }
+          }
+        }
+
+        if (msg.startsWith('bestmove')) {
+          finish(msg.split(' ')[1] || '');
+        }
+      };
+
+      timer = setTimeout(() => {
+        this._safeStop();
+        hardTimer = setTimeout(() => finish(bestInfo?.pv?.split(/\s+/).filter(Boolean)[0] || ''), 900);
+        if (this.activeSearch?.handler === handler) this.activeSearch.hardTimer = hardTimer;
+      }, timeoutMs);
+
+      this._addMessageHandler(handler);
+      this.activeSearch = { handler, timer, hardTimer, reject };
+      this._send(`position fen ${fen}`);
+      this._send('go infinite');
+    });
+  }
+
   async evaluateMultiPV(fen, depth = 18, numPV = 3, timeoutMs = 20000) {
     return this._runExclusive(() => this._evaluateMultiPV(fen, depth, numPV, timeoutMs));
   }
 
   async _evaluateMultiPV(fen, depth = 18, numPV = 3, timeoutMs = 20000) {
-    if (!this.ready) throw new Error('Engine not ready');
+    if (!this.ready) {
+      // If crashed, try one auto-restart before giving up
+      if (this.crashedError) {
+        const restarted = await this._restartAfterCrash();
+        if (!restarted) throw this.crashedError || new Error('Engine not ready');
+      } else {
+        throw new Error('Engine not ready');
+      }
+    }
 
     this._cancelActiveSearch();
     this._safeStop();
@@ -187,15 +294,11 @@ class UciEngine {
           }
         }
 
-        // Restore MultiPV=1 for the next single-PV search BEFORE resolving.
-        // _evaluate also sets MultiPV=1 itself (defensive), so the contract no
-        // longer depends on this call succeeding — but doing it first means a
-        // healthy engine never runs the next search at the old MultiPV=N.
-        try {
-          this._send('setoption name MultiPV value 1');
-        } catch (err) {
-          console.warn('Could not reset MultiPV after multipv search:', err?.message || err);
-        }
+        // NOTE: do NOT send `setoption MultiPV 1` here. Sending a setoption the
+        // instant `bestmove` arrives races the lite-single WASM's ASYNCIFY
+        // unwind and throws "RuntimeError: unreachable". The next single-PV
+        // search (_evaluate) sets MultiPV=1 defensively before it starts, so
+        // this reset was redundant as well as dangerous.
 
         resolve({
           lines: results,
@@ -294,6 +397,9 @@ class UciEngine {
     const npsMatch = line.match(/\bnps (\d+)/);
     if (npsMatch) result.nps = parseInt(npsMatch[1], 10);
 
+    const timeMatch = line.match(/\btime (\d+)/);
+    if (timeMatch) result.time = parseInt(timeMatch[1], 10);
+
     return result;
   }
 
@@ -368,15 +474,20 @@ class UciEngine {
   }
 
   async newGame() {
-    // Stop any in-flight search before resetting. UCI requires `stop` before
-    // `ucinewgame`; otherwise the engine may emit a late `bestmove` for the
-    // previous position AFTER ucinewgame is processed, which would resolve a
-    // stale search handler. This mirrors the search-start sequence.
-    this._cancelActiveSearch();
-    this._safeStop();
-    // ucinewgame resets engine hash/state; readyok confirms it has been applied.
-    this._send('ucinewgame');
-    await this._waitForReady(8000);
+    // MUST run inside operationChain, exactly like evaluate()/evaluateMultiPV().
+    // The lite-single WASM build is ASYNCIFY: during a `go` search it parks the
+    // WASM and rewinds later. If newGame()'s `ucinewgame`/`isready` writes land
+    // while another flow's search is parked, the asyncify unwind corrupts and
+    // the engine throws "RuntimeError: unreachable" (intermittent crashes during
+    // reviews). Serializing newGame against all searches guarantees no command
+    // reaches the WASM while it is parked. (Same fix applied server-side.)
+    return this._runExclusive(async () => {
+      this._cancelActiveSearch();
+      this._safeStop();
+      // ucinewgame resets engine hash/state; readyok confirms it has been applied.
+      this._send('ucinewgame');
+      await this._waitForReady(8000);
+    });
   }
 }
 
@@ -443,7 +554,12 @@ class BrowserStockfishEngine extends UciEngine {
           this.ready = true;
           this.configure().then(() => resolve()).catch((err) => reject(err));
         } else if (type === 'ERROR') {
-          fail(new Error(payload));
+          // Worker reported an error — mark as crashed so the next search
+          // triggers auto-restart. Also fail any in-flight search.
+          this.crashedError = new Error(payload || 'Engine error');
+          this.ready = false;
+          this._failActiveSearch(this.crashedError);
+          fail(this.crashedError);
         } else if (type === 'PROGRESS') {
           // Download-progress signal from the cached fetch in the worker.
           if (typeof this.onDownloadProgress === 'function') {
@@ -489,6 +605,27 @@ class BrowserStockfishEngine extends UciEngine {
     if (this.worker) {
       const payload = typeof cmd === 'string' ? { type: 'SEND', payload: cmd } : cmd;
       this.worker.postMessage(payload);
+    }
+  }
+
+  // Auto-restart the worker after a crash. Returns true if restart succeeded.
+  async _restartAfterCrash() {
+    if (!this.crashedError) return false;
+    console.warn('Engine crashed, attempting auto-restart:', this.crashedError.message);
+    this.crashedError = null;
+    this.ready = false;
+    try {
+      if (this.worker) {
+        this.worker.terminate();
+        this.worker = null;
+      }
+      await this.init();
+      console.log('Engine auto-restart succeeded');
+      return true;
+    } catch (err) {
+      console.error('Engine auto-restart failed:', err.message);
+      this.crashedError = err;
+      return false;
     }
   }
 

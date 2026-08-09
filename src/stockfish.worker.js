@@ -407,6 +407,31 @@ const topLevelOnMessage = async (e) => {
         break;
       }
 
+      case 'REINIT': {
+        // Reset all state and re-initialize from scratch. Used for crash
+        // recovery — the engine wrapper calls this when the worker sends an
+        // ERROR mid-search.
+        dbg('REINIT received, resetting engine state');
+        engine = null;
+        engineReady = false;
+        initPromise = null;
+        scriptOnMessage = null;
+        messageHandlers = [];
+        _hasReceivedOutput = false;
+        // Clear any stale Module state
+        delete self.Module;
+        delete self.__stockfishWasmUrl;
+        // Now re-init with the same config
+        initPromise = (async () => { await initStockfish(payload); })();
+        try {
+          await initPromise;
+          sendToMain('READY');
+        } catch (err) {
+          sendToMain('ERROR', err && err.message ? err.message : String(err));
+        }
+        break;
+      }
+
       case 'SEND': {
         if (!engine) throw new Error('Engine not initialized');
         dispatchToEngine(payload);

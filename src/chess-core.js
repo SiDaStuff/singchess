@@ -4,16 +4,16 @@
 // Classification scheme (10 classes), in order from best to worst.
 // Each entry carries the canonical short description used across the UI.
 const MoveClassification = Object.freeze({
-  BRILLIANT: { key: 'BRILLIANT', name: 'Brilliant', symbol: '!!', color: '#1ac4a3', icon: '!!', iconType: 'text', description: 'The best move — and a hard one to find!' },
-  GREAT: { key: 'GREAT', name: 'Great', symbol: '!', color: '#709bc3', icon: '!', iconType: 'text', description: 'A move that altered the course of the game!' },
-  BEST: { key: 'BEST', name: 'Best', symbol: '★', color: '#81b849', icon: 'star', iconType: 'material', description: "The chess engine's top choice" },
-  EXCELLENT: { key: 'EXCELLENT', name: 'Excellent', symbol: '👍', color: '#8cb758', icon: 'thumb_up', iconType: 'material', description: 'Almost as good as the Best move' },
-  GOOD: { key: 'GOOD', name: 'Good', symbol: '✓', color: '#93b772', icon: 'check', iconType: 'material', description: 'A decent move, but not the best' },
-  BOOK: { key: 'BOOK', name: 'Book', symbol: '📖', color: '#bf9b80', icon: 'menu_book', iconType: 'material', description: 'A conventional opening move' },
-  INACCURACY: { key: 'INACCURACY', name: 'Inaccuracy', symbol: '?!', color: '#f6d96b', icon: '?!', iconType: 'text', description: 'A weak move' },
-  MISTAKE: { key: 'MISTAKE', name: 'Mistake', symbol: '?', color: '#ffa24d', icon: '?', iconType: 'text', description: 'A bad move that immediately worsens your position' },
-  MISS: { key: 'MISS', name: 'Miss', symbol: 'X', color: '#ff7461', icon: 'X', iconType: 'text', description: 'A move that missed a tactical opportunity or a chance to punish the opponent' },
-  BLUNDER: { key: 'BLUNDER', name: 'Blunder', symbol: '??', color: '#ff3c2d', icon: '??', iconType: 'text', description: 'A very bad move that also loses material or the game' },
+  BRILLIANT: { key: 'BRILLIANT', name: 'Brilliant', symbol: '!!', color: '#27c2a2', icon: 'brillant', iconType: 'image', description: 'The best move — and a hard one to find!' },
+  GREAT: { key: 'GREAT', name: 'Great', symbol: '!', color: '#749ac0', icon: 'great', iconType: 'image', description: 'A move that altered the course of the game!' },
+  BEST: { key: 'BEST', name: 'Best', symbol: '★', color: '#82b64c', icon: 'best', iconType: 'image', description: "The chess engine's top choice" },
+  EXCELLENT: { key: 'EXCELLENT', name: 'Excellent', symbol: '👍', color: '#82b64c', icon: 'excellent', iconType: 'image', description: 'Almost as good as the Best move' },
+  GOOD: { key: 'GOOD', name: 'Good', symbol: '✓', color: '#a6cf7c', icon: 'good', iconType: 'image', description: 'A decent move, but not the best' },
+  BOOK: { key: 'BOOK', name: 'Book', symbol: '📖', color: '#d5a47d', icon: 'book', iconType: 'image', description: 'A conventional opening move' },
+  INACCURACY: { key: 'INACCURACY', name: 'Inaccuracy', symbol: '?!', color: '#f7c631', icon: 'inaccuracy', iconType: 'image', description: 'A weak move' },
+  MISTAKE: { key: 'MISTAKE', name: 'Mistake', symbol: '?', color: '#ffa459', icon: 'mistake', iconType: 'image', description: 'A bad move that immediately worsens your position' },
+  MISS: { key: 'MISS', name: 'Miss', symbol: 'X', color: '#ff7768', icon: 'miss', iconType: 'image', description: 'A move that missed a tactical opportunity or a chance to punish the opponent' },
+  BLUNDER: { key: 'BLUNDER', name: 'Blunder', symbol: '??', color: '#f9412d', icon: 'blunder', iconType: 'image', description: 'A very bad move that also loses material or the game' },
 });
 
 // Opening names now come from the Lichess Masters explorer (see the async
@@ -658,11 +658,30 @@ class BrowserMoveCoach {
 
   _explainGreat(payload, move, san) {
     const insight = this._pickMoveInsight(payload, move) || this._positionalFallback(payload, move);
-    const direction = payload.playerEdgeBefore <= -300
-      ? 'pulls the position back from the brink and dramatically shifts the momentum'
-      : payload.playerEdgeBefore >= 300
-        ? 'turns an already favorable position into a crushing one'
-        : 'swings what was a balanced game firmly in your favor';
+    const gain = payload.playerEdgeAfter - payload.playerEdgeBefore;
+    // Use a more nuanced direction that accounts for small swings (e.g. a simple
+    // queen trade in a balanced game) so "swings what was a balanced game" isn't
+    // applied to moves that barely change the evaluation.
+    //   playerEdgeBefore <= -300   → pulling back from bad position
+    //   playerEdgeBefore >=  300   → converting a winning position
+    //   gain >= 350                → massive swing from a balanced position
+    //   gain >= 200                → significant improvement from a balanced position
+    //   gain >= 100                → modest improvement from a balanced position
+    //   otherwise                  → minor improvement, describe concretely
+    let direction;
+    if (payload.playerEdgeBefore <= -300) {
+      direction = 'pulls the position back from the brink and dramatically shifts the momentum';
+    } else if (payload.playerEdgeBefore >= 300) {
+      direction = 'turns an already favorable position into a crushing one';
+    } else if (gain >= 350) {
+      // A genuine decisive gain from a starting point close to equal — not just
+      // a queen trade or equal exchange that the engine rates slightly higher.
+      direction = 'swings what was a balanced game firmly in your favor';
+    } else if (gain >= 200) {
+      direction = 'creates a significant advantage from a roughly balanced position';
+    } else {
+      direction = 'shifts the momentum in your favor — the engine\'s evaluation climbs as a result';
+    }
     return insight
       ? `${san} is a great move that ${direction}. ${this._capitalize(insight)}`
       : `${san} is a great move that ${direction}.`;
@@ -776,7 +795,13 @@ class BrowserMoveCoach {
       return `it captures the ${this.pieceNames[move.captured] || 'piece'} on ${move.to}`;
     }
 
-    const tactic = this._tacticLessonsForMove(payload, move)[0];
+    // Only include tactical lessons that describe the player's own move
+    // (forks, discovered attacks, removal of defender). Skip pin/skewer/loose
+    // piece lessons — they describe opponent weaknesses that are misleading
+    // in an error explanation ("Rc1 is an inaccuracy: the opponent's bishop
+    // on c2 is left undefended" — the user can defend it next move).
+    const tactic = this._tacticLessonsForMove(payload, move)
+      .find((t) => !/pin|skewer|undefended/i.test(t));
     if (tactic) return this._simplifyLesson(tactic);
 
     if (move.piece && move.piece !== 'p' && this._isBackRank(move.from, move.color) && !this._isBackRank(move.to, move.color)) {
@@ -952,7 +977,7 @@ class BrowserMoveCoach {
     const lessons = [];
     if (!payload.fenAfter || !move?.to || !move.piece) return lessons;
 
-    const fork = this._forkLesson(payload.fenAfter, move.to, move.color, move.piece, 'This move');
+    const fork = this._forkLesson(payload.fenAfter, move.to, move.color, move.piece, move, 'This move');
     if (fork) lessons.push(fork);
 
     const lineTactic = this._lineTacticLesson(payload.fenAfter, move.to, move.color, move.piece, 'This move');
@@ -973,14 +998,27 @@ class BrowserMoveCoach {
     return lessons.slice(0, 2);
   }
 
-  _forkLesson(fen, square, color, type, prefix = 'This move') {
+  _forkLesson(fen, square, color, type, move, prefix = 'This move') {
+    // Suppress the fork label when the move itself captures a high-value
+    // piece (queen or rook) — a queen trade or rook capture is not a fork,
+    // even if the moved piece also attacks other pieces from its new square.
+    if (move && move.captured) {
+      const capturedVal = this.pieceValues[move.captured] || 0;
+      if (capturedVal >= 5) return '';
+    }
+
     const attacks = this._attackedEnemyPieces(fen, square, color, type);
     const king = attacks.find((entry) => entry.piece.type === 'k');
     const targets = attacks
       .filter((entry) => entry.piece.type !== 'k' && (this.pieceValues[entry.piece.type] || 0) >= 3)
       .sort((a, b) => (this.pieceValues[b.piece.type] || 0) - (this.pieceValues[a.piece.type] || 0));
 
-    if (king && targets.length > 0) {
+    // A genuine fork attacks at least two valuable targets simultaneously.
+    // King + one other piece (e.g. a queen giving check while also attacking a
+    // lone bishop) is NOT a fork — the check+attack pattern is just a tactical
+    // threat, not a true fork. Require king + >=2 non-king targets, or >=2
+    // non-king targets without a king involved.
+    if (king && targets.length >= 2) {
       const target = targets[0];
       return `${prefix} creates a fork — it delivers check while simultaneously attacking the ${this.pieceNames[target.piece.type]} on ${target.square}.`;
     }
@@ -1384,6 +1422,8 @@ class MoveAnalyzer {
     this.analysisDepth = 14;
     this.multiPvCount = 3;
     this.fallbackTimeoutMs = 12000;
+    this.searchMode = 'depth';
+    this.movetimeMs = 0;
     this.bookPly = 16;
     this.coach = new BrowserMoveCoach(this);
   }
@@ -1392,6 +1432,35 @@ class MoveAnalyzer {
     this.analysisDepth = profile.depth || this.analysisDepth;
     this.multiPvCount = profile.multiPv || this.multiPvCount;
     this.fallbackTimeoutMs = profile.timeoutMs || this.fallbackTimeoutMs;
+    // Opt-in movetime mode for server review: when mode==='movetime', searches
+    // use `go movetime N` instead of `go depth N`. Browser review omits this
+    // (stays on depth). movetimeMs is the per-position search budget in ms.
+    // 'depth+movetime' sends `go depth N movetime M` — used for the two-pass
+    // server review (quick-scan at moderate depth with a tight ceiling, deep
+    // re-analysis at high depth with a generous ceiling).
+    if (profile.mode === 'movetime' && Number(profile.movetimeMs) > 0) {
+      this.searchMode = 'movetime';
+      this.movetimeMs = Math.floor(Number(profile.movetimeMs));
+    } else if (profile.mode === 'depth+movetime' && Number(profile.movetimeMs) > 0) {
+      this.searchMode = 'depth+movetime';
+      this.movetimeMs = Math.floor(Number(profile.movetimeMs));
+    } else {
+      this.searchMode = 'depth';
+      this.movetimeMs = 0;
+    }
+  }
+
+  // Engine-call options reflecting the current search mode. Passed as the
+  // trailing options arg to the server engine's evaluate/evaluateMultiPV.
+  // Browser engines ignore the extra arg (their methods don't read it).
+  _searchOptions() {
+    if (this.searchMode === 'movetime') {
+      return { mode: 'movetime', movetimeMs: this.movetimeMs };
+    }
+    if (this.searchMode === 'depth+movetime') {
+      return { mode: 'depth+movetime', movetimeMs: this.movetimeMs };
+    }
+    return {};
   }
 
   scoreToCp(score, scoreType) {
@@ -1483,19 +1552,32 @@ class MoveAnalyzer {
     return null;
   }
 
-  _cpLoss(bestScoreAfter, playedScoreAfter, isWhitePlaying) {
-    // When both evals are in the forced-mate band for the same side, the move
-    // is just advancing/defending a known mate — its cost is effectively 0 cp,
-    // never the ~10000 delta that would otherwise clamp to the 1200 ceiling.
-    // (mate band = |score| ≥ 9900.)
+  _cpLoss(scoreBefore, bestScoreAfter, playedScoreAfter, isWhitePlaying) {
+    // Returns centipawn loss vs the engine's BEST continuation (not the swing
+    // across the played move). The previous signature was mis-named — callers
+    // were passing (scoreBefore, scoreAfter) which made the function compute
+    // the position swing. With cpLoss-vs-best, the BLUNDER_CP=300 / MISTAKE_CP=150
+    // / INACCURACY_CP=50 thresholds (calibrated for cpLoss-vs-best) trigger
+    // correctly, and downstream accuracy (which uses playerEdgeBefore/After
+    // swings) reflects the real game-play quality.
+    //
+    // Mate-band short-circuit: when both evals are in the forced-mate band
+    // for the same side, the move is just advancing/defending a known mate —
+    // its cost is effectively 0 cp, never the ~10000 delta that would otherwise
+    // clamp at the 1200 ceiling. (mate band = |score| ≥ 9900.)
     const bb = Math.abs(bestScoreAfter);
     const ab = Math.abs(playedScoreAfter);
     if (bb >= 9900 && ab >= 9900 && ((bestScoreAfter >= 0) === (playedScoreAfter >= 0))) {
       return 0;
     }
-    const edgeBefore = isWhitePlaying ? bestScoreAfter : -bestScoreAfter;
-    const edgeAfter = isWhitePlaying ? playedScoreAfter : -playedScoreAfter;
-    const raw = Math.max(0, edgeBefore - edgeAfter);
+    // Express every edge in the player's perspective (positive = good for the mover).
+    const edgeBefore = isWhitePlaying ? scoreBefore      : -scoreBefore;
+    const edgeBest   = isWhitePlaying ? bestScoreAfter   : -bestScoreAfter;
+    const edgePlayed = isWhitePlaying ? playedScoreAfter : -playedScoreAfter;
+    // cpLoss-vs-best = how much better the best line is vs what was played,
+    // in the player's perspective. Clamp at 1200 so a single huge blunder
+    // doesn't poison averages.
+    const raw = Math.max(0, edgeBest - edgePlayed);
     return Math.min(raw, 1200);
   }
 
@@ -1746,13 +1828,11 @@ class MoveAnalyzer {
 
     // Fixed thresholds, same for all ratings/time controls. cpLoss is in
     // centipawns from the player's perspective (0 = top move, larger = worse).
-    // Tuned so a single tactical lapse near 100cp reads as inaccuracy, not
-    // mistake — fixed-depth eval wobble routinely lands at 100-150cp on the
-    // difference between "best" and the second-best line, and we don't want
-    // every such wiggle labeled Mistake (which has a red flag in the UI).
+    // If the eval changes by more than +1.0 (100cp) in a direction, it's
+    // normally a mistake — the player made a clearly suboptimal choice.
     const INACCURACY_CP = 50;
-    const MISTAKE_CP = 150;
-    const BLUNDER_CP = 300;
+    const MISTAKE_CP = 100;
+    const BLUNDER_CP = 250;
     const MATE_EDGE = -9000;            // "being mated" evaluation band
     const wasBeingMated = playerEdgeBefore <= MATE_EDGE;
     const opponentMateAfter = this._opponentImmediateMateAfter(fenBefore, moveSan);
@@ -1931,13 +2011,28 @@ class MoveAnalyzer {
 
 		    const value = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 		    const legalReplies = board.moves({ verbose: true });
+
+		    // If the move is a capture and the opponent has an equal or better
+		    // recapture on the same square, it's a trade — not a material loss.
+		    // Skip the recapture reply and only flag a tactic if a DIFFERENT
+		    // reply wins material.
+		    const recaptureSquares = new Set();
+		    if (moveObj.captured) {
+		      for (const reply of legalReplies) {
+		        if (reply.to === moveObj.to && reply.captured === moveObj.piece) {
+		          const capturedVal = value[moveObj.captured] || 0;
+		          const recapturedVal = value[reply.captured] || 0;
+		          if (capturedVal <= recapturedVal) {
+		            recaptureSquares.add(reply.to);
+		          }
+		        }
+		      }
+		    }
+
 		    for (const reply of legalReplies) {
 		      if (/#$/.test(reply.san || '')) return true;
-		      const equalOrBetterTradeRecapture = moveObj.captured
-		        && reply.to === moveObj.to
-		        && reply.captured === moveObj.piece
-		        && (value[moveObj.captured] || 0) >= (value[reply.captured] || 0);
-		      if (equalOrBetterTradeRecapture) continue;
+		      // Skip equal/better recaptures (trades)
+		      if (recaptureSquares.has(reply.to) && reply.captured === moveObj.piece) continue;
 		      if (reply.captured) {
 		        const attackerValue = reply.piece === 'k' ? (value[reply.captured] || 0) : (value[reply.piece] || 0);
 		        if ((value[reply.captured] || 0) - attackerValue >= 1) return true;
@@ -2281,14 +2376,14 @@ class MoveAnalyzer {
       }
 
       const fen = positions[i];
-      const cacheKey = `${fen}|${this.analysisDepth}|${this.multiPvCount}|${this.fallbackTimeoutMs}`;
+      const cacheKey = `${fen}|${this.analysisDepth}|${this.multiPvCount}|${this.fallbackTimeoutMs}|${this.searchMode}|${this.movetimeMs}`;
       if (cache.has(cacheKey)) {
         evals.push(cache.get(cacheKey));
         continue;
       }
 
       const isWhiteToMove = fen.split(' ')[1] === 'w';
-      const multi = await engine.evaluateMultiPV(fen, this.analysisDepth, this.multiPvCount, this.fallbackTimeoutMs);
+      const multi = await engine.evaluateMultiPV(fen, this.analysisDepth, this.multiPvCount, this.fallbackTimeoutMs, this._searchOptions());
       let lines = (multi.lines || []).map((line) => {
         const pvTokens = (line.pv || '').split(/\s+/).filter(Boolean);
         const move = pvTokens.length > 0 ? pvTokens[0] : '';
@@ -2305,7 +2400,7 @@ class MoveAnalyzer {
       lines = this._orderLinesForSide(lines, isWhiteToMove);
 
 	      if (lines.length === 0) {
-	        const fallback = await engine.evaluate(fen, this.analysisDepth, this.fallbackTimeoutMs);
+	        const fallback = await engine.evaluate(fen, this.analysisDepth, this.fallbackTimeoutMs, this._searchOptions());
 	        const cp = this.normalizeScore(fallback.score, fallback.scoreType, isWhiteToMove);
 	        lines.push({
 	          cp,
@@ -2348,7 +2443,7 @@ class MoveAnalyzer {
   // Shared by the serial and pooled paths so they produce identical results.
   async _evaluateOnePosition(fen, engine) {
     const isWhiteToMove = fen.split(' ')[1] === 'w';
-    const multi = await engine.evaluateMultiPV(fen, this.analysisDepth, this.multiPvCount, this.fallbackTimeoutMs);
+    const multi = await engine.evaluateMultiPV(fen, this.analysisDepth, this.multiPvCount, this.fallbackTimeoutMs, this._searchOptions());
     let lines = (multi.lines || []).map((line) => {
       const pvTokens = (line.pv || '').split(/\s+/).filter(Boolean);
       const move = pvTokens.length > 0 ? pvTokens[0] : '';
@@ -2365,7 +2460,7 @@ class MoveAnalyzer {
     lines = this._orderLinesForSide(lines, isWhiteToMove);
 
     if (lines.length === 0) {
-      const fallback = await engine.evaluate(fen, this.analysisDepth, this.fallbackTimeoutMs);
+      const fallback = await engine.evaluate(fen, this.analysisDepth, this.fallbackTimeoutMs, this._searchOptions());
       const cp = this.normalizeScore(fallback.score, fallback.scoreType, isWhiteToMove);
       lines.push({
         cp,
@@ -2416,7 +2511,7 @@ class MoveAnalyzer {
 
     let completed = 0;
     let nextIndex = 0;
-    const cacheKeyFor = (fen) => `${fen}|${this.analysisDepth}|${this.multiPvCount}|${this.fallbackTimeoutMs}`;
+    const cacheKeyFor = (fen) => `${fen}|${this.analysisDepth}|${this.multiPvCount}|${this.fallbackTimeoutMs}|${this.searchMode}|${this.movetimeMs}`;
 
     const worker = async (engine) => {
       while (true) {
@@ -2552,7 +2647,12 @@ class MoveAnalyzer {
       const bestMoveSan = this.uciToSan(fen, bestMove);
       const opponentBestMove = evals[i + 1]?.bestMove || '';
       const opponentBestMoveSan = opponentBestMove ? this.uciToSan(fenAfter, opponentBestMove) : '';
-	      const cpLoss = this._cpLoss(scoreBefore, scoreAfter, isWhitePlaying);
+	      // cpLoss-vs-best: pass the engine's top-line eval (after the best move)
+	      // as bestScoreAfter, not scoreBefore (which would be the swing).
+	      const bestLineCp = evals[i].lines[0]
+	        ? this.whiteAbsCp(evals[i].lines[0].cp, fen)
+	        : scoreBefore;
+	      const cpLoss = this._cpLoss(scoreBefore, bestLineCp, scoreAfter, isWhitePlaying);
 	      const phase = this._phaseFromFen(fen, movePly);
 
       // gapToSecond measures how much better the top move is than the next
@@ -2751,40 +2851,39 @@ class MoveAnalyzer {
     return this._winProbAccuracy(played);
   }
 
-  // chess.com CAPS2-style accuracy. The mean per-move win-probability loss is
-  // converted to a 0-100 score via chess.com's published transform. Key choices
-  // that make it land like the CAPS2 reference (most scores 50-95, no 99.9 for
-  // imperfect play, no demoralizing single digits at the low end):
-  //  - the transform is applied to the MEAN loss (transform-of-mean), not the
-  //    mean of per-move transforms. Averaging per-move transforms reads too
-  //    high (Jensen), so imperfect games hit 99 — the old CAPS1 complaint.
-  //  - win-probability is computed with a FIXED winning-chance logistic constant
-  //    (0.00368208) from White-absolute centipawn edges, NOT the rating-scaled
-  //    expectedLoss used elsewhere. CAPS2 "compares against the top engine
-  //    recommendations" and must be rating-independent.
-  // `moves` are pre-filtered by the caller (color + non-book); each carries
-  // playerEdgeBefore/playerEdgeAfter in White-absolute centipawns.
+  // CAPS2-style accuracy using per-move classification weights.
+  // Each move is scored based on its classification (Best, Excellent, Good,
+  // Inaccuracy, Mistake, Blunder, etc.) and the scores are averaged to
+  // produce a final 0-100 accuracy number. This mimics chess.com's school-
+  // grading approach where a game with several inaccuracies, mistakes, and
+  // blunders scores significantly lower than a clean game.
+  //
+  // Moves are pre-filtered by the caller (color + non-book); each carries a
+  // classificationKey set by classifyMove().
   _winProbAccuracy(moves) {
     if (!moves || moves.length === 0) return 100;
-    const WIN_CHANCE_K = 0.00368208;
-    const winPercent = (edgeCp) => {
-      if (edgeCp >= 9900) return 100;
-      if (edgeCp <= -9900) return 0;
-      return 100 / (1 + Math.exp(-WIN_CHANCE_K * edgeCp));
+    const weights = {
+      BRILLIANT: 100,
+      GREAT: 99,
+      BEST: 96,
+      EXCELLENT: 90,
+      GOOD: 78,
+      INACCURACY: 50,
+      MISTAKE: 22,
+      BLUNDER: 5,
+      MISS: 10,
     };
-    let totalLoss = 0;
+    let total = 0;
     let counted = 0;
     for (const move of moves) {
-      const before = typeof move.playerEdgeBefore === 'number' ? move.playerEdgeBefore : 0;
-      const after = typeof move.playerEdgeAfter === 'number' ? move.playerEdgeAfter : before;
-      const drop = winPercent(before) - winPercent(after);
-      totalLoss += drop > 0 ? drop : 0;
-      counted++;
+      const w = weights[move.classificationKey];
+      if (w !== undefined) {
+        total += w;
+        counted++;
+      }
     }
     if (counted === 0) return 100;
-    const meanLoss = totalLoss / counted;
-    const accuracy = 103.1668 * Math.exp(-0.04354 * meanLoss) - 3.1669;
-    return Math.round(clamp(accuracy, 0, 100));
+    return Math.round(clamp(total / counted, 0, 100));
   }
 
 	  _bestMoveAccuracyScore(moveResults, color) {

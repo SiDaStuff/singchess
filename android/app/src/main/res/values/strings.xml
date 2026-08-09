@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Sing Chess</string>
+    <string name="title_activity_main">Sing Chess</string>
+    <string name="package_name">com.singdev.chess</string>
+    <string name="custom_url_scheme">com.singdev.chess</string>
+</resources>

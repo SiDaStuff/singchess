@@ -5,6 +5,7 @@ import './engine.js';
 import './chess-core.js';
 import './app-dialog.js';
 import './boost.js';
+import './recaptcha.js';
 import './coach-chat.js';
 import './header.js';
 import './footer.js';

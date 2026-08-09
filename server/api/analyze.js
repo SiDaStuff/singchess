@@ -4,6 +4,7 @@ const {
   incrementPublicStats,
 } = require('./_lib/firebase-stats');
 const { requireQuota, isPaidOrAbove } = require('./_lib/user-service');
+const { acquireHeavyAction, releaseHeavyAction, getBusyAction } = require('./_lib/action-lock');
 const crypto = require('crypto');
 
 const SERVER_POSITION_BATCH_LIMIT = 12;
@@ -17,24 +18,124 @@ function _detectThreadCount() {
   return Math.min(cores, 4);
 }
 
-// Default review profiles tuned for speed while maintaining quality.
-// Depth 14 is the speed/quality sweet spot for non-boost reviews: at fixed
-// depth lite-single reaches depth 14 in ~0.6s/position (vs ~1.3s at 16),
-// roughly halving review wall-clock while leaving move classifications
-// essentially unchanged. Boost "strong" reviews use SERVER_STRONG below.
+// Server review profiles — two-pass analysis.
+//
+// Pass 1 (Quick-scan): every position is evaluated at a moderate depth with a
+//   tight movetime ceiling. This catches big blunders and eval swings fast.
+// Pass 2 (Deep re-analysis): only positions flagged as critical moments are
+//   re-evaluated at a higher depth with a generous movetime ceiling. One gnarly
+//   tactical position can't stall the whole queue.
+//
+// Normal review: quick-scan depth 12 / movetime 300ms, mid depth 14 / movetime 2000ms,
+//   deep depth 16 / movetime 4000ms. Critical moments get a mid-depth pass; the most
+//   severe ("really big") moments get an extra deepest pass.
+// Strong review:  quick-scan depth 16 / movetime 500ms, deep depth 22 / movetime 8000ms
 const _threads = _detectThreadCount();
+const SERVER_FAST_PROFILE = {
+  mode: 'depth+movetime', depth: 10, movetimeMs: 200, multiPv: 2, timeoutMs: 3000,
+};
 const SERVER_REVIEW_PROFILE = {
-  depth: 14,
-  multiPv: 3,
-  timeoutMs: 5000,
+  quickScan: { mode: 'depth+movetime', depth: 12, movetimeMs: 300, multiPv: 3, timeoutMs: 5000 },
+  mid:       { mode: 'depth+movetime', depth: 14, movetimeMs: 2000, multiPv: 3, timeoutMs: 6000 },
+  deep:      { mode: 'depth+movetime', depth: 16, movetimeMs: 4000, multiPv: 3, timeoutMs: 10000 },
   threads: _threads,
 };
 const SERVER_STRONG_REVIEW_PROFILE = {
-  depth: 18,
-  multiPv: 3,
-  timeoutMs: 8000,
+  quickScan: { mode: 'depth+movetime', depth: 16, movetimeMs: 500, multiPv: 3, timeoutMs: 6000 },
+  deep:      { mode: 'depth+movetime', depth: 22, movetimeMs: 8000, multiPv: 3, timeoutMs: 15000 },
   threads: _threads,
 };
+
+// Critical moments whose severity is at or above this threshold are treated as
+// "really big moves" and get the deepest re-analysis pass (depth 16) in normal
+// review. Lower-severity critical moments only get the mid-depth pass (14).
+const REALLY_BIG_SEVERITY = 1.0;
+
+// Build a review profile object from a profile spec + user multiPv override.
+function _reviewProfile(spec, profile) {
+  return {
+    mode: spec.mode,
+    movetimeMs: spec.movetimeMs,
+    depth: spec.depth,
+    multiPv: Math.max(1, Math.min(Number(profile.multiPv) || spec.multiPv, spec.multiPv)),
+    timeoutMs: spec.timeoutMs,
+  };
+}
+
+// Re-analyze critical moments after the quick-scan pass.
+//
+// Normal review uses a three-tier ladder: every critical moment gets a mid-depth
+// pass (14), and the most severe "really big" moments (severityScore >=
+// REALLY_BIG_SEVERITY) get an extra deepest pass (16). Strong review keeps its
+// single deep pass (22) on all critical moments.
+//
+// Returns the patched evals array aligned with `quickResults` (non-critical
+// entries carry over the quick-scan eval).
+async function _deepenCriticalMoments({ analyzer, engines, moves, initialFen, quickResults, baseProfile, profile, onProgress }) {
+  const positions = analyzer._positionsForMoves(moves, initialFen);
+  const criticalIndices = [];
+  for (let i = 0; i < quickResults.length; i++) {
+    if (quickResults[i].isCriticalMoment) criticalIndices.push(i);
+  }
+  if (criticalIndices.length === 0) return null;
+
+  const patchedEvals = [...quickResults.map((r) => ({
+    cp: r.evalBefore,
+    bestMove: r.bestMove,
+    pv: r.bestMovePv,
+    pvSan: r.bestMovePvSan,
+    depth: r.depth,
+    lines: (r.alternatives || []).map((alt) => ({
+      cp: alt.eval,
+      move: alt.moveUci,
+      pvUci: alt.pvUci || '',
+      pvSan: alt.pvSan || '',
+      depth: r.depth,
+    })),
+  }))];
+
+  // Map a pooled (completed, total) count to the game move index of the
+  // furthest critical moment being analyzed. Critical FENs are pulled in game
+  // order, so the `completed`-th critical moment is the furthest one underway.
+  const gameIndexFor = (indices, completed) => {
+    const k = Math.min(Math.max(0, completed), indices.length - 1);
+    return indices[k];
+  };
+
+  // Mid-depth pass (14) on every critical moment.
+  if (baseProfile.mid) {
+    analyzer.setReviewProfile(_reviewProfile(baseProfile.mid, profile));
+    const midFens = criticalIndices.map((idx) => positions[idx]);
+    const midEvals = await withEngineQueue(() => analyzer.evaluatePositionsPooled(
+      midFens, engines,
+      onProgress
+        ? (completed, total) => onProgress(completed, total, 'mid', gameIndexFor(criticalIndices, completed), moves.length)
+        : null,
+    ));
+    for (let k = 0; k < criticalIndices.length; k++) patchedEvals[criticalIndices[k]] = midEvals[k];
+  }
+
+  // Deepest pass. For normal review (which has a mid pass), only the "really
+  // big" critical moments (severityScore >= REALLY_BIG_SEVERITY) get it. For
+  // strong review (no mid pass), every critical moment gets the deep pass.
+  const deepTargets = baseProfile.mid
+    ? criticalIndices.filter((idx) => (quickResults[idx].severityScore || 0) >= REALLY_BIG_SEVERITY)
+    : criticalIndices;
+  if (deepTargets.length > 0 && baseProfile.deep) {
+    analyzer.setReviewProfile(_reviewProfile(baseProfile.deep, profile));
+    const deepFens = deepTargets.map((idx) => positions[idx]);
+    const deepEvals = await withEngineQueue(() => analyzer.evaluatePositionsPooled(
+      deepFens,
+      engines,
+      onProgress
+        ? (completed, total) => onProgress(completed, total, 'deep', gameIndexFor(deepTargets, completed), moves.length)
+        : null,
+    ));
+    for (let k = 0; k < deepTargets.length; k++) patchedEvals[deepTargets[k]] = deepEvals[k];
+  }
+
+  return patchedEvals;
+}
 
 let engineChain = Promise.resolve();
 let activeAnalysisJobs = 0;
@@ -67,24 +168,29 @@ function cacheSet(key, value) {
 }
 
 function cachedEngineAdapter(engine) {
+  // The trailing options arg carries mode/movetimeMs for server review.
+  // Cache keys include the resolved mode + budget so depth- and movetime-mode
+  // results for the same FEN never collide.
+  const optKey = (options) =>
+    options && options.mode === 'movetime' ? `|mt|${options.movetimeMs}` : '|dep';
   return {
     get ready() {
       return engine.ready;
     },
     newGame: () => engine.newGame(),
-    evaluate: async (fen, depth, timeoutMs) => {
-      const key = `eval|${depth}|${hashFen(fen)}`;
+    evaluate: async (fen, depth, timeoutMs, options) => {
+      const key = `eval|${depth}|${hashFen(fen)}${optKey(options)}`;
       const cached = cacheGet(key);
       if (cached) return cached;
-      const result = await engine.evaluate(fen, depth, timeoutMs);
+      const result = await engine.evaluate(fen, depth, timeoutMs, options);
       cacheSet(key, result);
       return result;
     },
-    evaluateMultiPV: async (fen, depth, numPV, timeoutMs) => {
-      const key = `multipv|${depth}|${numPV}|${hashFen(fen)}`;
+    evaluateMultiPV: async (fen, depth, numPV, timeoutMs, options) => {
+      const key = `multipv|${depth}|${numPV}|${hashFen(fen)}${optKey(options)}`;
       const cached = cacheGet(key);
       if (cached) return cached;
-      const result = await engine.evaluateMultiPV(fen, depth, numPV, timeoutMs);
+      const result = await engine.evaluateMultiPV(fen, depth, numPV, timeoutMs, options);
       cacheSet(key, result);
       return result;
     },
@@ -218,25 +324,31 @@ exports.handler = async (event, context = {}) => {
     });
   }
 
+  const uid = quotaState?.user?.uid || null;
+  if (!acquireHeavyAction(uid, 'review')) {
+    const busy = getBusyAction(uid);
+    return json(429, {
+      error: busy === 'coach'
+        ? 'You already have a coach chat running. Please wait for it to finish before starting a review.'
+        : 'You already have a review running. Please wait for it to finish.',
+      code: 'heavy_action_busy',
+    });
+  }
+
       const Chess = loadChess();
         const { MoveAnalyzer } = loadAnalyzer();
 	      const analyzer = new MoveAnalyzer();
 	      const profile = payload.profile || {};
       const preferFullServer = isPaidOrAbove(quotaState.plan?.plan, 'boost') && profile.serverEngine === 'full';
+      const isFast = profile.strength === 'fast';
       const isStrong = preferFullServer && profile.strength === 'strong';
-      const baseProfile = isStrong ? SERVER_STRONG_REVIEW_PROFILE : SERVER_REVIEW_PROFILE;
-      analyzer.setReviewProfile({
-        depth: Math.max(baseProfile.depth, Math.min(Number(profile.depth) || baseProfile.depth, isStrong ? 20 : 18)),
-        multiPv: Math.max(1, Math.min(Number(profile.multiPv) || baseProfile.multiPv, isStrong ? 4 : 3)),
-        // Per-move cap from the client strength tier (Quick 1s / Standard 1.5s /
-        // Thorough 2s). Floor at 1s so the tier latency actually takes effect.
-        timeoutMs: Math.max(1000, Math.min(Number(profile.timeoutMs) || baseProfile.timeoutMs, baseProfile.timeoutMs)),
-      });
+      const baseProfile = isFast ? SERVER_FAST_PROFILE : (isStrong ? SERVER_STRONG_REVIEW_PROFILE : SERVER_REVIEW_PROFILE);
 
   const initialFen = payload.initialFen || payload.headers?.FEN || undefined;
   if (initialFen) {
     const validation = new Chess();
     if (!validation.load(initialFen)) {
+      releaseHeavyAction(uid);
       return json(400, { error: 'Invalid initial FEN.' });
     }
   }
@@ -246,6 +358,7 @@ exports.handler = async (event, context = {}) => {
         const engines = await getEngineAdapters(preferFullServer);
         const reviewEngine = engines[0];
       if (positions.length > 0) {
+        // Raw position evaluation (no game context) — single pass only.
         const evals = await withEngineQueue(() => analyzer.evaluatePositionsPooled(positions, engines, null));
         let publicStats = null;
         try {
@@ -268,7 +381,49 @@ exports.handler = async (event, context = {}) => {
       if (moves.length > 50) {
         analyzer._mateThreat = () => null;
       }
-      const results = await withEngineQueue(() => analyzer.analyzeGame(moves, reviewEngine, null, { initialFen, headers: payload.headers || {}, engines }));
+
+      // ── Server review ──────────────────────────────────────────────
+      let results;
+      if (isFast) {
+        // Fast mode: single pass at low depth, no re-analysis.
+        analyzer.setReviewProfile({
+          mode: baseProfile.mode,
+          movetimeMs: baseProfile.movetimeMs,
+          depth: baseProfile.depth,
+          multiPv: Math.max(1, Math.min(Number(profile.multiPv) || baseProfile.multiPv, baseProfile.multiPv)),
+          timeoutMs: baseProfile.timeoutMs,
+        });
+        results = await withEngineQueue(() => analyzer.analyzeGame(moves, reviewEngine, null, { initialFen, headers: payload.headers || {}, engines }));
+      } else {
+        // Two-pass: Quick-scan every position, then re-analysis on critical
+        // moments (mid-depth 14, plus deepest 16 on "really big" moments).
+        const quickProfile = baseProfile.quickScan;
+        analyzer.setReviewProfile(_reviewProfile(quickProfile, profile));
+        const quickResults = await withEngineQueue(() => analyzer.analyzeGame(moves, reviewEngine, null, { initialFen, headers: payload.headers || {}, engines }));
+
+        const patchedEvals = await _deepenCriticalMoments({
+          analyzer,
+          baseProfile,
+          engines,
+          moves,
+          initialFen,
+          quickResults,
+          profile,
+          onProgress: null,
+        });
+
+        if (patchedEvals) {
+          const positions = analyzer._positionsForMoves(moves, initialFen);
+          const opening = quickResults.opening;
+          results = await analyzer.resultsFromEvals(moves, positions, patchedEvals, opening, {
+            initialFen,
+            headers: payload.headers || {},
+            skipMateThreat: moves.length > 50,
+          });
+        } else {
+          results = quickResults;
+        }
+      }
       let publicStats = null;
       try {
         publicStats = await incrementPublicStats({ movesAnalyzed: moves.length });
@@ -313,8 +468,10 @@ exports.handler = async (event, context = {}) => {
       // and crash the process.
       resetServerEngine();
     }
+    releaseHeavyAction(uid);
     return retryable(err.message || 'Server analysis failed.');
   }
+  releaseHeavyAction(uid);
 };
 
 function sseWrite(res, event, data) {
@@ -370,6 +527,19 @@ exports.streamHandler = async (req, res) => {
     return;
   }
 
+  const uid = quotaState?.user?.uid || null;
+  if (!acquireHeavyAction(uid, 'review')) {
+    const busy = getBusyAction(uid);
+    sseWrite(res, 'error', {
+      error: busy === 'coach'
+        ? 'You already have a coach chat running. Please wait for it to finish before starting a review.'
+        : 'You already have a review running. Please wait for it to finish.',
+      code: 'heavy_action_busy',
+    });
+    res.end();
+    return;
+  }
+
   try {
     await withAnalysisSlot(async (slotStatus) => {
       sseWrite(res, 'status', { message: 'started', queue: slotStatus });
@@ -378,18 +548,9 @@ exports.streamHandler = async (req, res) => {
 	      const analyzer = new MoveAnalyzer();
 	      const profile = payload.profile || {};
       const preferFullServer = isPaidOrAbove(quotaState.plan?.plan, 'boost') && profile.serverEngine === 'full';
+      const isFast = profile.strength === 'fast';
       const isStrong = preferFullServer && profile.strength === 'strong';
-      const baseSseProfile = isStrong ? SERVER_STRONG_REVIEW_PROFILE : SERVER_REVIEW_PROFILE;
-      analyzer.setReviewProfile({
-        // Honor the client's strength-tier depth when provided (Quick 12 /
-        // Standard 14 / Thorough 18, or a custom advanced depth), clamped to a
-        // sensible server range. Falls back to the base profile otherwise.
-        depth: Math.max(8, Math.min(Number(profile.depth) || baseSseProfile.depth, isStrong ? 20 : 18)),
-        multiPv: Math.max(1, Math.min(Number(profile.multiPv) || baseSseProfile.multiPv, baseSseProfile.multiPv)),
-        // Per-move cap from the client strength tier (Quick 1s / Standard 1.5s /
-        // Thorough 2s). Floor at 1s so the tier latency actually takes effect.
-        timeoutMs: Math.max(1000, Math.min(Number(profile.timeoutMs) || baseSseProfile.timeoutMs, baseSseProfile.timeoutMs)),
-      });
+      const baseSseProfile = isFast ? SERVER_FAST_PROFILE : (isStrong ? SERVER_STRONG_REVIEW_PROFILE : SERVER_REVIEW_PROFILE);
 
       const initialFen = payload.initialFen || payload.headers?.FEN || undefined;
       if (initialFen) {
@@ -402,25 +563,65 @@ exports.streamHandler = async (req, res) => {
       if (moves.length > 50) {
         analyzer._mateThreat = () => null;
       }
-      const evals = await withEngineQueue(() => analyzer.evaluatePositionsPooled(
-        positions,
-        engines,
-        (completed, total) => {
-          if (res.destroyed) return;
-          sseWrite(res, 'progress', {
-            completed,
-            total,
-          });
-        },
-      ));
 
-      const results = await analyzer.resultsFromEvals(
-        moves,
-        positions,
-        evals,
-        analyzer.detectOpening(moves),
-        { initialFen, headers: payload.headers || {}, skipMateThreat: true }
-      );
+      // ── Server review (streaming) ───────────────────────────────────
+      let results;
+      if (isFast) {
+        // Fast mode: single pass at low depth, no re-analysis.
+        analyzer.setReviewProfile({
+          mode: baseSseProfile.mode,
+          movetimeMs: baseSseProfile.movetimeMs,
+          depth: baseSseProfile.depth,
+          multiPv: Math.max(1, Math.min(Number(profile.multiPv) || baseSseProfile.multiPv, baseSseProfile.multiPv)),
+          timeoutMs: baseSseProfile.timeoutMs,
+        });
+        const evals = await withEngineQueue(() => analyzer.evaluatePositionsPooled(
+          positions, engines,
+          (completed, total) => {
+            if (res.destroyed) return;
+            const moveIndex = Math.min(Math.max(0, completed), moves.length - 1);
+            sseWrite(res, 'progress', { completed, total, pass: 'quick', moveIndex, totalMoves: moves.length });
+          },
+        ));
+        results = await analyzer.resultsFromEvals(moves, positions, evals, analyzer.detectOpening(moves), { initialFen, headers: payload.headers || {}, skipMateThreat: true });
+      } else {
+        // Two-pass: Quick-scan every position, then re-analysis on critical
+        // moments (mid-depth 14, plus deepest 16 on "really big" moments).
+        const quickProfile = baseSseProfile.quickScan;
+        analyzer.setReviewProfile(_reviewProfile(quickProfile, profile));
+        const quickEvals = await withEngineQueue(() => analyzer.evaluatePositionsPooled(
+          positions, engines,
+          (completed, total) => {
+            if (res.destroyed) return;
+            const moveIndex = Math.min(Math.max(0, completed), moves.length - 1);
+            sseWrite(res, 'progress', { completed, total, pass: 'quick', moveIndex, totalMoves: moves.length });
+          },
+        ));
+        const quickResults = await analyzer.resultsFromEvals(moves, positions, quickEvals, analyzer.detectOpening(moves), { initialFen, headers: payload.headers || {}, skipMateThreat: true });
+
+        const patchedEvals = await _deepenCriticalMoments({
+          analyzer,
+          baseProfile: baseSseProfile,
+          engines,
+          moves,
+          initialFen,
+          quickResults,
+          profile,
+          onProgress: (completed, total, pass, moveIndex, totalMoves) => {
+            if (res.destroyed) return;
+            const label = pass === 'deep'
+              ? `Deep-analyzing ${total} critical moment(s)`
+              : `Refining ${total} critical moment(s)`;
+            sseWrite(res, 'progress', { completed, total, pass, moveIndex, totalMoves, label });
+          },
+        });
+
+        if (patchedEvals) {
+          results = await analyzer.resultsFromEvals(moves, positions, patchedEvals, quickResults.opening, { initialFen, headers: payload.headers || {}, skipMateThreat: true });
+        } else {
+          results = quickResults;
+        }
+      }
 
       let publicStats = null;
       try {
@@ -473,6 +674,7 @@ exports.streamHandler = async (req, res) => {
     }
 	    sseWrite(res, 'error', { error: err.message || 'Server analysis failed.' });
   } finally {
+    releaseHeavyAction(uid);
     res.end();
   }
 };

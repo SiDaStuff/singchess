@@ -11,7 +11,7 @@ const json = (statusCode, body) => ({
 
 const CHESSCOM_HEADERS = {
   Accept: 'application/json',
-  'User-Agent': 'Mozilla/5.0 (compatible; SiDaStuffChess/1.0; +https://lichess.org)',
+  'User-Agent': 'Mozilla/5.0 (compatible; SingChess/1.0; +https://lichess.org)',
 };
 
 function splitPgnGames(text) {
@@ -75,21 +75,39 @@ async function lichessGames(username, limit) {
   });
 }
 
+// Cap how many month archives we walk. A user with years of history can have
+// dozens of month URLs; fetching them sequentially (the old behavior) made
+// loading slow and one hung month froze the whole request. We fetch the most
+// recent few months in PARALLEL with per-request timeouts instead — enough to
+// gather `limit` recent games for almost everyone.
+const CHESSCOM_MAX_MONTHS = 6;
+const CHESSCOM_ARCHIVE_TIMEOUT_MS = 10_000;
+const CHESSCOM_MONTH_TIMEOUT_MS = 12_000;
+
 async function chessComGames(username, limit) {
   const archiveResponse = await fetchCompat(`https://api.chess.com/pub/player/${encodeURIComponent(username)}/games/archives`, {
     headers: CHESSCOM_HEADERS,
+    timeoutMs: CHESSCOM_ARCHIVE_TIMEOUT_MS,
   });
   if (!archiveResponse.ok) throw chessComError(archiveResponse.status);
   const archiveData = await archiveResponse.json();
-  const archives = Array.isArray(archiveData.archives) ? archiveData.archives.slice().reverse() : [];
-  const games = [];
+  // Newest first, capped — parallel fetch of the slice, never the full history.
+  const archives = (Array.isArray(archiveData.archives) ? archiveData.archives.slice().reverse() : [])
+    .slice(0, CHESSCOM_MAX_MONTHS);
 
-  for (const monthUrl of archives) {
-    if (games.length >= Math.max(limit, 20)) break;
-    const monthResponse = await fetchCompat(monthUrl, { headers: CHESSCOM_HEADERS });
-    if (!monthResponse.ok) continue;
-    const monthData = await monthResponse.json();
-    for (const game of Array.isArray(monthData.games) ? monthData.games : []) {
+  // Fetch all capped months concurrently; a failed/timed-out month just yields
+  // no games rather than aborting the whole load. allSettled so one bad month
+  // can't reject the batch.
+  const settled = await Promise.allSettled(
+    archives.map((monthUrl) =>
+      fetchCompat(monthUrl, { headers: CHESSCOM_HEADERS, timeoutMs: CHESSCOM_MONTH_TIMEOUT_MS })
+        .then((r) => (r && r.ok ? r.json().catch(() => null) : null))
+    )
+  );
+  const games = [];
+  for (const result of settled) {
+    if (result.status !== 'fulfilled' || !result.value) continue;
+    for (const game of Array.isArray(result.value.games) ? result.value.games : []) {
       if (!game.pgn) continue;
       const headers = {
         ...readHeaders(game.pgn),

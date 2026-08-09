@@ -20,6 +20,7 @@
     activeId: null,
     streaming: false,
     abortController: null,
+    chatPid: null,        // backend instance pid for the active SSE (affinity backstop)
   };
 
   // ── DOM refs (resolved on mount) ─────────────────────────────────────
@@ -30,7 +31,7 @@
       'coach-chat-card', 'coach-chat-locked', 'coach-chat-body', 'coach-chat-messages',
       'coach-typing', 'coach-typing-text', 'coach-chat-form', 'coach-chat-textarea',
       'btn-coach-send', 'btn-coach-stop', 'coach-sidebar-list', 'btn-coach-new-chat',
-      'btn-coach-play-bot', 'coach-chat-subtitle', 'coach-usage-bar',
+      'btn-coach-play-bot', 'btn-coach-sidebar-toggle', 'coach-chat-subtitle', 'coach-usage-bar',
     ].forEach((id) => { el[id] = $(id); });
     el.modelSegs = document.querySelectorAll('.coach-model-seg');
   }
@@ -62,13 +63,29 @@
     renderMessages();
     focusInput();
   }
+
+  // Create a new chat preloaded with a reviewed game's context + the overview
+  // the user just generated as the first assistant message. The reviewContext
+  // is stored on the chat so every subsequent send() forwards it to the server
+  // (the coach answers follow-ups about the game without re-running a review).
+  function startWithContext({ reviewContext, firstAssistant }) {
+    const chat = { id: newId(), title: 'Reviewed game', createdAt: Date.now(), messages: [], reviewContext: reviewContext || null };
+    if (firstAssistant) chat.messages.push({ role: 'assistant', content: String(firstAssistant), ts: Date.now() });
+    state.chats.unshift(chat);
+    state.activeId = chat.id;
+    saveChats();
+    renderSidebar();
+    renderMessages();
+    focusInput();
+  }
   function selectChat(id) {
     if (state.streaming) return;
     state.activeId = id;
     saveChats();
     renderSidebar();
     renderMessages();
-    if (window.innerWidth <= 900) el['coach-chat-card']?.classList.remove('sidebar-open');
+    // On mobile, collapse sidebar after selecting a chat
+    if (window.innerWidth <= 720) el['coach-chat-card']?.classList.add('sidebar-collapsed');
   }
   function deleteChat(id) {
     // Guard: deleting the active chat mid-stream orphans send()'s closure and
@@ -250,6 +267,10 @@
   async function send() {
     if (state.streaming) return;
     if (isLocked()) return;
+    const app = state.app;
+    if (app && typeof app._canStartHeavyAction === 'function' && !app._canStartHeavyAction('coach', 'Coach Chat')) {
+      return;
+    }
     const ta = el['coach-chat-textarea'];
     const text = String(ta?.value || '').trim();
     if (!text) return;
@@ -267,6 +288,7 @@
     scrollMessages();
 
     state.streaming = true;
+    if (app && typeof app._setBusyAction === 'function') app._setBusyAction('coach');
     el['coach-chat-card']?.querySelector('.coach-chat-main')?.classList.add('busy');
     el['btn-coach-send'] && (el['btn-coach-send'].disabled = true);
     el['btn-coach-send'] && (el['btn-coach-send'].hidden = true);
@@ -293,7 +315,7 @@
         headers: await state.app._authHeaders({ 'Content-Type': 'application/json', Accept: 'text/event-stream' }),
         signal: controller.signal,
         cache: 'no-store',
-        body: JSON.stringify({ message: text, model: state.model, history }),
+        body: JSON.stringify({ message: text, model: state.model, history, reviewContext: chat.reviewContext || undefined }),
       });
       if (!response.ok) {
         let msg = `Coach error (${response.status}).`;
@@ -301,6 +323,7 @@
         throw new Error(msg);
       }
       await readStream(response, {
+        onInit: (data) => { if (data && data.pid) state.chatPid = data.pid; },
         onToken: (t) => {
           if (!assistantEl) { skeleton?.remove(); hideTyping(); assistantEl = buildBubble('assistant', ''); assistantEl.classList.add('streaming'); el['coach-chat-messages'].appendChild(assistantEl); }
           assistantText += t;
@@ -361,6 +384,7 @@
       clearTimeout(timeout);
       state.streaming = false;
       state.abortController = null;
+      if (app && typeof app._setBusyAction === 'function') app._setBusyAction(null);
       el['coach-chat-card']?.querySelector('.coach-chat-main')?.classList.remove('busy');
       el['btn-coach-send'] && (el['btn-coach-send'].disabled = false);
       el['btn-coach-send'] && (el['btn-coach-send'].hidden = false);
@@ -391,6 +415,7 @@
         let data = {};
         try { data = JSON.parse(dataLines.join('\n')); } catch (_) { continue; }
         if (event === 'token' && h.onToken) h.onToken(data.text || '');
+        else if (event === 'init' && h.onInit) h.onInit(data);
         else if (event === 'tool_call' && h.onToolCall) h.onToolCall(data);
         else if (event === 'tool_status' && h.onToolStatus) h.onToolStatus(data);
         else if (event === 'tool_result_visible' && h.onToolResultVisible) h.onToolResultVisible(data);
@@ -412,43 +437,106 @@
       if (name === 'ask_question') return await runAskQuestionTool(id, args);
       if (name === 'end_conversation') return await runEndConversationTool(id, args);
       if (name === 'show_board') return await runShowBoardTool(id, args);
-      if (name === 'puzzle') return await runPuzzleTool(id, args);
       throw new Error('Unsupported browser tool.');
     } catch (err) {
       await postToolResult(id, { error: err.message || 'Browser tool failed.' });
     }
   }
 
+  // Validate a FEN string well enough to reject obviously-malformed input
+  // before handing it to Stockfish. Stockfish will accept some illegal-looking
+  // positions but GARBAGE input silently returns depth:0/bestMove:'' — which
+  // the coach could mistake for a real "0.00" eval. Rejecting early sends a
+  // clear error back to the LLM instead of a false-positive zero eval.
+  function isValidFen(fen) {
+    if (typeof fen !== 'string') return false;
+    const f = fen.trim();
+    if (!f) return false;
+    const parts = f.split(/\s+/);
+    if (parts.length < 1 || parts.length > 6) return false;
+    const placement = parts[0];
+    if (!/^[pnbrqkPNBRQK1-8]+$/.test(placement)) return false;
+    const rows = placement.split('/');
+    if (rows.length !== 8) return false;
+    for (const row of rows) {
+      let len = 0, sawKing = false, kings = 0;
+      for (const ch of row) {
+        if (ch >= '1' && ch <= '8') { len += parseInt(ch, 10); }
+        else { len += 1; if (ch === 'k' || ch === 'K') kings++; }
+      }
+      if (len !== 8) return false;            // each rank must sum to 8 files
+      if (kings > 1) return false;             // can't have 2 kings on one rank
+    }
+    // Side-to-move (part 1) must be 'w' or 'b' if present.
+    if (parts[1] && parts[1] !== 'w' && parts[1] !== 'b') return false;
+    return true;
+  }
+
   // Post a browser-tool result back to the server so the parked SSE stream
   // resumes. Retry a couple of times on transient network failure — otherwise a
   // one-off blip strands the Coach on "thinking…" for the full 60s tool timeout.
+  // Returns the parsed server response { ok, note } so callers can detect a
+  // 'not_found' (wrong cluster instance) and react honestly.
   async function postToolResult(callId, result) {
-    const body = JSON.stringify({ callId, result });
+    const body = JSON.stringify({ callId, result, chatPid: state.chatPid || null });
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        await window.apiFetch('/api/coach/tool-result', {
+        const res = await window.apiFetch('/api/coach/tool-result', {
           method: 'POST',
           headers: await state.app._authHeaders({ 'Content-Type': 'application/json' }),
           cache: 'no-store',
           body,
         });
-        return;
+        let data = {};
+        try { data = await res.json(); } catch (_) {}
+        return data;
       } catch (_) {
-        if (attempt >= 3) return;
+        if (attempt >= 3) return { ok: false, note: 'network error' };
         await new Promise((r) => setTimeout(r, 400 * attempt));
       }
     }
+    return { ok: false };
   }
 
   async function runStockfishTool(id, args) {
-    showTyping('Analyzing the position…');
     const fen = String(args?.fen || '').trim();
-    const depth = Math.max(8, Math.min(24, Number(args?.depth) || 18));
-    if (!fen) throw new Error('No FEN provided.');
+    if (!fen) { await postToolResult(id, { error: 'No FEN provided.' }); return; }
+    if (!isValidFen(fen)) {
+      // The LLM sent an invalid FEN. Return a clear error — NEVER a silent
+      // score:0 result the model could cite as "+0.00, position is equal".
+      appendToolCard('stockfish', 'Invalid FEN — could not analyze.');
+      await postToolResult(id, { error: 'Invalid FEN. The position could not be parsed (check the piece placement, side to move, and ranks).' });
+      return;
+    }
     const app = state.app;
     if (!app.engine?.ready && app._initEngine) await app._initEngine();
-    if (!app.engine?.ready) throw new Error('Stockfish is not ready yet.');
-    const result = await app.engine.evaluate(fen, depth, Math.min(20000, depth * 1200));
+    if (!app.engine?.ready) {
+      appendToolCard('stockfish', 'Engine not ready — could not analyze.');
+      await postToolResult(id, { error: 'Stockfish engine is not ready yet. Wait for it to load and try again.' });
+      return;
+    }
+
+    // Use iterative deepening — no fixed depth cap. Show progress on each
+    // depth increase so the user sees the engine working.
+    showTyping('Analyzing position…');
+    let lastDepth = 0;
+    const result = await app.engine.evaluateInfinite(fen, 20000, (info) => {
+      if (info.depth > lastDepth) {
+        lastDepth = info.depth;
+        showTyping(`Depth ${info.depth}${info.score !== undefined ? ` (${info.scoreType === 'mate' ? `#${info.score}` : (info.score / 100).toFixed(2)})` : ''}…`);
+      }
+    });
+
+    // Guard against a useless/empty result. A timed-out search returns
+    // { score: 0, scoreType: 'cp', bestMove: '', depth: 0, timedOut: true }.
+    // Feeding that to the LLM risks it citing "+0.00, position is balanced" as
+    // a real eval. Instead, flag it as a timeout so the system prompt's ERROR
+    // HANDLING rule kicks in (honest "I couldn't verify that").
+    if (result && result.timedOut && !result.bestMove) {
+      appendToolCard('stockfish', 'Analysis timed out — no verified result.');
+      await postToolResult(id, { error: 'Stockfish analysis timed out before producing a result. No verified evaluation is available.' });
+      return;
+    }
     await postToolResult(id, result);
   }
 
@@ -522,6 +610,11 @@
   async function runShowBoardTool(id, args) {
     const fen = String(args?.fen || '').trim();
     if (!fen) { await postToolResult(id, { error: 'No FEN provided.' }); return; }
+    if (!isValidFen(fen)) {
+      appendToolCard('show_board', 'Invalid FEN — no board shown.');
+      await postToolResult(id, { error: 'Invalid FEN. No board could be rendered.' });
+      return;
+    }
     hideTyping();
     const box = el['coach-chat-messages']; if (!box) { await postToolResult(id, { shown: false }); return; }
     const card = document.createElement('div');
@@ -532,44 +625,6 @@
     card.appendChild(boardDiv);
     box.appendChild(card); scrollMessages();
     await postToolResult(id, { shown: true });
-  }
-
-  // puzzle: open a SweetAlert popup with a position for the user to solve.
-  async function runPuzzleTool(id, args) {
-    const fen = String(args?.fen || '').trim();
-    const title = String(args?.title || 'Solve this position');
-    const instruction = String(args?.instruction || args?.text || 'Find the best move.');
-    const solution = String(args?.solution || '').trim();
-    if (!fen) { await postToolResult(id, { solved: false, error: 'No FEN provided.' }); return; }
-    const boardHtml = renderBoardEmbed(fen);
-    // Show the puzzle popup; user can reveal the solution or close. AWAIT the
-    // popup so we only post the tool result + the tool card AFTER the user has
-    // actually interacted (previously the card showed "done" before they moved,
-    // and a dismissed popup left the LLM blocked until the 60s timeout).
-    if (window.Swal && window.Swal.fire) {
-      let result;
-      try { result = await window.Swal.fire({
-        title,
-        html: `<div class="coach-puzzle-popup">${boardHtml}</div><p style="margin-top:12px;font-size:0.9rem;color:var(--text-secondary);">${escapeHtml(instruction)}</p>`,
-        confirmButtonText: solution ? 'Reveal solution' : 'Got it',
-        showCancelButton: true,
-        cancelButtonText: 'Close',
-        showDenyButton: !!solution,
-        denyButtonText: 'I solved it!',
-      }); } catch (_) { result = { isDismissed: true }; }
-      let outcome;
-      if (result.isDenied) { outcome = { solved: true }; }
-      else if (result.isConfirmed && solution) {
-        outcome = { revealed: true };
-        window.Swal.fire({ title: 'Solution', text: solution, icon: 'info' });
-      } else { outcome = { closed: true }; }
-      await postToolResult(id, outcome);
-      appendToolCard('puzzle', `${title} — ${outcome.solved ? 'solved' : outcome.revealed ? 'solution revealed' : 'closed'}`);
-    } else {
-      window.confirm(title + '\n' + instruction);
-      await postToolResult(id, { closed: true });
-      appendToolCard('puzzle', `${title} — closed`);
-    }
   }
 
   // SweetAlert popup promise -> boolean isConfirmed.
@@ -736,9 +791,16 @@
   function applyLockedState() {
     const ta = el['coach-chat-textarea'];
     const send = el['btn-coach-send'];
+    const app = state.app;
+    const reviewRunning = app && typeof app._isBusyWithHeavyAction === 'function' && app.busyAction === 'review';
     const locked = isLocked();
-    if (ta) { ta.disabled = locked; if (locked) ta.placeholder = 'This conversation has been ended.'; else ta.placeholder = 'Ask the coach anything about chess…'; }
-    if (send) send.disabled = locked || state.streaming;
+    if (ta) {
+      ta.disabled = locked || reviewRunning;
+      if (locked) ta.placeholder = 'This conversation has been ended.';
+      else if (reviewRunning) ta.placeholder = 'A game review is running. Wait for it to finish.';
+      else ta.placeholder = 'Ask the coach anything about chess…';
+    }
+    if (send) send.disabled = locked || state.streaming || reviewRunning;
     // Toggle a notice bubble if needed.
     const box = el['coach-chat-messages']; if (!box) return;
     let notice = box.querySelector('.coach-locked-notice');
@@ -752,6 +814,7 @@
   }
 
   function bindEvents() {
+    document.addEventListener('chessreview:busyaction', () => applyLockedState());
     el['coach-chat-form']?.addEventListener('submit', (e) => { e.preventDefault(); send(); });
     el['coach-chat-textarea']?.addEventListener('input', autoGrow);
     el['coach-chat-textarea']?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
@@ -760,6 +823,9 @@
     // Play the bot: delegate to the app's coach game setup modal.
     el['btn-coach-play-bot']?.addEventListener('click', () => {
       if (state.app && state.app._showCoachSetupModal) state.app._showCoachSetupModal();
+    });
+    el['btn-coach-sidebar-toggle']?.addEventListener('click', () => {
+      el['coach-chat-card']?.classList.toggle('sidebar-collapsed');
     });
     el.modelSegs?.forEach((b) => b.addEventListener('click', () => setModel(b.dataset.model)));
   }
@@ -787,6 +853,8 @@
     state.app = app;
     if (!el['coach-chat-card']) resolveEls(); // resolve once
     if (!state.mounted) { bindEvents(); state.mounted = true; }
+    // Collapse sidebar on mobile by default
+    if (window.innerWidth <= 720) el['coach-chat-card']?.classList.add('sidebar-collapsed');
     // model preference
     try { state.model = localStorage.getItem(MODEL_PREF_KEY) || (app.authState && app.authState.profile && app.authState.profile.coachMode && app.authState.profile.coachMode.model) || 'fast'; } catch (_) { state.model = 'fast'; }
     if (state.model !== 'strong') state.model = 'fast';
@@ -796,6 +864,13 @@
     renderGate();
     const uid = app.authState && app.authState.user && app.authState.user.uid;
     loadForUid(uid);
+    // Hand-off from the review page: if a seed is stashed, open a new chat
+    // preloaded with the reviewed game's context + the generated overview.
+    if (app._pendingCoachSeed) {
+      const seed = app._pendingCoachSeed;
+      app._pendingCoachSeed = null;
+      try { startWithContext(seed); } catch (_) {}
+    }
     // Auto-scroll the chat section into view.
     setTimeout(() => { el['coach-chat-card']?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100);
   }

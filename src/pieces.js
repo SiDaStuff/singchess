@@ -160,13 +160,12 @@ function pieceMotif(piece, color) {
 }
 
 // makeThemedPieceSvg renders letter-badge SVGs for non-PNG themes (glass/wood/
-// neon/mono). It is currently UNUSED: the app serves real piece PNGs from
-// /assets/pieces/{classic,glass,wood,neo}/ (built by scripts/build-pieces.mjs),
-// and getPieceSvgUri() routes through getPieceAssetUri() -> those PNGs, falling
-// back to the classic PIECE_SVG set only if a PNG 404s. This badge generator is
-// retained as ready-to-wire fallback art if a PNG theme is ever dropped; it is
-// not dead-by-accident. PIECE_ASSET_THEMES below intentionally lists exactly
-// the four PNG themes that exist on disk.
+// neon/mono). It is currently UNUSED: the app serves real piece SVGs from
+// /assets/pieces/{cburnett,celtic,chessnut,fantasy,firi,kiwen-suwi,merida,rhosgfx,spatial}/,
+// and getPieceSvgUri() routes through getPieceAssetUri() -> those SVGs, falling
+// back to the classic PIECE_SVG set only if an SVG 404s. This badge generator is
+// retained as ready-to-wire fallback art if a SVG theme is ever dropped; it is
+// not dead-by-accident.
 function makeThemedPieceSvg(piece, theme) {
   const isWhite = piece[0] === 'w';
   if (theme === 'glass') {
@@ -245,18 +244,21 @@ function makeThemedPieceSvg(piece, theme) {
   return PIECE_SVG[piece] || '';
 }
 
-const PIECE_ASSET_THEMES = new Set(['classic', 'glass', 'wood', 'neo']);
+const PIECE_ASSET_THEMES = new Set([
+  'cburnett', 'celtic', 'chessnut', 'fantasy', 'firi',
+  'kiwen-suwi', 'merida', 'rhosgfx', 'spatial',
+]);
 
 function getPieceAssetTheme() {
   const theme = document.body?.dataset?.pieceTheme || (() => {
     try {
       const raw = window.localStorage?.getItem('sidastuff.engineSettings');
-      return raw ? JSON.parse(raw).pieceTheme : 'classic';
+      return raw ? JSON.parse(raw).pieceTheme : 'cburnett';
     } catch (_) {
-      return 'classic';
+      return 'cburnett';
     }
   })();
-  return PIECE_ASSET_THEMES.has(theme) ? theme : 'classic';
+  return PIECE_ASSET_THEMES.has(theme) ? theme : 'cburnett';
 }
 
 function getPieceAssetName(piece) {
@@ -267,7 +269,7 @@ function getPieceAssetName(piece) {
 function getPieceAssetUri(piece) {
   const assetName = getPieceAssetName(piece);
   if (!assetName) return '';
-  return `./assets/pieces/${getPieceAssetTheme()}/${assetName}.png`;
+  return `/assets/pieces/${getPieceAssetTheme()}/${assetName}.svg`;
 }
 
 function getPieceFallbackSvgUri(piece) {

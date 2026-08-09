@@ -25,8 +25,18 @@ exports.handler = async (event = {}) => {
   const play = normalizePlay(params.play);
   if (!play) return json(400, { error: 'Missing or invalid "play" (comma-separated UCI moves).' }, 'no-store');
 
+  // Optional second source: 'masters' (default) or 'lichess' (all-player rated
+  // games, filterable by speeds/ratings). speeds/ratings are validated against
+  // the documented enums inside lookupOpening.
+  const variant = params.variant === 'lichess' ? 'lichess' : 'masters';
+  const options = { variant };
+  if (variant === 'lichess') {
+    if (params.speeds) options.speeds = params.speeds;
+    if (params.ratings) options.ratings = params.ratings;
+  }
+
   try {
-    const result = await lookupOpening(play);
+    const result = await lookupOpening(play, options);
     if (result.error) return json(502, result, 'no-store');
     return json(200, result);
   } catch (err) {

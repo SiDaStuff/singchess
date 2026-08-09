@@ -25,6 +25,7 @@ const profileFn = require('./api/profile.js');
 const giftBoostFn = require('./api/gift-boost.js');
 const adminPlansFn = require('./api/admin-plans.js');
 const contactFn = require('./api/contact.js');
+const signupVerifyFn = require('./api/signup-verify.js');
 const publicStatsFn = require('./api/public-stats.js');
 const adminBanUserFn = require('./api/admin-ban-user.js');
 const usersMeStreamFn = require('./api/users-me-stream.js');
@@ -32,8 +33,36 @@ const banStatusFn = require('./api/ban-status.js');
 const adminDashboardFn = require('./api/admin-dashboard.js');
 const siteVisitFn = require('./api/site-visit.js');
 const coachChatFn = require('./api/coach-chat.js');
+const coachOverviewFn = require('./api/coach-overview.js');
 const coachToolResultFn = require('./api/coach-tool-result.js');
 const openingExplorerFn = require('./api/opening-explorer.js');
+const adminAbuseReportFn = require('./api/admin-abuse-report.js');
+
+function generateDeviceId() {
+  const bytes = require('crypto').randomBytes(16);
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function deviceCookieMiddleware(req, res, next) {
+  const cookie = require('cookie');
+  const parsed = cookie.parse(req.headers.cookie || '');
+  let deviceId = parsed.sid_device;
+  if (!deviceId || !/^[0-9a-f]{32}$/i.test(deviceId)) {
+    deviceId = generateDeviceId();
+    const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+    const cookieOptions = [
+      'sid_device=' + deviceId,
+      'Max-Age=31536000',
+      'Path=/',
+      'HttpOnly',
+      'SameSite=Strict',
+      isSecure ? 'Secure' : '',
+    ].filter(Boolean).join('; ');
+    res.setHeader('Set-Cookie', cookieOptions);
+  }
+  req.sidDeviceId = deviceId;
+  next();
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -88,7 +117,7 @@ function clientKey(req) {
   return req.socket?.remoteAddress || 'unknown';
 }
 
-function rateLimit({ windowMs, max, label }) {
+function makeRateLimiter({ windowMs, max, label }) {
   return (req, res, next) => {
     const now = Date.now();
     const key = `${label}:${clientKey(req)}`;
@@ -119,6 +148,7 @@ function _maybePruneRateBuckets(now) {
 }
 
 app.use(morgan('tiny'));
+app.use(deviceCookieMiddleware);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -152,6 +182,7 @@ function makeEvent(req) {
     queryStringParameters: Object.keys(req.query || {}).length ? req.query : undefined,
     path: req.path,
     rawUrl: req.originalUrl,
+    sidDeviceId: req.sidDeviceId || '',
   };
 }
 
@@ -200,9 +231,13 @@ app.options('/api/*', (req, res) => {
   res.sendStatus(200);
 });
 
-const gentleApiLimit = rateLimit({ windowMs: 60 * 1000, max: 180, label: 'api' });
-const analysisLimit = rateLimit({ windowMs: 60 * 1000, max: 12, label: 'analysis' });
-const writeLimit = rateLimit({ windowMs: 60 * 1000, max: 45, label: 'write' });
+const gentleApiLimit = makeRateLimiter({ windowMs: 60 * 1000, max: 180, label: 'api' });
+const analysisLimit = makeRateLimiter({ windowMs: 60 * 1000, max: 12, label: 'analysis' });
+const writeLimit = makeRateLimiter({ windowMs: 60 * 1000, max: 45, label: 'write' });
+// Coach chat can issue a burst of small requests during a normal conversation
+// (streaming chunks, tool calls, follow-ups). Give it its own bucket so it
+// doesn't share the tight writeLimit with mutations like puzzle solves.
+const coachLimit = makeRateLimiter({ windowMs: 60 * 1000, max: 120, label: 'coach' });
 
 app.use('/api', gentleApiLimit);
 app.post('/api/analyze', analysisLimit, wrapHandler(analyzeFn));
@@ -222,17 +257,22 @@ app.get('/api/profile/:username', profileFn.expressHandler);
 app.get('/api/profile', wrapHandler(profileFn));
 app.post('/api/users/me', writeLimit, wrapHandler(usersMeFn));
 app.get('/api/users/me/stream', usersMeStreamFn.streamHandler);
-app.post('/api/coach/chat', writeLimit, coachChatFn.streamHandler);
-app.post('/api/coach/tool-result', writeLimit, wrapHandler(coachToolResultFn));
+app.post('/api/coach/chat', coachLimit, coachChatFn.streamHandler);
+app.post('/api/coach/overview', coachLimit, coachOverviewFn.streamHandler);
+app.post('/api/coach/tool-result', coachLimit, wrapHandler(coachToolResultFn));
 app.post('/api/admin/gift-boost', writeLimit, wrapHandler(giftBoostFn));
 app.post('/api/admin/remove-subscription', writeLimit, wrapHandler(adminPlansFn.removeSubscriptionHandler));
 app.post('/api/admin/ban-user', writeLimit, wrapHandler(adminBanUserFn));
 app.get('/api/admin/support', wrapHandler(adminPlansFn.supportListHandler));
 app.post('/api/admin/support/delete', writeLimit, wrapHandler(adminPlansFn.supportDeleteHandler));
 app.post('/api/contact', writeLimit, wrapHandler(contactFn));
+app.post('/api/signup-verify', writeLimit, wrapHandler(signupVerifyFn));
 app.post('/api/site/visit', writeLimit, wrapHandler(siteVisitFn));
 app.get('/api/admin/dashboard', wrapHandler(adminDashboardFn));
 app.post('/api/admin/dashboard', writeLimit, wrapHandler(adminDashboardFn));
+app.post('/api/report-abuse', writeLimit, wrapHandler(adminAbuseReportFn));
+app.get('/api/admin/abuse', wrapHandler(adminAbuseReportFn));
+app.post('/api/admin/abuse', writeLimit, wrapHandler(adminAbuseReportFn));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
@@ -313,11 +353,14 @@ if (serveStatic) {
       if (path.basename(filePath) === 'index.html') {
         res.setHeader('Cache-Control', 'no-store');
       }
+      if (path.extname(filePath).toLowerCase() === '.svg') {
+        res.setHeader('Content-Type', 'image/svg+xml');
+      }
     },
   }));
 
   // Rate-limit SPA catch-all to avoid filesystem DoS from unauthenticated requests
-  const spaLimiter = rateLimit({
+  const spaLimiter = makeRateLimiter({
     windowMs: 60 * 1000,
     max: 120,
     standardHeaders: true,

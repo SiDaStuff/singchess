@@ -31,6 +31,12 @@ exports.handler = async (event) => {
       return json(404, { ok: false, note: 'No pending tool call for that id (it may have timed out).' });
     }
     if (outcome === 'not_found') {
+      // Affinity backstop: log when a tool-result lands on the wrong cluster
+      // instance (sticky routing via nginx should prevent this; a spike here
+      // means the hash-cookie routing or PM2 instance count changed).
+      if (body.chatPid && body.chatPid !== process.pid) {
+        console.warn(`[coach] tool-result instance mismatch: result for pid=${body.chatPid} landed on pid=${process.pid} (callId=${callId}). Sticky routing may be misconfigured.`);
+      }
       return json(200, { ok: false, note: 'No pending tool call for that id (it may have timed out).' });
     }
     return json(200, { ok: true });

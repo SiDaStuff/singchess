@@ -1,20 +1,48 @@
-# Netlify deployment for SiDaStuff Chess Review (frontend only).
-# Builds the Vite SPA — no API calls to netlify; all API calls go to the
-# backend at chess.sidastuff.com via the compile-time VITE_API_URL.
+# Netlify deployment for Sing Chess Review (frontend SPA only).
+# The frontend builds here and calls the backend on the Oracle VM at build-time
+# VITE_API_URL. All API/SSE/stream traffic is cross-origin to chess.sidastuff.com.
 #
-# Deploy: connect the repo to Netlify, set:
-#   Build command: npm run build
-#   Publish directory: dist
-#   Environment: VITE_API_URL=https://chess.sidastuff.com
-#
-# If VITE_API_URL is not set, the bundle defaults to same-origin (works when
-# the Node server serves static files from dist/, or for local dev).
+# No server-side code runs on Netlify — it is a static file host + CDN for dist/.
+
+# Compile-time env: the backend URL baked into the JS bundle. Defined here so
+# every build (manual, CI, or auto-deploy from a git push) uses the same value
+# without needing dashboard config. Override in the Netlify UI if you need a
+# different backend (e.g. a staging URL) without touching the repo.
+[build.environment]
+  NODE_VERSION = "20"
+  VITE_API_URL = "https://chess.sidastuff.com"
 
 [build]
   command = "npm run build"
   publish = "dist"
 
-# Redirect all unmatched paths to index.html (SPA fallback).
+# Security + caching headers on the static SPA assets. The app already sets
+# none of these client-side, so add them at the CDN edge.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+
+# Long-cache fingerprints bundled assets (Vite emits content-hashed filenames
+# like /assets/index-C5YnXl1t.js so these are safe to cache forever).
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# index.html must NEVER be cached (it points at the current hashed bundle).
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-store"
+
+# SPA fallback: every unmatched path serves index.html (so client-side routing
+# /coach /review /account works on a cold load / refresh). Must be status 200
+# (a rewrite), NOT a 301 redirect, so the URL the user typed stays in the bar.
 [[redirects]]
   from = "/*"
   to = "/index.html"

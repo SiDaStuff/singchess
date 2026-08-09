@@ -19,6 +19,14 @@
     } catch (err) {
       console.warn('Could not set Firebase auth persistence:', err);
     }
+    // Initialize Firebase Analytics if available
+    try {
+      if (window.firebase.analytics) {
+        window.firebase.analytics();
+      }
+    } catch (err) {
+      console.warn('Firebase Analytics not available:', err);
+    }
     return window.firebase;
   }
 
