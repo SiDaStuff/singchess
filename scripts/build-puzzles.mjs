@@ -146,19 +146,36 @@ async function decompressZstdStreaming(zstPath, outPath) {
   if (zstdBin) {
     const { spawn } = await import('child_process');
     const out = createWriteStream(tmpPath);
+    let written = 0;
+    let lastLog = Date.now();
     await new Promise((resolve, reject) => {
       const child = spawn(zstdBin, ['-d', '-c', zstPath], { stdio: ['ignore', 'pipe', 'pipe'] });
       let err = '';
+      child.stdout.on('data', (c) => {
+        written += c.length;
+        const now = Date.now();
+        if (now - lastLog > 5000) {
+          lastLog = now;
+          console.log(`  decompressed ${(written / 1e6).toFixed(1)} MB...`);
+        }
+      });
       child.stdout.pipe(out);
       child.stderr.on('data', (c) => { err += c; });
       out.on('error', reject);
       child.on('error', reject);
+      // Wait for stdout to fully drain (not just the child's exit) so the
+      // output file is complete before we rename it.
+      child.stdout.on('end', () => {
+        out.end();
+        out.on('finish', () => {
+          if (child.exitCode === 0) resolve();
+          else reject(new Error(`zstd exited with code ${child.exitCode}: ${err.trim()}`));
+        });
+      });
       child.on('close', (code) => {
-        if (code === 0) resolve();
-        else reject(new Error(`zstd exited with code ${code}: ${err.trim()}`));
+        if (code !== 0) reject(new Error(`zstd exited with code ${code}: ${err.trim()}`));
       });
     });
-    await closeStream(out);
     renameSync(tmpPath, outPath);
     return statSync(outPath).size;
   }
@@ -167,10 +184,16 @@ async function decompressZstdStreaming(zstPath, outPath) {
   const { Decompress } = await import('fzstd');
   const out = createWriteStream(tmpPath);
   let written = 0;
+  let lastLog = Date.now();
   const stream = new Decompress((chunk, isLast) => {
     if (chunk && chunk.length) {
       out.write(Buffer.from(chunk));
       written += chunk.length;
+      const now = Date.now();
+      if (now - lastLog > 5000) {
+        lastLog = now;
+        console.log(`  decompressed ${(written / 1e6).toFixed(1)} MB...`);
+      }
     }
     if (isLast) out.end();
   });

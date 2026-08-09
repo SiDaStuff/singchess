@@ -557,6 +557,7 @@ class ChessReviewApp {
 		    this.elLoginGoogle = document.getElementById('btn-login-google');
 		    this.elSignupEmail = document.getElementById('signup-email');
 		    this.elSignupPassword = document.getElementById('signup-password');
+		    this.elSignupUsername = document.getElementById('signup-username');
 		    this.elSignupStatus = document.getElementById('signup-status');
 		    this.elSignupSubmit = document.getElementById('btn-signup-submit');
 		    this.elSignupGoogle = document.getElementById('btn-signup-google');
@@ -2103,6 +2104,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      await this._handleEmailAuth({
 		        email: isSignup ? this.elSignupEmail?.value : this.elLoginEmail?.value,
 		        password: isSignup ? this.elSignupPassword?.value : this.elLoginPassword?.value,
+		        username: isSignup ? this.elSignupUsername?.value : undefined,
 		        statusEl,
 		      });
 		      this._navigateTo('/account');
@@ -3398,6 +3400,18 @@ _syncAccountUi() {
 	    const username = (fields?.username || this.elAuthUsername?.value || '').trim();
 	    if (!email || !password) {
 	      const message = 'Fill in the required account fields.';
+	      if (fields?.statusEl) {
+	        fields.statusEl.textContent = message;
+	        fields.statusEl.className = 'account-status error';
+	      } else {
+	        this._setAccountStatus(message, 'error');
+	      }
+	      throw new Error(message);
+	    }
+	    // Username is required at signup (it's a progress step). Validate format
+	    // so the public profile is usable immediately.
+	    if (this.authMode === 'signup' && username && !/^[a-zA-Z0-9._-]{3,40}$/.test(username)) {
+	      const message = 'Username must be 3–40 characters: letters, numbers, . _ - only.';
 	      if (fields?.statusEl) {
 	        fields.statusEl.textContent = message;
 	        fields.statusEl.className = 'account-status error';
