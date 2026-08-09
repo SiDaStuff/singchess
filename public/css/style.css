@@ -1740,6 +1740,22 @@ body.in-app-route .header { display: flex !important; }
 }
 .btn-review:disabled { cursor: not-allowed; opacity: 0.55; }
 .btn-review .btn-content { position: relative; z-index: 1; }
+/* Review progress bar — fills the button background as the review advances.
+   Hidden by default; shown while a server review is in progress. */
+.review-progress-bar {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: rgba(255,255,255,0.10);
+}
+.review-progress-fill {
+  display: block;
+  width: 0%;
+  height: 100%;
+  background: rgba(255,255,255,0.18);
+  transition: width 0.25s ease;
+}
 /* Review progress percentage — replaces the old progress bar. Shown as a
    compact right-aligned percentage inside the review button while analyzing. */
 .review-progress-pct {

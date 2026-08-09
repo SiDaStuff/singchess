@@ -137,6 +137,50 @@ async function _deepenCriticalMoments({ analyzer, engines, moves, initialFen, qu
   return patchedEvals;
 }
 
+// Progressive-depth single-pass review for NORMAL mode.
+//
+// Instead of the two-pass "quick-scan all + deepen critical moments" model,
+// this analyzes every position exactly once at a depth that grows with how far
+// through the game it is:
+//   0–50%  of moves → depth 12 (quick pass)
+//   50–75% of moves → depth 14 (more advanced)
+//   75–100% of moves → depth 16 (highest, for the indicator)
+//
+// Because each move is analyzed exactly once, the progress bar advances
+// linearly 0→100% with no backwards jumps — exactly what the frontend board
+// overlay expects.
+async function _evaluateProgressiveReview({ analyzer, engines, moves, initialFen, baseProfile, profile, onProgress }) {
+  const positions = analyzer._positionsForMoves(moves, initialFen);
+  const total = positions.length;
+  const results = new Array(total);
+
+  // Tier boundaries by move index (0-based). 0–50% quick, 50–75% mid, 75–100% deep.
+  const midStart = Math.floor(total * 0.50);
+  const deepStart = Math.floor(total * 0.75);
+
+  const tiers = [
+    { name: 'quick', start: 0, end: midStart, spec: baseProfile.quickScan },
+    { name: 'mid', start: midStart, end: deepStart, spec: baseProfile.mid },
+    { name: 'deep', start: deepStart, end: total, spec: baseProfile.deep },
+  ];
+
+  for (const tier of tiers) {
+    if (tier.end <= tier.start) continue;
+    const tierPositions = positions.slice(tier.start, tier.end);
+    analyzer.setReviewProfile(_reviewProfile(tier.spec, profile));
+    const tierEvals = await withEngineQueue(() => analyzer.evaluatePositionsPooled(
+      tierPositions,
+      engines,
+      onProgress
+        ? (done) => onProgress(tier.start + done, total, tier.name, tier.start + done, total)
+        : null,
+    ));
+    for (let k = 0; k < tierEvals.length; k++) results[tier.start + k] = tierEvals[k];
+  }
+
+  return results;
+}
+
 let engineChain = Promise.resolve();
 let activeAnalysisJobs = 0;
 const analysisQueue = [];
@@ -395,34 +439,24 @@ exports.handler = async (event, context = {}) => {
         });
         results = await withEngineQueue(() => analyzer.analyzeGame(moves, reviewEngine, null, { initialFen, headers: payload.headers || {}, engines }));
       } else {
-        // Two-pass: Quick-scan every position, then re-analysis on critical
-        // moments (mid-depth 14, plus deepest 16 on "really big" moments).
-        const quickProfile = baseProfile.quickScan;
-        analyzer.setReviewProfile(_reviewProfile(quickProfile, profile));
-        const quickResults = await withEngineQueue(() => analyzer.analyzeGame(moves, reviewEngine, null, { initialFen, headers: payload.headers || {}, engines }));
-
-        const patchedEvals = await _deepenCriticalMoments({
+        // Progressive-depth single pass: every move analyzed once at a depth
+        // that grows with game progress (0–50% depth 12, 50–75% depth 14,
+        // 75–100% depth 16).
+        const positions = analyzer._positionsForMoves(moves, initialFen);
+        const progressiveEvals = await _evaluateProgressiveReview({
           analyzer,
-          baseProfile,
           engines,
           moves,
           initialFen,
-          quickResults,
+          baseProfile,
           profile,
           onProgress: null,
         });
-
-        if (patchedEvals) {
-          const positions = analyzer._positionsForMoves(moves, initialFen);
-          const opening = quickResults.opening;
-          results = await analyzer.resultsFromEvals(moves, positions, patchedEvals, opening, {
-            initialFen,
-            headers: payload.headers || {},
-            skipMateThreat: moves.length > 50,
-          });
-        } else {
-          results = quickResults;
-        }
+        results = await analyzer.resultsFromEvals(moves, positions, progressiveEvals, analyzer.detectOpening(moves), {
+          initialFen,
+          headers: payload.headers || {},
+          skipMateThreat: moves.length > 50,
+        });
       }
       let publicStats = null;
       try {
@@ -585,42 +619,22 @@ exports.streamHandler = async (req, res) => {
         ));
         results = await analyzer.resultsFromEvals(moves, positions, evals, analyzer.detectOpening(moves), { initialFen, headers: payload.headers || {}, skipMateThreat: true });
       } else {
-        // Two-pass: Quick-scan every position, then re-analysis on critical
-        // moments (mid-depth 14, plus deepest 16 on "really big" moments).
-        const quickProfile = baseSseProfile.quickScan;
-        analyzer.setReviewProfile(_reviewProfile(quickProfile, profile));
-        const quickEvals = await withEngineQueue(() => analyzer.evaluatePositionsPooled(
-          positions, engines,
-          (completed, total) => {
-            if (res.destroyed) return;
-            const moveIndex = Math.min(Math.max(0, completed), moves.length - 1);
-            sseWrite(res, 'progress', { completed, total, pass: 'quick', moveIndex, totalMoves: moves.length });
-          },
-        ));
-        const quickResults = await analyzer.resultsFromEvals(moves, positions, quickEvals, analyzer.detectOpening(moves), { initialFen, headers: payload.headers || {}, skipMateThreat: true });
-
-        const patchedEvals = await _deepenCriticalMoments({
+        // Progressive-depth single pass: every move analyzed once at a depth
+        // that grows with game progress (0–50% depth 12, 50–75% depth 14,
+        // 75–100% depth 16). Clean linear 0–100% progress.
+        const progressiveEvals = await _evaluateProgressiveReview({
           analyzer,
-          baseProfile: baseSseProfile,
           engines,
           moves,
           initialFen,
-          quickResults,
+          baseProfile: baseSseProfile,
           profile,
           onProgress: (completed, total, pass, moveIndex, totalMoves) => {
             if (res.destroyed) return;
-            const label = pass === 'deep'
-              ? `Deep-analyzing ${total} critical moment(s)`
-              : `Refining ${total} critical moment(s)`;
-            sseWrite(res, 'progress', { completed, total, pass, moveIndex, totalMoves, label });
+            sseWrite(res, 'progress', { completed, total, pass, moveIndex, totalMoves });
           },
         });
-
-        if (patchedEvals) {
-          results = await analyzer.resultsFromEvals(moves, positions, patchedEvals, quickResults.opening, { initialFen, headers: payload.headers || {}, skipMateThreat: true });
-        } else {
-          results = quickResults;
-        }
+        results = await analyzer.resultsFromEvals(moves, positions, progressiveEvals, analyzer.detectOpening(moves), { initialFen, headers: payload.headers || {}, skipMateThreat: true });
       }
 
       let publicStats = null;
