@@ -151,6 +151,19 @@ async function decompressZstdStreaming(zstPath, outPath) {
     await new Promise((resolve, reject) => {
       const child = spawn(zstdBin, ['-d', '-c', zstPath], { stdio: ['ignore', 'pipe', 'pipe'] });
       let err = '';
+      let exitCode = null;
+      let stdoutEnded = false;
+      let outFinished = false;
+      let settled = false;
+
+      const finish = () => {
+        if (settled) return;
+        if (!stdoutEnded || !outFinished || exitCode === null) return;
+        settled = true;
+        if (exitCode === 0) resolve();
+        else reject(new Error(`zstd exited with code ${exitCode}: ${err.trim()}`));
+      };
+
       child.stdout.on('data', (c) => {
         written += c.length;
         const now = Date.now();
@@ -163,17 +176,20 @@ async function decompressZstdStreaming(zstPath, outPath) {
       child.stderr.on('data', (c) => { err += c; });
       out.on('error', reject);
       child.on('error', reject);
-      // Wait for stdout to fully drain (not just the child's exit) so the
-      // output file is complete before we rename it.
+      // stdout fully drained → end the write stream.
       child.stdout.on('end', () => {
+        stdoutEnded = true;
         out.end();
-        out.on('finish', () => {
-          if (child.exitCode === 0) resolve();
-          else reject(new Error(`zstd exited with code ${child.exitCode}: ${err.trim()}`));
-        });
       });
+      // Write stream flushed → mark done.
+      out.on('finish', () => {
+        outFinished = true;
+        finish();
+      });
+      // Process exited → capture the real exit code.
       child.on('close', (code) => {
-        if (code !== 0) reject(new Error(`zstd exited with code ${code}: ${err.trim()}`));
+        exitCode = code;
+        finish();
       });
     });
     renameSync(tmpPath, outPath);
