@@ -635,6 +635,27 @@ async function checkMultiAccount(uid, event) {
       await db.ref(`abuse/multiAccount/${uid}/detectedAt`).set(now);
       if (fp.ipHash) await db.ref(`abuse/multiAccount/${uid}/ipHash`).set(fp.ipHash);
       if (fp.cookieHash) await db.ref(`abuse/multiAccount/${uid}/cookieHash`).set(fp.cookieHash);
+
+      // Surface this in the admin abuse queue so it's actionable even without a
+      // manual report. Only auto-flag on high confidence (shared IP AND cookie)
+      // to avoid false positives from shared networks (office/school/cafe).
+      if (confidence === 'high') {
+        const flaggedRef = db.ref(`abuse/flagged/${uid}`);
+        await flaggedRef.transaction((current) => {
+          const data = current || { count: 0, reasons: [], flaggedBy: [], firstReportedAt: now, lastReportedAt: now };
+          if (!Array.isArray(data.reasons)) data.reasons = [];
+          if (!Array.isArray(data.flaggedBy)) data.flaggedBy = [];
+          data.count = (data.count || 0) + 1;
+          data.reasons.push(`Multi-account: shares IP + device cookie with ${linked.length} account(s)`);
+          data.flaggedBy.push('system:multi-account');
+          data.lastReportedAt = now;
+          if (!data.firstReportedAt) data.firstReportedAt = now;
+          data.autoFlagged = true;
+          data.autoFlagSource = 'multi-account';
+          return data;
+        }, undefined, false);
+      }
+
       return { linkedUids: linked, count: linked.length };
     }
     return null;

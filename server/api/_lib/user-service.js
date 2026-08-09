@@ -142,8 +142,13 @@ async function requireUser(event) {
 
   // Track login fingerprint for anti-abuse multi-account detection (fire-and-forget).
   try {
-    const { trackLoginFingerprint } = require('../admin-abuse-report.js');
-    trackLoginFingerprint(decoded.uid, event).catch(() => {});
+    const abuse = require('../admin-abuse-report.js');
+    // Record this login's IP/cookie fingerprint into the index.
+    abuse.trackLoginFingerprint(decoded.uid, event).catch(() => {});
+    // Proactively flag this account if it shares an IP/cookie with other
+    // accounts (multi-accounting). This writes to abuse/multiAccount/<uid> so
+    // the admin queue surfaces it even before anyone files a manual report.
+    abuse.checkMultiAccount(decoded.uid, event).catch(() => {});
   } catch (_) { /* admin-abuse-report may not be loaded yet */ }
   return {
     uid: decoded.uid,

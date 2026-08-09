@@ -8,6 +8,8 @@ function allowedOrigin(origin) {
   if (!origin) return '';
   const isDev = process.env.NODE_ENV === 'development' || process.env.CHESS_REVIEW_DEV_SERVER === '1';
   if (origin === 'https://chess.sidastuff.com') return origin;
+  // Netlify frontend (production SPA).
+  if (origin === 'https://chess.singdevelopments.com') return origin;
   if (isDev && origin === 'http://localhost:3000') return origin;
   return '';
 }
