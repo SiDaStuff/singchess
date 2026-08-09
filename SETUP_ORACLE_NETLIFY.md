@@ -129,6 +129,13 @@ node -v   # should print v20.x
 # can skip this — they download a prebuilt.
 sudo apt install -y g++ make wget
 
+# ── zstd (fast, low-memory puzzle DB decompression) ──────────────────
+# `npm run puzzles:build` decompresses the multi-GB Lichess puzzle CSV. The
+# build script prefers the system `zstd` CLI (streams with tiny memory and
+# handles any compression level) and only falls back to the pure-JS fzstd
+# path if `zstd` is missing. Install it to avoid OOM kills on small VMs.
+sudo apt install -y zstd
+
 # ── PM2 (process manager — keeps Node alive + restarts on crash) ────
 sudo npm install -g pm2
 # Make PM2 start on boot (follow the command it prints):
@@ -170,6 +177,13 @@ npm run stockfish:copy
 > puzzle CSV and compiles it to `server/data/puzzles.db` (both gitignored). This
 > needs a few GB of disk + takes several minutes the first time. If your VM disk
 > is small you can build it locally and `scp` the `puzzles.db` file up.
+>
+> **If the build dies with just `Killed`** (no error message) during
+> "Decompressing puzzle database...", that's the Linux OOM killer — the old
+> decompressor loaded the whole multi-GB file into RAM. The script now streams
+> the decompression with bounded memory. Make sure `zstd` is installed
+> (`sudo apt install -y zstd`) so it uses the fast CLI path; otherwise it falls
+> back to the pure-JS fzstd streamer. Then re-run `npm run puzzles:build`.
 
 ### 3.3 Create the production `.env`
 

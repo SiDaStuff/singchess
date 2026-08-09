@@ -116,15 +116,80 @@ async function decompressArchive() {
     throw new Error('Missing lichess_db_puzzle.csv.zst. Run without SKIP_PUZZLE_DOWNLOAD first.');
   }
 
-  const { decompress } = await import('fzstd');
   console.log('Decompressing puzzle database (this can take a few minutes)...');
-  const buffers = [];
-  for await (const chunk of createReadStream(zstPath)) {
-    buffers.push(chunk);
+  const csvSize = await decompressZstdStreaming(zstPath, csvPath);
+  console.log(`Wrote ${relative(csvPath)} (${(csvSize / 1e6).toFixed(1)} MB)`);
+}
+
+/**
+ * Decompress a .zst archive to a file using bounded memory.
+ *
+ * The Lichess puzzle CSV is several GB when decompressed, so we must NOT load
+ * the whole thing into RAM (that gets the process OOM-killed on small VMs).
+ *
+ * Strategy:
+ *   1. Prefer the system `zstd` CLI when available (Linux VMs). It streams with
+ *      minimal memory and handles any compression level/window size.
+ *   2. Otherwise fall back to fzstd's streaming Decompress API (pure JS, works
+ *      on Windows). Note fzstd only supports backreference distances up to 32MB,
+ *      so it may fail on archives compressed with a very large window — the CLI
+ *      path avoids that limitation.
+ *
+ * Returns the decompressed size in bytes.
+ */
+async function decompressZstdStreaming(zstPath, outPath) {
+  const tmpPath = `${outPath}.decompressing`;
+  safeUnlink(tmpPath);
+
+  // 1) System `zstd` CLI (best: streaming, any compression level, tiny memory).
+  const zstdBin = await resolveExecutable('zstd');
+  if (zstdBin) {
+    const { spawn } = await import('child_process');
+    const out = createWriteStream(tmpPath);
+    await new Promise((resolve, reject) => {
+      const child = spawn(zstdBin, ['-d', '-c', zstPath], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let err = '';
+      child.stdout.pipe(out);
+      child.stderr.on('data', (c) => { err += c; });
+      out.on('error', reject);
+      child.on('error', reject);
+      child.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`zstd exited with code ${code}: ${err.trim()}`));
+      });
+    });
+    await closeStream(out);
+    renameSync(tmpPath, outPath);
+    return statSync(outPath).size;
   }
-  const decompressed = Buffer.from(decompress(Buffer.concat(buffers)));
-  writeFileSync(csvPath, decompressed);
-  console.log(`Wrote ${relative(csvPath)} (${(decompressed.length / 1e6).toFixed(1)} MB)`);
+
+  // 2) fzstd streaming fallback (pure JS, bounded memory).
+  const { Decompress } = await import('fzstd');
+  const out = createWriteStream(tmpPath);
+  let written = 0;
+  const stream = new Decompress((chunk, isLast) => {
+    if (chunk && chunk.length) {
+      out.write(Buffer.from(chunk));
+      written += chunk.length;
+    }
+    if (isLast) out.end();
+  });
+  for await (const chunk of createReadStream(zstPath)) {
+    stream.push(chunk);
+  }
+  stream.push(new Uint8Array(0), true);
+  await once(out, 'finish');
+  renameSync(tmpPath, outPath);
+  return written;
+}
+
+/** Resolve an executable on PATH, or null if not found. */
+async function resolveExecutable(name) {
+  const { spawnSync } = await import('child_process');
+  const isWin = process.platform === 'win32';
+  const cmd = isWin ? 'where' : 'which';
+  const res = spawnSync(cmd, [name], { stdio: 'ignore' });
+  return res.status === 0 ? name : null;
 }
 
 function parseCsvLine(line) {
