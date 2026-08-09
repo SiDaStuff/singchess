@@ -443,6 +443,22 @@ deploy in the dashboard. No backend restart is needed for frontend changes.
 - Escape hatch: `SERVER_STOCKFISH_BINARY=/path/to/your/stockfish` in `.env`
   points at a prebuilt binary you've placed on the VM.
 
+**PM2 errors with `Cannot find module .../server/index.js` (or crashes on start):**
+- The server file is `server/index.cjs`, NOT `index.js`. The root `package.json`
+  has `"type": "module"`, so a `.js` server file would be treated as ESM and
+  break — that's why it's `.cjs`. If PM2 is looking for `index.js`, its process
+  list is **stale** (it was started before the rename, or with an old config).
+- Fix — delete the errored processes and restart with the current config:
+  ```bash
+  cd ~/singchess
+  git pull                       # ensure ecosystem.config.cjs references index.cjs
+  pm2 delete all                 # clear the stale errored processes
+  pm2 start ecosystem.config.cjs --env production
+  pm2 save
+  ```
+- Verify the config points at the right file: `grep script ecosystem.config.cjs`
+  should show `server/index.cjs`.
+
 **`No LLM provider configured` error on coach chat:**
 - At least one of `LLM_API_KEY`/`CEREBRAS_API_KEY`/`GROQ_API_KEY`/`MISTRAL_API_KEY`
   must be set in `.env`. Restart PM2 after editing.
