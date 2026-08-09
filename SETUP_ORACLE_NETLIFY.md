@@ -255,12 +255,19 @@ curl http://localhost:3000/health    # → {"ok":true}
 sudo apt install -y certbot python3-certbot-nginx
 
 # Install the site config (the file is in your repo):
-sudo cp ~/chess-review/chess.sidastuff.com.nginx.conf \
+sudo cp ~/singchess/chess.sidastuff.com.nginx.conf \
          /etc/nginx/sites-available/chess.sidastuff.com
 sudo ln -sf /etc/nginx/sites-available/chess.sidastuff.com \
             /etc/nginx/sites-enabled/chess.sidastuff.com
 # Remove the default site so it doesn't conflict:
 sudo rm -f /etc/nginx/sites-enabled/default
+# Remove ANY other enabled site configs that define the same `upstream chess_api`
+# block (e.g. an older `singchess` config). nginx requires upstream names to be
+# globally unique — two configs both declaring `upstream chess_api` makes
+# `nginx -t` fail with "duplicate upstream". List what's enabled first:
+ls -la /etc/nginx/sites-enabled/
+# Then remove any stale/duplicate ones (keep ONLY chess.sidastuff.com):
+sudo rm -f /etc/nginx/sites-enabled/singchess
 
 # Get the cert (nginx plugin auto-edits the config for TLS):
 sudo certbot --nginx -d chess.sidastuff.com \
@@ -442,6 +449,22 @@ deploy in the dashboard. No backend restart is needed for frontend changes.
   `rm -rf server/vendor/stockfish-native/* && pm2 restart chess-review`.
 - Escape hatch: `SERVER_STOCKFISH_BINARY=/path/to/your/stockfish` in `.env`
   points at a prebuilt binary you've placed on the VM.
+
+**`sudo nginx -t` fails with `duplicate upstream "chess_api"` (or `[emerg]`):**
+- Two enabled site configs both define `upstream chess_api`. nginx requires
+  upstream names to be globally unique. This usually means an older config
+  (e.g. `singchess`) is still enabled alongside `chess.sidastuff.com`.
+- Fix — list what's enabled, then remove the stale duplicate (keep only
+  `chess.sidastuff.com`):
+  ```bash
+  ls -la /etc/nginx/sites-enabled/
+  sudo rm -f /etc/nginx/sites-enabled/singchess   # or whatever the stale one is
+  sudo nginx -t && sudo systemctl reload nginx
+  ```
+- If you also see `[warn] duplicate value "TLSv1.2"/"TLSv1.3"`, that's harmless
+  but comes from setting `ssl_protocols` in the config while the included
+  `/etc/letsencrypt/options-ssl-nginx.conf` already sets it. The repo config no
+  longer sets it — re-copy the config from the repo to clear the warning.
 
 **PM2 errors with `Cannot find module .../server/index.js` (or crashes on start):**
 - The server file is `server/index.cjs`, NOT `index.js`. The root `package.json`
