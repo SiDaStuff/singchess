@@ -276,43 +276,45 @@ app.post('/api/admin/abuse', writeLimit, wrapHandler(adminAbuseReportFn));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
+// ── Serve the server-vendored Stockfish WASM files at /vendor/ ────────
+// The browser worker loads these from the backend origin even when the
+// frontend SPA is on Netlify (chess.singdevelopments.com) and the backend is
+// API-only (SERVE_STATIC=0). So this MUST be registered regardless of
+// serveStatic. Files live in server/vendor/stockfish/ after a successful
+// `npm run stockfish:copy` on the host. CORS headers are required because the
+// frontend is on a different origin.
+const vendorDir = path.resolve(__dirname, 'vendor');
+if (fs.existsSync(vendorDir)) {
+  app.use('/vendor', (req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && originAllowed(origin, req.headers.host)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+    }
+    // Override the default Cache-Control for WASM files (express.static sets
+    // 1h by default; wasm files are immutable once downloaded).
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    next();
+  });
+  // Ensure WASM files are served with the correct MIME type (Express's built-in
+  // mime types may not include application/wasm in older versions, causing
+  // WebAssembly.instantiateStreaming to fail with "Incorrect response MIME type").
+  express.static.mime.define({ 'application/wasm': ['wasm'] });
+  app.use('/vendor', express.static(vendorDir, {
+    etag: true,
+    maxAge: '1h',
+    setHeaders(res, filePath) {
+      // Explicit WASM MIME guard — some Express/mime versions still map .wasm
+      // to application/octet-stream, which breaks instantiateStreaming.
+      if (path.extname(filePath).toLowerCase() === '.wasm') {
+        res.setHeader('Content-Type', 'application/wasm');
+      }
+    },
+  }));
+}
+
 if (serveStatic) {
   const staticDir = isDev || !fs.existsSync(distDir) ? publicDir : distDir;
-  // Serve the server-vendored Stockfish WASM files at /vendor/ so the browser
-  // worker can load them from the backend (even when the frontend is on Netlify
-  // and the static assets are served elsewhere). Files live in
-  // server/vendor/stockfish/ after a successful npm run stockfish:copy on the
-  // host. Must include CORS headers because the frontend is on a different
-  // origin (chess.singdevelopments.com) when deployed to Netlify.
-  const vendorDir = path.resolve(__dirname, 'vendor');
-  if (fs.existsSync(vendorDir)) {
-    app.use('/vendor', (req, res, next) => {
-      const origin = req.headers.origin;
-      if (origin && originAllowed(origin, req.headers.host)) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Vary', 'Origin');
-      }
-      // Override the default Cache-Control for WASM files (express.static sets
-      // 1h by default; wasm files are immutable once downloaded).
-      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-      next();
-    });
-    // Ensure WASM files are served with the correct MIME type (Express's built-in
-    // mime types may not include application/wasm in older versions, causing
-    // WebAssembly.instantiateStreaming to fail with "Incorrect response MIME type").
-    express.static.mime.define({ 'application/wasm': ['wasm'] });
-    app.use('/vendor', express.static(vendorDir, {
-      etag: true,
-      maxAge: '1h',
-      setHeaders(res, filePath) {
-        // Explicit WASM MIME guard — some Express/mime versions still map .wasm
-        // to application/octet-stream, which breaks instantiateStreaming.
-        if (path.extname(filePath).toLowerCase() === '.wasm') {
-          res.setHeader('Content-Type', 'application/wasm');
-        }
-      },
-    }));
-  }
   const staticIndexPath = path.join(staticDir, 'index.html');
   const apiConfigScript = API_BASE_URL
     ? `<script>window.__API_CONFIG={baseUrl:'${API_BASE_URL.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'}</script>`
