@@ -351,8 +351,14 @@ class UciEngine {
   }
 
   interrupt() {
+    // Only send `stop` if there was actually an active search to interrupt.
+    // Sending `stop` while the engine is idle (e.g. during a setoption/isready
+    // handshake, or between searches) can land while the lite-single WASM is
+    // parked mid-ASYNCIFY-unwind and throw "RuntimeError: unreachable",
+    // crashing the worker. Guarding on activeSearch avoids that spurious stop.
+    const hadActive = !!this.activeSearch;
     this._cancelActiveSearch();
-    this._safeStop();
+    if (hadActive) this._safeStop();
   }
 
   _cancelActiveSearch() {

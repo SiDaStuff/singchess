@@ -385,6 +385,11 @@ class ChessReviewApp {
     this.elOpeningControls = document.getElementById('opening-controls');
     this.elOpeningFilters = document.getElementById('opening-filters');
     this._openingCache = new Map(); // key -> {opening, stats} | null
+    // Latest resolved opening (from the async Lichess explorer). Used during
+    // live play to classify book moves, since detectOpening() is a no-op.
+    this._liveOpening = null;
+    // Debounce timer for refreshing the opening card during live play.
+    this._openingRefreshTimer = null;
     // Opening-explorer source + filters (persisted). Masters is the default
     // (back-compat). Lichess = all-player rated games; filters default to ALL
     // OFF (load every result) — the user opts into speed/rating filters.
@@ -7660,8 +7665,10 @@ _showPuzzleSuccessOverlay() {
     this._invalidateAnalysisResults({ skipBoardRefresh: true });
     this._renderMoveList();
     this._saveGameState();
-    // detectOpening() is a no-op now (Lichess lookup is async). Don't clobber
-    // the opening card on each live move — leave the async-driven card as-is.
+    // Refresh the opening card (debounced) so live book classification stays
+    // current as the game progresses. detectOpening() is a no-op, so the async
+    // Lichess lookup is the source of truth for isInBook during live play.
+    this._scheduleOpeningRefresh();
     this._updateGameStatus();
     this._playMoveSound(move, this.currentMoveIndex);
     this._syncActionButtons();
@@ -7746,7 +7753,10 @@ _showPuzzleSuccessOverlay() {
     // During live play a move is "in book" only if every move so far (this one
     // included) still matches a known opening line. Mirrors analyzeGame's
     // `opening && i < opening.ply` gate so live classification matches a review.
-    const liveOpening = this.analyzer.detectOpening(this.gameMoves.slice(0, moveIndex + 1));
+    // detectOpening() is a no-op; use the async-resolved opening (this._liveOpening)
+    // which carries a `bookPly` (how many half-moves are in the recognised line).
+    const liveOpening = this._liveOpening;
+    const bookPly = liveOpening?.bookPly || liveOpening?.ply || 0;
     const classification = this.analyzer.classifyMove({
       movePly,
       moveSan: moveObj.san,
@@ -7766,7 +7776,7 @@ _showPuzzleSuccessOverlay() {
       playerRating,
       timeControl,
       opponentJustBlundered,
-      isInBook: !!(liveOpening && moveIndex + 1 <= liveOpening.ply),
+      isInBook: !!(bookPly && moveIndex + 1 <= bookPly),
     });
 
     const alternatives = lines.slice(0, this._getReviewProfile().multiPv).map((line, idx) => ({
@@ -8265,6 +8275,8 @@ _showPuzzleSuccessOverlay() {
     this.liveEvalHistory = [];
     this._drawEvalGraph();
     // Opening card is driven by the async Lichess lookup (_loadGame), not reset.
+    this._liveOpening = null;
+    if (this._openingRefreshTimer) { clearTimeout(this._openingRefreshTimer); this._openingRefreshTimer = null; }
     this._updateLiveEvalPanel({
       busy: false,
       score: null,
@@ -8337,6 +8349,8 @@ _showPuzzleSuccessOverlay() {
 	    this.analysisResults = null;
 	    if (this.elReviewBtnText) this.elReviewBtnText.textContent = 'Start Review';
     this.liveMoveResults = [];
+    this._liveOpening = null;
+    if (this._openingRefreshTimer) { clearTimeout(this._openingRefreshTimer); this._openingRefreshTimer = null; }
     this.initialFen = headers.FEN || headers.Fen || headers.fen || new Chess().fen();
     this.chess = new Chess(this.initialFen);
     this.board.setChessInstance(this.chess);
@@ -9591,6 +9605,9 @@ _saveGameState() {
 				  }
 
 	  _showOpeningInfo(opening) {
+    // Track the latest resolved opening so live-play book classification works
+    // (detectOpening() is a no-op; this is the async source of truth).
+    this._liveOpening = opening || null;
     if (!opening) {
       this.elOpeningInfo.style.display = 'none';
       this.elOpeningName.textContent = '';
@@ -9873,6 +9890,17 @@ _saveGameState() {
       this._openingCache.set(cacheKey, null);
       return null;
     }
+  }
+
+  // Debounced opening-card refresh for live play. Called after each live move
+  // so the async Lichess lookup updates this._liveOpening (and thus book
+  // classification) without hammering the API on every single move.
+  _scheduleOpeningRefresh() {
+    if (this._openingRefreshTimer) clearTimeout(this._openingRefreshTimer);
+    this._openingRefreshTimer = setTimeout(() => {
+      this._openingRefreshTimer = null;
+      this._refreshOpeningCard();
+    }, 400);
   }
 
   // Drive the opening card for the currently loaded game: show a loading state,
