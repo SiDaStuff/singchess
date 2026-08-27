@@ -11,7 +11,7 @@
 
 const { requireUser, isPaidOrAbove, activePlan, initAdmin, usageDay, reserveCoachTokens, reconcileCoachTokens } = require('./_lib/user-service');
 const llm = require('./_lib/llm-service');
-const { TOOL_DEFINITIONS, BROWSER_TOOLS, runServerTool } = require('./_lib/coach-tools');
+const { TOOL_DEFINITIONS, getToolDefinitions, BROWSER_TOOLS, runServerTool } = require('./_lib/coach-tools');
 const { acquireHeavyAction, releaseHeavyAction, getBusyAction } = require('./_lib/action-lock');
 
 const LLM_HISTORY_LIMIT = 20;    // prior turns sent to the LLM (client caps this too)
@@ -344,7 +344,7 @@ async function runConversation({ res, llmMessages, modelTier, user, closedRef, o
     // Stream this turn WITH tools available. We accumulate content (piped live
     // to emit) and tool_calls (assembled from deltas) in parallel.
     const streamRes = await llm.chatCompletion({
-      messages: llmMessages, tools: TOOL_DEFINITIONS, toolChoice: 'auto',
+      messages: llmMessages, tools: getToolDefinitions(), toolChoice: 'auto',
       model: modelTier, stream: true, maxTokens, temperature: 0.3,
     });
     const result = await llm.streamDeltas(streamRes, emit);
@@ -439,6 +439,7 @@ function fallbackReply() {
 
 function toolLabel(name) {
   if (name === 'web_search') return 'Searching the web…';
+  if (name === 'exa_search') return 'Searching the web (Exa)…';
   if (name === 'coach_games') return 'Reading your chess profile…';
   if (name === 'stockfish') return 'Analyzing the position…';
   if (name === 'lichess_opening') return 'Looking up the opening…';
@@ -478,6 +479,12 @@ function toolResultSummary(name, result) {
   if (name === 'lichess_opening') return result.summary || (result.opening || 'No opening data.');
   if (name === 'lichess_player') return result.summary || (result.username || 'No player data.');
   if (name === 'web_search') {
+    const rs = Array.isArray(result.results) ? result.results : [];
+    if (!rs.length) return result.note || 'No results found.';
+    const titles = rs.slice(0, 3).map((r) => r.title).filter(Boolean).join('; ');
+    return `Found ${rs.length}: ${titles}`;
+  }
+  if (name === 'exa_search') {
     const rs = Array.isArray(result.results) ? result.results : [];
     if (!rs.length) return result.note || 'No results found.';
     const titles = rs.slice(0, 3).map((r) => r.title).filter(Boolean).join('; ');

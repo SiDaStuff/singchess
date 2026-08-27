@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from 'vite';
 import path from 'path';
 import fs from 'fs';
+import tailwindcss from '@tailwindcss/vite';
 
 /**
  * Force Vite's dev server to serve .wasm files with the MIME type required by
@@ -73,6 +74,6 @@ export default defineConfig(({ mode }) => {
     optimizeDeps: {
       entries: ['./index.html'],
     },
-    plugins: [wasmMimePlugin(), servePublicSvgPlugin()],
+    plugins: [tailwindcss(), wasmMimePlugin(), servePublicSvgPlugin()],
   };
 });

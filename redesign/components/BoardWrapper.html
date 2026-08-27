@@ -1,0 +1,29 @@
+<!-- ======================================================================
+     BoardWrapper.html — Sing Chess redesign
+     Mounts into #board-wrapper-mount. The Chessboard.js component takes the
+     #sc-board element + #sc-board-arrows SVG overlay and manages everything
+     inside. The wrapper itself is the all-white card frame (coords, padding).
+     ====================================================================== -->
+
+<div class="sc-board-wrapper noise-card animate-scale-in" id="sc-board-wrapper">
+  <!-- White king / black king badges above the board (player strips) -->
+  <div class="sc-player-strip top" id="player-top">
+    <span class="player-dot" data-color="black"></span>
+    <span class="player-name">Black</span>
+    <span class="player-rating">—</span>
+    <span class="player-clock" id="clock-top" hidden>10:00</span>
+  </div>
+
+  <!-- The board itself. Chessboard.js renders the grid into #sc-board. -->
+  <div class="sc-board" id="sc-board" role="img" aria-label="Chess board"></div>
+
+  <!-- SVG overlay for arrows. Chessboard#drawArrows() writes here. -->
+  <svg class="sc-board-arrows" id="sc-board-arrows" viewBox="0 0 8 8" preserveAspectRatio="none" aria-hidden="true"></svg>
+
+  <div class="sc-player-strip bottom" id="player-bottom">
+    <span class="player-dot" data-color="white"></span>
+    <span class="player-name">White</span>
+    <span class="player-rating">—</span>
+    <span class="player-clock" id="clock-bottom" hidden>10:00</span>
+  </div>
+</div>

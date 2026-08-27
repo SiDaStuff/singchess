@@ -15,6 +15,13 @@ try {
   console.error('Anticheat module load failed:', err && err.message ? err.message : err);
 }
 
+// Shared helpers used by the legacy sync handler, the SSE stream handler,
+// and the new background-job path (`_runAnticheatJob`). Imported here so the
+// background job can write its results to Firebase without duplicating the
+// analysis pipeline.
+const { requireUser, requireQuota, activePlan, isPaidOrAbove, _pruneStaleDataGlobal, _pushNotification, initAdmin } = require('./_lib/user-service');
+const cryptoNode = require('crypto');
+
 const MAX_GAMES = 15;
 const MAX_PLIES_PER_GAME = 90;
 // Limit total positions evaluated in one request to avoid serverless timeouts.
@@ -31,7 +38,6 @@ const ANTICHEAT_PROFILE = {
   timeoutMs: 8000,
 };
 const { fetchCompat } = require('./_lib/fetch-compat');
-const { requireQuota } = require('./_lib/user-service');
 const crypto = require('crypto');
 
 let activeAnalysisJobs = 0;
@@ -762,5 +768,414 @@ exports.streamHandler = async (req, res) => {
     });
   } finally {
     res.end();
+  }
+};
+
+// ── Background-job path ─────────────────────────────────────────────────────
+// POST /api/anticheat/submit  -> returns { jobId, status: 'running' }
+// GET  /api/anticheat/status  -> returns the saved report
+// The work runs in-process via setImmediate so the HTTP response is fast;
+// the user gets a notification + can revisit the result at
+// /anticheat/report/<jobId> for the next 3 days (TTL enforced by the
+// lazy `_pruneStaleData` cleanup on user-service.js).
+
+// Pulled out of `exports.handler` so the background job can call the same
+// analysis pipeline. Returns the legacy result shape, throws on failure.
+async function _runLegacyAnalysisForJob(pgns, payload, onProgress) {
+  const engine = await withTimeout(getServerEngine(), 9000, 'Server engine is still warming up.');
+  const reviewEngine = cachedEngineAdapter(engine);
+  const { MoveAnalyzer } = loadAnalyzer();
+  const analyzer = new MoveAnalyzer();
+  analyzer.setReviewProfile(ANTICHEAT_PROFILE);
+  const username = String(payload.username || '').trim();
+
+  const allMetrics = [];
+  const aggregatedGames = [];
+  let skipped = 0;
+  let processedPositions = 0;
+
+  return await withTimeout(withEngineQueue(async () => {
+    await reviewEngine.newGame();
+    for (let gameIndex = 0; gameIndex < pgns.length; gameIndex += 1) {
+      const pgn = pgns[gameIndex];
+      try {
+        const parsed = parseGame(pgn);
+        const remaining = TOTAL_POSITIONS_LIMIT - processedPositions;
+        if (remaining <= 0) { skipped += 1; continue; }
+        if (parsed.moves.length > remaining) parsed.moves = parsed.moves.slice(0, remaining);
+        processedPositions += parsed.moves.length;
+        const results = await analyzeParsedGame(parsed, analyzer, reviewEngine);
+        const times = moveTimesFromPgn(parsed.pgn, parsed.moves.length, parsed.headers);
+        const targetSide = sideForUsername(parsed.headers, username);
+        const sides = targetSide ? [targetSide] : ['white', 'black'];
+        for (const side of sides) {
+          const metrics = sideMetrics(results, side, times, parsed.headers);
+          allMetrics.push(metrics);
+          const singleScore = scoreMetrics([metrics]);
+          aggregatedGames.push({
+            title: `${metrics.player} as ${side}`,
+            score: singleScore.score,
+            note: `Accuracy ${Math.round(metrics.accuracy)}%, ACPL ${Math.round(metrics.acpl)}, fast bests ${Math.round(metrics.fastBestRate)}%`,
+          });
+        }
+      } catch (err) {
+        skipped += 1;
+        console.warn('Skipping background anticheat game:', err.message);
+      }
+      // Persist running progress so the anticheat page's "In progress" list
+      // can show games-analyzed/total while the job is still going.
+      if (onProgress) {
+        try { await onProgress({ gameDone: gameIndex + 1, gameTotal: pgns.length }); } catch (_e) {}
+      }
+    }
+
+    if (!allMetrics.length) throw new Error('No standard chess games could be analyzed. Try fewer or shorter games.');
+    return {
+      summary: scoreMetrics(allMetrics),
+      games: aggregatedGames,
+      gamesAnalyzed: pgns.length - skipped,
+      gamesSkipped: skipped,
+      subjectsAnalyzed: allMetrics.length,
+      profile: ANTICHEAT_PROFILE,
+    };
+  }), 900000, 'Anticheat overall processing timed out.');
+}
+
+// Engine-only mode (depth-18 multi-PV per position). Same as above but
+// returns the engine-results list, used when `mode: 'engine'` is requested.
+async function _runEngineAnalysisForJob(pgns, onProgress) {
+  const engine = await withTimeout(getServerEngine(), 9000, 'Server engine is still warming up.');
+  const reviewEngine = cachedEngineAdapter(engine);
+
+  return await withTimeout(withEngineQueue(async () => {
+    await reviewEngine.newGame();
+    const responses = [];
+    let processedPositions = 0;
+
+    for (let gameIndex = 0; gameIndex < pgns.length; gameIndex += 1) {
+      const pgn = pgns[gameIndex];
+      try {
+        const parsed = parseGame(pgn);
+        const movesAllowed = Math.max(1, Math.min(parsed.moves.length, MAX_PLIES_PER_GAME, TOTAL_POSITIONS_LIMIT - processedPositions));
+        if (movesAllowed < parsed.moves.length) parsed.moves = parsed.moves.slice(0, movesAllowed);
+        processedPositions += parsed.moves.length;
+
+        const Chess = loadChess();
+        const chess = new Chess();
+        if (parsed.headers.FEN || parsed.headers.Fen || parsed.headers.fen) chess.load(parsed.headers.FEN || parsed.headers.Fen || parsed.headers.fen);
+        const positions = [chess.fen()];
+        for (const mv of parsed.moves) {
+          chess.move(mv, { sloppy: true });
+          positions.push(chess.fen());
+        }
+
+        const evals = [];
+        for (let i = 0; i < positions.length; i++) {
+          const fen = positions[i];
+          let multi = null;
+          try {
+            multi = await reviewEngine.evaluateMultiPV(fen, ANTICHEAT_PROFILE.depth, ANTICHEAT_PROFILE.multiPv, ANTICHEAT_PROFILE.timeoutMs);
+          } catch (_e) {
+            try {
+              multi = await reviewEngine.evaluate(fen, ANTICHEAT_PROFILE.depth, ANTICHEAT_PROFILE.timeoutMs);
+              multi = { lines: [{ score: multi.score, scoreType: multi.scoreType, pv: multi.pv || '', depth: multi.depth || 0 }], bestMove: multi.bestMove };
+            } catch (err) {
+              multi = { lines: [], bestMove: '', timedOut: true };
+            }
+          }
+          evals.push(multi || { lines: [], bestMove: '', timedOut: true });
+        }
+
+        responses.push({ headers: parsed.headers, moves: parsed.moves, positions, evals, pgn: parsed.pgn });
+      } catch (err) {
+        console.warn('Skipping background engine anticheat game:', err.message);
+      }
+      // Persist running progress for the anticheat page's "In progress" list.
+      if (onProgress) {
+        try { await onProgress({ gameDone: gameIndex + 1, gameTotal: pgns.length }); } catch (_e) {}
+      }
+    }
+    return { results: responses, profile: ANTICHEAT_PROFILE };
+  }), 900000, 'Anticheat overall processing timed out.');
+}
+
+// Background-job runner. Runs the analysis async, writes the result to
+// `anticheatReports/<uid>/<jobId>`, and pushes a notification on completion
+// (success OR failure). Used by `exports.submit` (below). The `setImmediate`
+// schedule means the HTTP response has already returned by the time the
+// engine queue picks the job up.
+async function _runAnticheatJob(jobId, payload, uid, quota, plan) {
+  const { db } = initAdmin();
+  const reportRef = db.ref(`anticheatReports/${uid}/${jobId}`);
+
+  let pgns = [];
+  try {
+    pgns = await loadPgns(payload);
+    if (!pgns.length) throw new Error('No games found.');
+  } catch (err) {
+    await reportRef.update({
+      status: 'error',
+      error: err.message || 'Could not load games.',
+      completedAt: Date.now(),
+    }).catch(() => {});
+    await _pushNotification(uid, {
+      type: 'anticheat.error',
+      title: 'Anticheat review failed',
+      body: err.message || 'Could not load games.',
+      link: `/anticheat/report/${jobId}`,
+      reportId: jobId,
+    });
+    return;
+  }
+
+  try {
+    const isEngine = payload.mode === 'engine';
+    // Persist per-game progress while the job runs so the anticheat page's
+    // "In progress" list can show a live games-analyzed count + bar. The final
+    // update below overwrites gamesAnalyzed with the authoritative total.
+    const onProgress = async ({ gameDone, gameTotal }) => {
+      await reportRef.update({
+        gamesAnalyzed: gameDone,
+        limit: payload.limit != null ? Number(payload.limit) : gameTotal,
+        gamesTotal: gameTotal,
+      }).catch(() => {});
+    };
+    const result = isEngine
+      ? { engineResults: (await _runEngineAnalysisForJob(pgns, onProgress)).results, profile: ANTICHEAT_PROFILE }
+      : await _runLegacyAnalysisForJob(pgns, payload, onProgress);
+
+    await reportRef.update({
+      status: 'done',
+      completedAt: Date.now(),
+      summary: isEngine ? null : result.summary,
+      games: isEngine ? null : result.games,
+      gamesAnalyzed: isEngine ? null : result.gamesAnalyzed,
+      gamesSkipped: isEngine ? null : result.gamesSkipped,
+      subjectsAnalyzed: isEngine ? null : result.subjectsAnalyzed,
+      engineResults: isEngine ? result.engineResults : null,
+      profile: result.profile,
+    }).catch(() => {});
+
+    const headline = !isEngine && result.summary
+      ? `${result.summary.riskLevel} risk · score ${result.summary.score}/100`
+      : 'Review complete.';
+    await _pushNotification(uid, {
+      type: 'anticheat.done',
+      title: 'Anticheat review complete',
+      body: headline,
+      link: `/anticheat/report/${jobId}`,
+      reportId: jobId,
+    });
+  } catch (err) {
+    console.error('Background anticheat job failed:', err);
+    if (/cancelled|not ready|timed out|out of memory|abort/i.test(String(err?.message || err))) {
+      try { resetServerEngine(); } catch (_) {}
+    }
+    await reportRef.update({
+      status: 'error',
+      error: err.message || 'Anticheat analysis failed.',
+      completedAt: Date.now(),
+    }).catch(() => {});
+    await _pushNotification(uid, {
+      type: 'anticheat.error',
+      title: 'Anticheat review failed',
+      body: err.message || 'Anticheat analysis failed.',
+      link: `/anticheat/report/${jobId}`,
+      reportId: jobId,
+    });
+  }
+}
+
+// POST /api/anticheat/submit — charge quota, write a fresh report entry
+// with status:'running', then hand the heavy work to _runAnticheatJob via
+// setImmediate so the HTTP response is fast. The user gets a notification
+// when it finishes and can revisit the result at the saved URL.
+exports.submit = async (event) => {
+  if (event.httpMethod === 'OPTIONS') return json(200, {});
+  if (event.httpMethod !== 'POST') return json(405, { error: 'Use POST.' });
+
+  if (_moduleLoadError) return json(500, { error: `Anticheat module load failed: ${_moduleLoadError.message || String(_moduleLoadError)}` });
+
+  let payload = {};
+  try { payload = JSON.parse(event.body || '{}'); }
+  catch (_) { return json(400, { error: 'Invalid JSON body.' }); }
+
+  // Background-job trigger also drives the global stale-data cleanup so
+  // abuse logs and trackers get pruned even on silent users.
+  _pruneStaleDataGlobal().catch(() => {});
+
+  // Auth first — we need uid for the report path AND the quota charge.
+  let user;
+  try {
+    user = await requireUser({
+      httpMethod: event.httpMethod,
+      headers: event.headers || {},
+      body: event.body,
+    });
+  } catch (err) {
+    return json(err.statusCode || 500, { error: err.message || 'Unauthorized.', code: err.code });
+  }
+
+  // Background anticheat is a Max-only feature. Gate BEFORE validating PGNs or
+  // charging quota so a non-Max user is rejected without burning a weekly slot.
+  const plan = activePlan(user._profile);
+  if (!isPaidOrAbove(plan.plan, 'max')) {
+    return json(402, {
+      error: 'Background anticheat reviews are a Max feature. Upgrade to Max to run anticheat without keeping this tab open.',
+      code: 'upgrade_required',
+      plan: { plan: plan.plan, name: plan.name },
+    });
+  }
+
+  // Validate PGNs BEFORE charging quota so a malformed payload doesn't burn
+  // a weekly slot. (Reuses the same loader the legacy handler uses.)
+  let preloadedPgns = [];
+  try {
+    preloadedPgns = await loadPgns(payload);
+    if (!preloadedPgns.length) return json(400, { error: 'No games found.' });
+  } catch (err) {
+    return json(400, { error: err.message || 'Could not load games.' });
+  }
+
+  // Charge the per-game quota up front. Free users hard-block here; Boost
+  // and Max get a weekly per-game claim. Any charge that's later abandoned
+  // (e.g. user navigated away mid-submit) stays spent — matches the
+  // legacy handler's behaviour.
+  let quotaState;
+  try {
+    quotaState = await requireQuota(event, 'anticheat', { amount: preloadedPgns.length });
+  } catch (err) {
+    return json(err.statusCode || 500, { error: err.message, code: err.code, quota: err.quota, plan: err.plan });
+  }
+
+  const jobId = (cryptoNode.randomUUID && cryptoNode.randomUUID())
+    || `job_${Date.now()}_${cryptoNode.randomBytes(8).toString('hex')}`;
+  const startedAt = Date.now();
+  const expiresAt = startedAt + (3 * 24 * 60 * 60 * 1000); // 3-day TTL
+  const reportRecord = {
+    status: 'running',
+    mode: payload.mode === 'engine' ? 'engine' : 'legacy',
+    source: String(payload.source || 'pgn'),
+    sourceMeta: {
+      username: payload.username ? String(payload.username).trim() : '',
+      limit: preloadedPgns.length,
+    },
+    startedAt,
+    completedAt: null,
+    expiresAt,
+    quota: quotaState.quota,
+    plan: quotaState.plan,
+    error: null,
+    summary: null,
+    games: null,
+    gamesAnalyzed: null,
+    gamesSkipped: null,
+    subjectsAnalyzed: null,
+    engineResults: null,
+    profile: ANTICHEAT_PROFILE,
+  };
+
+  try {
+    const { db } = initAdmin();
+    await db.ref(`anticheatReports/${user.uid}/${jobId}`).set(reportRecord);
+  } catch (err) {
+    console.error('[anticheat/submit] report-write failed:', err && err.message ? err.message : err);
+    return json(500, { error: 'Could not start the background review.', code: 'storage_error', detail: (err && err.message) ? String(err.message).slice(0, 300) : undefined });
+  }
+
+  // Hand off to the engine pool. setImmediate keeps the call off the current
+  // event loop tick so the HTTP response can flush first.
+  setImmediate(() => {
+    _runAnticheatJob(jobId, payload, user.uid, quotaState.quota, quotaState.plan).catch((err) => {
+      console.error('Background anticheat job crashed:', err);
+    });
+  });
+
+  return json(200, {
+    jobId,
+    status: 'running',
+    startedAt,
+    expiresAt,
+    quota: quotaState.quota,
+    plan: quotaState.plan,
+  });
+};
+
+// GET /api/anticheat/list — list every saved report (running/error/done)
+// for the current user as lightweight metadata, newest first. Serves the
+// anticheat page's "Saved reviews" section. Full game data is intentionally
+// omitted — the report page fetches it on demand via /status?jobId=….
+exports.list = async (event) => {
+  if (event.httpMethod === 'OPTIONS') return json(200, {});
+  if (event.httpMethod !== 'GET') return json(405, { error: 'Use GET.' });
+
+  let user;
+  try {
+    user = await requireUser({
+      httpMethod: event.httpMethod,
+      headers: event.headers || {},
+      queryStringParameters: event.queryStringParameters,
+    });
+  } catch (err) {
+    return json(err.statusCode || 500, { error: err.message || 'Unauthorized.', code: err.code });
+  }
+
+  try {
+    const { db } = initAdmin();
+    const snap = await db.ref(`anticheatReports/${user.uid}`).once('value');
+    const reports = [];
+    if (snap.exists()) {
+      snap.forEach((c) => {
+        const v = c.val() || {};
+        reports.push({
+          jobId: c.key,
+          status: v.status === 'done' ? 'done' : (v.status === 'error' ? 'error' : 'running'),
+          startedAt: Number(v.startedAt) || 0,
+          completedAt: v.completedAt ? Number(v.completedAt) : null,
+          summary: v.summary && v.summary.riskLevel
+            ? { riskLevel: String(v.summary.riskLevel), score: v.summary.score }
+            : null,
+          error: v.error ? String(v.error) : null,
+          gamesAnalyzed: v.gamesAnalyzed != null ? Number(v.gamesAnalyzed) : null,
+          subjectsAnalyzed: v.subjectsAnalyzed != null ? Number(v.subjectsAnalyzed) : null,
+          gamesTotal: v.gamesTotal != null ? Number(v.gamesTotal) : null,
+          limit: v.limit != null ? Number(v.limit) : null,
+        });
+      });
+    }
+    reports.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+    return json(200, { reports });
+  } catch (err) {
+    return json(500, { error: err.message || 'Could not load anticheat reports.' });
+  }
+};
+
+// GET /api/anticheat/status?jobId=… — read the saved report. Used by the
+// `/anticheat/report/<jobId>` page on load AND by the bell on click.
+exports.status = async (event) => {
+  if (event.httpMethod === 'OPTIONS') return json(200, {});
+  if (event.httpMethod !== 'GET') return json(405, { error: 'Use GET.' });
+
+  let user;
+  try {
+    user = await requireUser({
+      httpMethod: event.httpMethod,
+      headers: event.headers || {},
+      queryStringParameters: event.queryStringParameters,
+    });
+  } catch (err) {
+    return json(err.statusCode || 500, { error: err.message || 'Unauthorized.', code: err.code });
+  }
+
+  const jobId = String((event.queryStringParameters && event.queryStringParameters.jobId) || '').trim();
+  if (!jobId) return json(400, { error: 'jobId query parameter is required.' });
+
+  try {
+    const { db } = initAdmin();
+    const snap = await db.ref(`anticheatReports/${user.uid}/${jobId}`).once('value');
+    if (!snap.exists()) return json(404, { error: 'Report not found. It may have expired (3-day TTL).' });
+    return json(200, { jobId, ...snap.val() });
+  } catch (err) {
+    return json(500, { error: err.message || 'Could not load the report.' });
   }
 };

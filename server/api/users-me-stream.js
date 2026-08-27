@@ -1,4 +1,4 @@
-const { requireUser } = require('./_lib/user-service');
+const { requireUser, initAdmin } = require('./_lib/user-service');
 const {
   setUserPresence,
   touchUserPresence,
@@ -74,11 +74,16 @@ exports.streamHandler = async (req, res) => {
   let closed = false;
   let interval = null;
   let maxAge = null;
+  let notifListener = null;
+  let notifRef = null;
   const stopStream = () => {
     if (closed) return;
     closed = true;
     if (interval) clearInterval(interval);
     if (maxAge) clearTimeout(maxAge);
+    if (notifRef && notifListener) {
+      try { notifRef.off('child_added', notifListener); } catch (_) {}
+    }
     clearUserPresence(user.uid).catch(() => {});
     if (!res.finished) res.end();
   };
@@ -129,6 +134,31 @@ exports.streamHandler = async (req, res) => {
     sendHeartbeat();
     checkStatus();
   }, 20000);
+
+  // Push notifications (anticheat done, etc.) to the browser as SSE events.
+  // We start watching from "now" so notifications created BEFORE the stream
+  // connected aren't replayed — the bell loads those via the initial getMe.
+  try {
+    const { db: database } = initAdmin();
+    notifRef = database.ref(`users/${user.uid}/notifications`);
+    const now = Date.now();
+    notifListener = notifRef.orderByChild('createdAt').startAt(now).on('child_added', (snap) => {
+      if (closed) return;
+      const v = snap.val() || {};
+      sseWrite(res, 'notification', {
+        id: snap.key,
+        type: String(v.type || ''),
+        title: String(v.title || ''),
+        body: String(v.body || ''),
+        link: String(v.link || ''),
+        reportId: v.reportId ? String(v.reportId) : null,
+        read: v.read === true,
+        createdAt: Number(v.createdAt) || Date.now(),
+      });
+    });
+  } catch (err) {
+    console.warn('users-me-stream: notification listener setup failed:', err && err.message ? err.message : err);
+  }
 
   // Cap the stream lifetime so an idle client (tab left open) can't hold a
   // connection + file descriptor forever. 15 min; the client reconnects.

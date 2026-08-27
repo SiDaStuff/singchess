@@ -274,6 +274,183 @@ function _weekKeyOlderThan(weekKey, cutoffMs) {
   return wk < cutWeek;
 }
 
+// ── Broader stale-data cleanup ──────────────────────────────────────────────
+// Runs alongside `pruneOldUsage` from getMe and the anticheat submit path.
+// Two throttles: per-uid (1× per uid/hour) for user-scoped data and
+// process-wide (1× per hour) for global stores (abuse logs / trackers). The
+// throttle Maps reset on process restart, which is fine — at worst we run
+// cleanup one extra time after a deploy.
+//
+// All deletes are best-effort; a single failure must NOT block a request.
+const _stalePruneSeen = new Map();      // uid -> lastPrunedAt
+const _stalePruneSeenGlobal = { last: 0 };
+const PRESENCE_DEAD_MS = 6 * 60 * 1000;          // 6 min — > 4× the 90s "stale" threshold
+const ANTICHEAT_REPORT_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+const NOTIFICATION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const ABUSE_FINGERPRINT_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const ABUSE_REPORT_DISMISSED_TTL_MS = 180 * 24 * 60 * 60 * 1000;
+const ABUSE_FLAGGED_REASON_LIMIT = 20;
+
+async function _pruneStaleData(uid) {
+  try {
+    if (!uid) return; // per-uid scope; the global sweep has its own entry point
+    const now = Date.now();
+    const last = Number(_stalePruneSeen.get(uid)) || 0;
+    if (now - last < 60 * 60 * 1000) return; // at most once/hour/uid
+    _stalePruneSeen.set(uid, now);
+
+    const { db } = initAdmin();
+    const updates = {};
+
+    // Presence record gone stale — the 90s threshold means anything > 6 min
+    // without a heartbeat is certainly abandoned.
+    try {
+      const pSnap = await db.ref(`presence/${uid}`).once('value');
+      if (pSnap.exists() && now - (Number(pSnap.val().lastSeen) || 0) > PRESENCE_DEAD_MS) {
+        updates[`presence/${uid}`] = null;
+      }
+    } catch (_) { /* best-effort */ }
+
+    // Anticheat reports past their 3-day TTL (expiresAt OR completedAt+3d).
+    try {
+      const rSnap = await db.ref(`anticheatReports/${uid}`).once('value');
+      if (rSnap.exists()) rSnap.forEach((c) => {
+        const v = c.val() || {};
+        const expiresAt = Number(v.expiresAt) || 0;
+        const completedAt = Number(v.completedAt) || 0;
+        if ((expiresAt && expiresAt < now)
+          || (completedAt && now - completedAt > ANTICHEAT_REPORT_TTL_MS)) {
+          updates[`anticheatReports/${uid}/${c.key}`] = null;
+        }
+      });
+    } catch (_) { /* best-effort */ }
+
+    // Notifications older than 30 days.
+    try {
+      const nSnap = await db.ref(`users/${uid}/notifications`).once('value');
+      if (nSnap.exists()) nSnap.forEach((c) => {
+        const v = c.val() || {};
+        const ts = Number(v.createdAt) || 0;
+        if (ts && now - ts > NOTIFICATION_TTL_MS) updates[`users/${uid}/notifications/${c.key}`] = null;
+      });
+    } catch (_) { /* best-effort */ }
+
+    if (Object.keys(updates).length) await db.ref().update(updates);
+  } catch (_) { /* best-effort */ }
+}
+
+// Global sweep: cleans abuse reports / fingerprint indexes / flagged reasons.
+// Runs from anticheat submit + getMe so cleanup happens even on users who
+// never call getMe (heavy anticheat users).
+async function _pruneStaleDataGlobal() {
+  try {
+    const now = Date.now();
+    if (now - _stalePruneSeenGlobal.last < 60 * 60 * 1000) return; // 1×/hour
+    _stalePruneSeenGlobal.last = now;
+    const { db } = initAdmin();
+    const updates = {};
+
+    // Bulk-remove dismissed abuse reports older than 180 days. Un-dismissed
+    // reports stay (they're on the admin queue).
+    try {
+      const reportsSnap = await db.ref('abuse/reports').orderByChild('reportedAt')
+        .endAt(now - ABUSE_REPORT_DISMISSED_TTL_MS).once('value');
+      if (reportsSnap.exists()) reportsSnap.forEach((c) => {
+        const v = c.val() || {};
+        if (v.dismissed === true) updates[`abuse/reports/${c.key}`] = null;
+      });
+    } catch (_) { /* best-effort */ }
+
+    // Trim `reasons`/`flaggedBy` arrays on abuse/flagged/<uid> to last 20.
+    try {
+      const flaggedSnap = await db.ref('abuse/flagged').once('value');
+      if (flaggedSnap.exists()) flaggedSnap.forEach((c) => {
+        const v = c.val() || {};
+        let changed = false;
+        if (Array.isArray(v.reasons) && v.reasons.length > ABUSE_FLAGGED_REASON_LIMIT) {
+          updates[`abuse/flagged/${c.key}/reasons`] = v.reasons.slice(-ABUSE_FLAGGED_REASON_LIMIT);
+          changed = true;
+        }
+        if (Array.isArray(v.flaggedBy) && v.flaggedBy.length > ABUSE_FLAGGED_REASON_LIMIT) {
+          updates[`abuse/flagged/${c.key}/flaggedBy`] = v.flaggedBy.slice(-ABUSE_FLAGGED_REASON_LIMIT);
+          changed = true;
+        }
+        return changed;
+      });
+    } catch (_) { /* best-effort */ }
+
+    // Drop stale uids from ipIndex / cookieIndex; remove the parent key if
+    // its uids bucket becomes empty.
+    for (const root of ['abuse/ipIndex', 'abuse/cookieIndex']) {
+      try {
+        const snap = await db.ref(root).once('value');
+        if (!snap.exists()) continue;
+        snap.forEach((c) => {
+          const v = c.val() || {};
+          const uids = v.uids || {};
+          let anyRemoved = false;
+          for (const [id, ts] of Object.entries(uids)) {
+            if (now - Number(ts || 0) > ABUSE_FINGERPRINT_TTL_MS) {
+              updates[`${root}/${c.key}/uids/${id}`] = null;
+              anyRemoved = true;
+            }
+          }
+          if (anyRemoved) {
+            const remaining = Object.keys(uids).filter((id) => !(id in updates[`${root}/${c.key}/uids`] || updates[`${root}/${c.key}/uids/${id}`] === null));
+            if (!remaining.length) updates[`${root}/${c.key}`] = null;
+          }
+        });
+      } catch (_) { /* best-effort */ }
+    }
+
+    if (Object.keys(updates).length) await db.ref().update(updates);
+  } catch (_) { /* best-effort */ }
+}
+
+// Push a notification to a user. Idempotent on (uid, type, reportId) — if a
+// matching one already exists, the new one is skipped so retries don't dup.
+// `payload` = { type, title, body, link, reportId? }
+async function _pushNotification(uid, payload) {
+  if (!uid || !payload || !payload.type) return null;
+  try {
+    const { db } = initAdmin();
+    const ref = db.ref(`users/${uid}/notifications`).push();
+    const notif = {
+      type: String(payload.type).slice(0, 60),
+      title: String(payload.title || '').slice(0, 140),
+      body: String(payload.body || '').slice(0, 500),
+      link: String(payload.link || '').slice(0, 200),
+      read: false,
+      createdAt: db.ref('.info/serverTimeOffset').key ? Date.now() + Number(await _serverTimeOffsetMs(db)) : Date.now(),
+    };
+    if (payload.reportId) notif.reportId = String(payload.reportId).slice(0, 100);
+    // Idempotency: skip if an existing unread notification already has the
+    // same type + reportId. Cheap because there are very few notifications
+    // per user in practice.
+    try {
+      const existing = await db.ref(`users/${uid}/notifications`)
+        .orderByChild('reportId').equalTo(notif.reportId || '').once('value');
+      if (existing.exists()) {
+        let dup = false;
+        existing.forEach((c) => { if (c.val().type === notif.type) dup = true; });
+        if (dup) return null;
+      }
+    } catch (_) { /* no index? fine, just write */ }
+    await ref.set(notif);
+    return ref.key;
+  } catch (_) { return null; }
+}
+
+// Small helper: returns the server-clock offset in ms, falls back to 0 if
+// the SDK isn't fully wired. (Firebase server timestamps would be nicer but
+// they can't be combined with a non-server ref.push()'s `.key` cleanly.)
+async function _serverTimeOffsetMs(db) {
+  try {
+    const offsetSnap = await db.ref('.info/serverTimeOffset').once('value');
+    return Number(offsetSnap.val()) || 0;
+  } catch (_) { return 0; }
+}
+
 async function getProfile(uid, user = null) {
   const { db: database } = initAdmin();
   const ref = database.ref(`users/${uid}/profile`);
@@ -305,6 +482,7 @@ const ALLOWED_PROFILE_KEYS = new Set([
   'coachMode',
   'puzzleMode',
   'onboardingComplete',
+  'notificationSettings',
   'updatedAt',
 ]);
 
@@ -322,6 +500,28 @@ const FORBIDDEN_PROFILE_KEYS = new Set([
   'uid',
   'lastUsernameChangeAt',
 ]);
+
+// Defaults for the per-user notification settings. `browserPush` is the
+// user's explicit willingness to receive browser notifications (driven from
+// the Settings page); `browserPushGranted` is updated when the OS-level
+// permission resolves to 'granted' so the client doesn't ask twice.
+const DEFAULT_NOTIFICATION_SETTINGS = Object.freeze({
+  anticheatComplete: true,
+  browserPush: false,
+  browserPushGranted: false,
+});
+
+// Merge helper: never let the client remove a default by sending a partial
+// object. Missing fields are filled with defaults; unknown fields are dropped.
+function sanitizeNotificationSettings(input) {
+  const src = input && typeof input === 'object' ? input : {};
+  const out = {};
+  for (const key of Object.keys(DEFAULT_NOTIFICATION_SETTINGS)) {
+    if (key in src) out[key] = !!src[key];
+    else out[key] = DEFAULT_NOTIFICATION_SETTINGS[key];
+  }
+  return out;
+}
 
 // Minimum time between username changes. Prevents username churn (and the
 // public-profile-index churn it causes). A user's FIRST set of a username
@@ -342,7 +542,11 @@ async function patchProfile(uid, update) {
       console.warn(`patchProfile: blocked unknown key "${key}" for uid ${uid}`);
       continue;
     }
-    sanitized[key] = value;
+    // notificationSettings needs shape-preserving merge so the client can't
+    // accidentally drop `anticheatComplete: true` by sending only
+    // `{browserPush:true}` — defaults stay applied.
+    if (key === 'notificationSettings') sanitized[key] = sanitizeNotificationSettings(value);
+    else sanitized[key] = value;
   }
 
   // A username can never be cleared — a profile must always carry a non-empty
@@ -463,6 +667,7 @@ async function getMe(event) {
   const week = usageWeek();
   const usageRef = database.ref(`users/${user.uid}/usage/${day}`);
   const weekRef = database.ref(`users/${user.uid}/usage/week/${week}/anticheatGames`);
+  const notificationsRef = database.ref(`users/${user.uid}/notifications`);
 
   // Reuse the profile snapshot already fetched by requireUser
   const profileSnap = user._profileSnap;
@@ -474,12 +679,16 @@ async function getMe(event) {
   delete profile.attemptedPuzzleIds;
   delete profile.solvedPuzzleIds;
   profile.subscription = profile.subscription || { plan: 'free' };
+  // Merge notification settings over defaults so a partial save in the
+  // client can't strip fields a server caller might rely on.
+  profile.notificationSettings = sanitizeNotificationSettings(profile.notificationSettings);
   profile.uid = user.uid;
 
-  // Fetch daily + weekly usage in parallel with everything else
-  const [usageSnap, weekSnap] = await Promise.all([
+  // Fetch daily + weekly usage + notifications in parallel.
+  const [usageSnap, weekSnap, notifsSnap] = await Promise.all([
     usageRef.once('value'),
     weekRef.once('value'),
+    notificationsRef.orderByChild('createdAt').limitToLast(20).once('value'),
   ]);
 
   if (!profileSnap.exists()) {
@@ -488,6 +697,9 @@ async function getMe(event) {
 
   // Best-effort: prune usage buckets older than a week (fire-and-forget).
   pruneOldUsage(user.uid).catch(() => {});
+  // Broader cleanup (throttled): user-scoped + global abuse/trackers.
+  _pruneStaleData(user.uid).catch(() => {});
+  _pruneStaleDataGlobal().catch(() => {});
 
   const plan = activePlan(profile);
   const warning = profile.warning || null;
@@ -498,6 +710,28 @@ async function getMe(event) {
       warnedBy: String(warning.warnedBy || ''),
     }
     : null;
+
+  // Assemble the notification list (newest first) and unread count for the bell.
+  let notifications = [];
+  let unread = 0;
+  if (notifsSnap.exists()) {
+    notifsSnap.forEach((childSnap) => {
+      const v = childSnap.val() || {};
+      const item = {
+        id: childSnap.key,
+        type: String(v.type || ''),
+        title: String(v.title || ''),
+        body: String(v.body || ''),
+        link: String(v.link || ''),
+        reportId: v.reportId ? String(v.reportId) : null,
+        read: v.read === true,
+        createdAt: Number(v.createdAt) || 0,
+      };
+      if (!item.read) unread += 1;
+      notifications.push(item);
+    });
+    notifications.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }
   // Merge daily + weekly counters into one usage object the client reads:
   //   usage.serverReviews = today's count
   //   usage.anticheatGames = this week's games
@@ -528,6 +762,10 @@ async function getMe(event) {
     isAdmin: !!user.admin,
     pendingWarning,
     usernameCooldown,
+    notifications: {
+      list: notifications,
+      unread,
+    },
   };
 }
 
@@ -824,4 +1062,11 @@ module.exports = {
   reconcileCoachTokens,
   usageDay,
   usageWeek,
+  // Notifications + cleanup helpers used by the anticheat job runner and the
+  // SSE users-me stream.
+  _pruneStaleData,
+  _pruneStaleDataGlobal,
+  _pushNotification,
+  sanitizeNotificationSettings,
+  DEFAULT_NOTIFICATION_SETTINGS,
 };

@@ -1,0 +1,30 @@
+<!-- ======================================================================
+     Header.html — Sing Chess redesign (MOBILE ONLY)
+     Mounted into #sc-mobile-header, shown under 768px. Contains the menu
+     trigger (opens the slide-out drawer via Drawer.js), the brand, and a
+     compact actions slot. Hidden on desktop (where the sidebar is visible).
+     ====================================================================== -->
+
+<button
+  id="sc-menu-trigger"
+  class="sc-icon-btn sc-menu-trigger"
+  aria-label="Open menu"
+  aria-controls="sc-sidebar"
+  aria-expanded="false"
+>
+  <span class="material-symbols-outlined">menu</span>
+</button>
+
+<a class="sc-header-brand" href="/" aria-label="Sing Chess home">
+  <img src="/assets/icon.png" alt="" width="24" height="24" />
+  <span>Sing Chess</span>
+</a>
+
+<div class="sc-header-actions">
+  <button class="sc-icon-btn" aria-label="Flip board" data-board-action="flip">
+    <span class="material-symbols-outlined">flip_camera_android</span>
+  </button>
+  <button class="sc-icon-btn" aria-label="Settings" data-route="/settings">
+    <span class="material-symbols-outlined">tune</span>
+  </button>
+</div>

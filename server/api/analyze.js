@@ -614,7 +614,7 @@ exports.streamHandler = async (req, res) => {
           (completed, total) => {
             if (res.destroyed) return;
             const moveIndex = Math.min(Math.max(0, completed), moves.length - 1);
-            sseWrite(res, 'progress', { completed, total, pass: 'quick', moveIndex, totalMoves: moves.length });
+            sseWrite(res, 'progress', { completed, total, pass: 'quick', moveIndex, totalMoves: moves.length, mode: baseSseProfile.mode });
           },
         ));
         results = await analyzer.resultsFromEvals(moves, positions, evals, analyzer.detectOpening(moves), { initialFen, headers: payload.headers || {}, skipMateThreat: true });
@@ -631,7 +631,7 @@ exports.streamHandler = async (req, res) => {
           profile,
           onProgress: (completed, total, pass, moveIndex, totalMoves) => {
             if (res.destroyed) return;
-            sseWrite(res, 'progress', { completed, total, pass, moveIndex, totalMoves });
+            sseWrite(res, 'progress', { completed, total, pass, moveIndex, totalMoves, mode: baseSseProfile.mode });
           },
         });
         results = await analyzer.resultsFromEvals(moves, positions, progressiveEvals, analyzer.detectOpening(moves), { initialFen, headers: payload.headers || {}, skipMateThreat: true });

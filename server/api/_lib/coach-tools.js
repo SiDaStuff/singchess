@@ -7,6 +7,7 @@
 //   - ask_question     -> BROWSER (inline multiple-choice question to the user).
 //   - end_conversation -> BROWSER (locks this chat — response to ToS/abuse).
 //   - web_search       -> SERVER  (Wikipedia + DuckDuckGo, no API key).
+//   - exa_search       -> SERVER  (real-time web via Exa, requires EXA_API_KEY).
 //   - coach_games      -> SERVER  (reads the signed-in user's profile).
 
 const { fetchCompat } = require('./fetch-compat');
@@ -17,7 +18,18 @@ const { activePlan } = require('./user-service');
 // `tool_call` SSE event for these and waits for the browser to POST the result.
 const BROWSER_TOOLS = new Set(['stockfish', 'game_review', 'show_board', 'ask_question', 'end_conversation']);
 
-// OpenAI-compatible function-tool schemas shown to the LLM.
+// Tool availability: the exa_search tool is only listed when the operator has
+// configured EXA_API_KEY. Without it, the model would call it and just get an
+// "not configured" error every time, which is noise. The helper is read at
+// chat start so a server restart picks up the env change.
+function exaSearchAvailable() {
+  return !!String(process.env.EXA_API_KEY || '').trim();
+}
+
+// OpenAI-compatible function-tool schemas shown to the LLM. exa_search is
+// appended only when the operator has set EXA_API_KEY — its description is
+// crafted so the model prefers it over web_search for any time-sensitive or
+// "what's the latest" question.
 const TOOL_DEFINITIONS = [
   {
     type: 'function',
@@ -151,12 +163,43 @@ const TOOL_DEFINITIONS = [
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },
+  // Exa is gated on EXA_API_KEY — the chat handler filters the list before
+  // sending, so this entry is only reached when the env var is set.
+  {
+    type: 'function',
+    function: {
+      name: 'exa_search',
+      description: 'Real-time web search via Exa (Neural Search). Use for time-sensitive questions: recent tournaments, current ratings, the latest news, a player\'s recent results, or anything that may have changed since training. Prefer this over web_search for any "latest", "current", "recent", or "news" question. Returns up to 10 results with title, URL, published date, and a short snippet. Always cite the source URL.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query.' },
+          num_results: { type: 'integer', minimum: 1, maximum: 10, default: 5 },
+          recency_days: { type: 'integer', minimum: 1, maximum: 365, description: 'Only include results published in the past N days. Use for "latest" / "recent" questions.' },
+        },
+        required: ['query'],
+      },
+    },
+  },
 ];
+
+// Returns the list of tool schemas for the current run. Filters EXA in/out
+// based on the server's env config so the model never sees a tool it can't
+// actually run. Today the EXA tool definition is always present in
+// TOOL_DEFINITIONS for module-shape stability; this filter exists so the
+// chat handler doesn't have to know about EXA env coupling directly.
+function getToolDefinitions() {
+  // TOOL_DEFINITIONS already includes the EXA schema; gate it on the env var
+  // here so an unconfigured server doesn't waste a tool slot on it.
+  if (exaSearchAvailable()) return TOOL_DEFINITIONS;
+  return TOOL_DEFINITIONS.filter((t) => t && t.function && t.function.name !== 'exa_search');
+}
 
 // Run a SERVER-side tool. Returns a JSON-serialisable result.
 async function runServerTool(name, args, user) {
   switch (name) {
     case 'web_search': return runWebSearch(args || {});
+    case 'exa_search': return runExaSearch(args || {});
     case 'coach_games': return runCoachGames(user);
     case 'lichess_opening': return runLichessOpening(args || {});
     case 'lichess_player': return runLichessPlayer(args || {});
@@ -280,6 +323,67 @@ async function runWebSearch({ query, top_k }) {
   return { query: q, results: results.slice(0, k + 2) };
 }
 
+// Exa (https://exa.ai) neural search. Requires the EXA_API_KEY env var on
+// the server. When unset the runServerTool case above returns a clean
+// "not configured" error so the model never bricks on it.
+//
+// We pass `useAutoprompt: true` so Exa can rephrase chess-natural-language
+// queries into search-engine-friendly terms — e.g. "who won the Candidates
+// 2026" → tournament results.
+async function runExaSearch({ query, num_results, recency_days }) {
+  const apiKey = String(process.env.EXA_API_KEY || '').trim();
+  if (!apiKey) return { error: 'Exa search is not configured on this server.' };
+  const q = String(query || '').trim();
+  if (!q) return { error: 'Empty query.' };
+  const k = Math.min(10, Math.max(1, Math.trunc(Number(num_results) || 5)));
+
+  const body = { query: q, numResults: k, useAutoprompt: true };
+  const recency = Math.trunc(Number(recency_days));
+  if (Number.isFinite(recency) && recency > 0 && recency <= 365) {
+    // Exa accepts an ISO date for the lower bound on published date.
+    body.startPublishedDate = new Date(Date.now() - recency * 24 * 60 * 60 * 1000).toISOString();
+  }
+
+  let res;
+  try {
+    res = await fetchCompat('https://api.exa.ai/search', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(body),
+      timeoutMs: 12000,
+    });
+  } catch (e) {
+    return { error: `Could not reach Exa: ${e && e.message ? e.message : 'network error'}` };
+  }
+  if (!res || !res.ok) {
+    let detail = '';
+    try { detail = await res.text(); } catch (_) { detail = ''; }
+    return { error: `Exa returned ${res ? res.status : 'no response'}: ${detail.slice(0, 200)}` };
+  }
+  let json = null;
+  try { json = await res.json(); } catch (_) { return { error: 'Exa returned a non-JSON body.' }; }
+  const raw = Array.isArray(json && json.results) ? json.results : [];
+  const results = raw.slice(0, k).map((r) => {
+    const highlight = Array.isArray(r.highlights) ? r.highlights.join(' ') : '';
+    const text = typeof r.text === 'string' ? r.text : '';
+    const snippet = (highlight || text).slice(0, 400);
+    return {
+      source: 'exa',
+      title: String(r.title || '').slice(0, 200),
+      url: String(r.url || '').slice(0, 400),
+      publishedDate: r.publishedDate || null,
+      author: r.author || null,
+      snippet,
+    };
+  }).filter((r) => r.title && r.url);
+  if (!results.length) return { query: q, results: [], note: 'No results found.' };
+  return { query: q, results, note: null };
+}
+
 // Returns a concise, prose-friendly summary of the user's chess context. The
 // shape is intentionally short and human-readable so the model paraphrases it
 // rather than echoing raw JSON to the user.
@@ -359,8 +463,11 @@ function stripHtml(s) {
 module.exports = {
   BROWSER_TOOLS,
   TOOL_DEFINITIONS,
+  getToolDefinitions,
+  exaSearchAvailable,
   runServerTool,
   runWebSearch,
+  runExaSearch,
   runCoachGames,
   runLichessOpening,
   runLichessPlayer,

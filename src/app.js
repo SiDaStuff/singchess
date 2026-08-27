@@ -52,6 +52,10 @@ class ChessReviewApp {
 
     this.gameMoves = [];
     this.gameHeaders = {};
+    // Username whose games were imported (Lichess/Chess.com). When a game is
+    // loaded, the board auto-flips so this player is at the bottom. Cleared
+    // when a PGN is pasted directly (no username context).
+    this._importUsername = null;
     this.originalGameMoves = [];
 		this.gameClockHistory = [];
 		this.initialClocks = { white: null, black: null };
@@ -310,9 +314,8 @@ class ChessReviewApp {
     this.elBtnPrev = document.getElementById('btn-prev');
     this.elBtnNext = document.getElementById('btn-next');
     this.elBtnLast = document.getElementById('btn-last');
-    this.elBtnAuto = document.getElementById('btn-auto');
+    this.elBtnExport = document.getElementById('btn-export');
     this.elBtnReset = document.getElementById('btn-reset');
-    this.elBtnAutoLabel = this.elBtnAuto.querySelector('.btn-label');
     this.elMoveList = document.getElementById('move-list');
     this.elEvalBarWhite = document.getElementById('eval-bar-white');
     this.elEvalBarBlack = document.getElementById('eval-bar-black');
@@ -489,8 +492,6 @@ class ChessReviewApp {
 		    // Cache per-level sample puzzle so we don't refetch when re-selecting.
 		    this._puzzleLevelSamples = {};
 		    this._selectedPuzzleLevel = 1500;
-		    this.elBtnExportPgn = document.getElementById('btn-export-pgn');
-		    this.elBtnExportFen = document.getElementById('btn-export-fen');
 		    this.elAnticheatCard = document.getElementById('anticheat-card');
 	    this.elAnticheatSource = document.getElementById('anticheat-source');
 	    this.elAnticheatUsername = document.getElementById('anticheat-username');
@@ -500,6 +501,10 @@ class ChessReviewApp {
 	    this.elAnticheatStatus = document.getElementById('anticheat-status');
 	    this.elAnticheatResults = document.getElementById('anticheat-results');
 	    this.elAnticheatRiskPill = document.getElementById('anticheat-risk-pill');
+	    this.elAnticheatSaved = document.getElementById('anticheat-saved');
+	    this.elAnticheatSavedList = document.getElementById('anticheat-saved-list');
+	    this.elBtnAnticheatRefresh = document.getElementById('btn-anticheat-refresh');
+	    this._anticheatReportsCache = null;
 
     this.elCriticalMoments = document.getElementById('critical-moments');
     this.elCriticalList = document.getElementById('critical-list');
@@ -580,6 +585,28 @@ class ChessReviewApp {
 		    this.elPageAccountSignout = document.getElementById('btn-page-account-signout');
 		    this.elSettingsSummary = document.getElementById('settings-summary');
 		    this.elPageClearCache = document.getElementById('btn-page-clear-cache');
+		    // Notifications live in the sidebar (header icon was removed). These
+		    // refs drive the sidebar list + unread badge + mark-all button.
+		    this.elNotificationPanelBody = document.getElementById('sc-notification-list');
+		    this.elNotificationMarkAll = document.getElementById('sidebar-notification-mark-all');
+		    this.elSidebarNotificationBadge = document.getElementById('sidebar-notification-badge');
+		    this.elSidebarNotificationsSection = document.getElementById('sc-sidebar-notifications');
+		    // Notifications settings
+		    this.elSettingsNotifyAnticheat = document.getElementById('settings-notify-anticheat');
+		    this.elSettingsNotifyPush = document.getElementById('settings-notify-push');
+		    this.elBtnSaveNotifySettings = document.getElementById('btn-save-notify-settings');
+		    this.elNotifySettingsStatus = document.getElementById('notify-settings-status');
+		    // Anticheat report page
+		    this.elAnticheatReportPanel = document.getElementById('page-anticheat-report');
+		    this.elAnticheatReportStatus = document.getElementById('anticheat-report-status');
+		    this.elAnticheatReportJob = document.getElementById('anticheat-report-job');
+		    this.elAnticheatReportResults = document.getElementById('anticheat-report-results');
+		    this.elAnticheatReportExpiry = document.getElementById('anticheat-report-expiry');
+		    // Polling state for notifications. Cheap refresh — the server
+		    // returns up to 20 latest notifications + an unread count, so we
+		    // diff against the last snapshot to fire a system Notification +
+		    // update the bell badge.
+		    this._notifState = { lastSeenIds: new Set(), lastPollAt: 0, pollTimer: null };
 		    // SPA route panels
 		    this.elBoostPagePanel = document.getElementById('page-boost');
 		    this.elAuthPagePanel = document.getElementById('page-auth');
@@ -1075,7 +1102,7 @@ _installLinkInterceptor() {
 			    '/plans', '/boost', '/review', '/coach', '/puzzles', '/anticheat',
 			    '/privacy', '/terms', '/contact',
 			  ];
-			  if (!knownRoutes.includes(route) && !route.startsWith('/profile/')) return;
+			  if (!knownRoutes.includes(route) && !route.startsWith('/profile/') && !route.startsWith('/anticheat/report/')) return;
 			  event.preventDefault();
 			  this._navigateTo(route);
 		    }, true);
@@ -1089,6 +1116,7 @@ _installLinkInterceptor() {
 		    if (this.elBoostPagePanel) this.elBoostPagePanel.hidden = true;
 		    if (this.elCoachPage) this.elCoachPage.hidden = true;
 		    if (this.elAuthPagePanel) this.elAuthPagePanel.hidden = true;
+		    if (this.elAnticheatReportPanel) this.elAnticheatReportPanel.hidden = true;
 if (this.elPrivacyPage) this.elPrivacyPage.hidden = true;
 if (this.elProfilePage) this.elProfilePage.hidden = true;
 if (this.elContactPage) this.elContactPage.hidden = true;
@@ -1098,9 +1126,11 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		  }
 
 		  _updateNavActiveState() {
-		    const navLinks = document.querySelectorAll('.apple-nav a');
+		    const navLinks = document.querySelectorAll('.apple-nav a, .sc-nav-link');
 		    if (!navLinks.length) return;
-		    const currentPath = this._normalizeRoute(window.location.pathname || '/') || '/index';
+		    let currentPath = this._normalizeRoute(window.location.pathname || '/') || '/index';
+		    // Report sub-pages keep their parent's nav item highlighted.
+		    if (currentPath.startsWith('/anticheat/report/')) currentPath = '/anticheat';
 		    navLinks.forEach((link) => {
 		      const href = link.getAttribute('href');
 		      link.classList.remove('active');
@@ -1164,6 +1194,8 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	      this.elContactPage.hidden = false;
 		    } else if (name === '404' && this.elNotFoundPanel) {
 		      this.elNotFoundPanel.hidden = false;
+		    } else if (name === 'anticheat-report' && this.elAnticheatReportPanel) {
+		      this.elAnticheatReportPanel.hidden = false;
 		    } else if (name === 'incompatible-browser' && this.elIncompatiblePanel) {
 		      this.elIncompatiblePanel.hidden = false;
 		    }
@@ -2302,6 +2334,22 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      return;
 		    }
 
+		    // /anticheat/report/<jobId> — the deep-link page for a background
+		    // anticheat report. Matches before the catch-all 404 below.
+		    if (route.startsWith('/anticheat/report/')) {
+		      const jobId = route.slice('/anticheat/report/'.length).replace(/\/+$/, '');
+		      if (jobId) {
+		        this._enterInAppLayout();
+		        this._showRoutePage('anticheat-report');
+		        this._hideSettingsModal();
+		        this._hideAccountModal();
+		        this._renderAnticheatReportPage(jobId);
+		        document.title = 'Anticheat Report | Sing Chess';
+		        this._updateNavActiveState();
+		        return;
+		      }
+		    }
+
 			    if (route === '/coach') {
 			      this._hideRoutePages();
 			      this._hideSettingsModal();
@@ -2517,6 +2565,15 @@ return window.firebase;
               // state so a signed-in user never sees the "Sign In" panel.
               if (this.elAccountPage && !this.elAccountPage.hidden) {
                 this._renderSpaAccount();
+              }
+              // Part 3b: a deep-linked /anticheat/report/<jobId> page may have
+              // loaded before auth resolved, firing a tokenless request (401).
+              // Re-run the route now that auth is ready so it fetches with a
+              // valid token.
+              if (user && this.elAnticheatReportPanel && !this.elAnticheatReportPanel.hidden) {
+                const currentRoute = this._normalizeRoute(window.location.pathname || '/index');
+                const reportMatch = /^\/anticheat\/report\/([^/]+)/.exec(currentRoute);
+                if (reportMatch) this._renderAnticheatReportPage(reportMatch[1]);
               }
               // Re-evaluate the move-insights gate + review save-CTA now that
               // auth has resolved (they may have flashed for a signed-in user
@@ -3213,6 +3270,8 @@ _syncAccountUi() {
 		    // signed-out paths.
 		    this._syncAdminControlsVisibility();
 		    if (!signedIn) {
+		      // Hide the bell + sidebar Notifications section and stop the poller.
+		      this._syncNotificationUi(signedIn);
 		      this._syncServerStrongToggle();
 		      return;
 		    }
@@ -3244,7 +3303,477 @@ _syncAccountUi() {
 			    }
 			    this._syncServerStrongToggle();
 			    if (this.elAccountPage && !this.elAccountPage.hidden) this._syncAccountPage();
+			    // Notifications: show/hide the bell + start/stop the poller.
+			    this._syncNotificationUi(signedIn);
 		  }
+
+	  // ── Notifications: bell + polling ────────────────────────────────────
+	  // Polls GET /api/users/me on a 60s timer. The response includes up to 20
+	  // latest notifications + an unread count, so we diff against the last
+	  // snapshot to fire a system Notification + update the bell badge. SSE
+	  // is intentionally avoided here — the user disabled it on /api/users/me/stream
+	  // for lag reasons; polling is the lighter alternative.
+	  _syncNotificationUi(signedIn) {
+	    if (this.elSidebarNotificationsSection) this.elSidebarNotificationsSection.hidden = !signedIn;
+	    if (!signedIn) {
+	      // Stop polling and clear state on sign-out so the next user doesn't
+	      // inherit the previous account's badge count.
+	      if (this._notifState?.pollTimer) {
+	        clearInterval(this._notifState.pollTimer);
+	        this._notifState.pollTimer = null;
+	      }
+	      this._notifState = { lastSeenIds: new Set(), lastPollAt: 0, pollTimer: null };
+	      this._renderNotificationPanel([], 0);
+	      return;
+	    }
+	    // Render whatever is in authState.me right now (initial paint), then
+	    // start the poller. The poller is idempotent — repeated calls within
+	    // the throttle window are a no-op.
+	    const meNotifs = (this.authState.me && this.authState.me.notifications) || { list: [], unread: 0 };
+	    this._renderNotificationPanel(meNotifs.list || [], meNotifs.unread || 0);
+	    this._notifState.lastSeenIds = new Set((meNotifs.list || []).map((n) => n.id));
+	    this._startNotificationPolling();
+	    // Prefill the settings toggles with the saved notificationSettings.
+	    this._loadNotificationSettingsIntoUi();
+	  }
+
+	  _startNotificationPolling() {
+	    if (this._notifState.pollTimer) return; // already running
+	    this._notifState.pollTimer = setInterval(() => this._pollNotificationsNow(), 60000);
+	    // First poll is immediate but throttled by lastPollAt below.
+	    this._pollNotificationsNow();
+	  }
+
+	  async _pollNotificationsNow() {
+	    if (!this.authState.user) return;
+	    const now = Date.now();
+	    if (now - (this._notifState.lastPollAt || 0) < 5000) return; // 5s soft throttle
+	    this._notifState.lastPollAt = now;
+	    try {
+	      const response = await fetch('/api/users/me', {
+        headers: await this._authHeaders(),
+        cache: 'no-store',
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data?.me) this.authState.me = data;
+      const meNotifs = (data && data.notifications) || { list: [], unread: 0 };
+      const list = Array.isArray(meNotifs.list) ? meNotifs.list : [];
+      const unread = Number(meNotifs.unread) || 0;
+      // Find NEW notifications (ids not in lastSeenIds) to fire system popups.
+	      const newOnes = list.filter((n) => n && n.id && !this._notifState.lastSeenIds.has(n.id));
+	      this._notifState.lastSeenIds = new Set(list.map((n) => n.id));
+	      if (newOnes.length) this._fireSystemNotifications(newOnes);
+	    } catch (_err) { /* swallow — polling is best-effort */ }
+	  }
+
+	  _renderNotificationPanel(list, unread) {
+		    // Render into the sidebar Notifications list; keep the header badge in sync.
+		    const hasUnread = (list || []).some((n) => !n.read);
+		    if (this.elNotificationMarkAll) this.elNotificationMarkAll.hidden = !hasUnread;
+		    if (this.elNotificationPanelBody) {
+		      if (!list.length) {
+		        this.elNotificationPanelBody.innerHTML = '<p class="sc-notification-empty">No notifications yet.</p>';
+		      } else {
+		        this.elNotificationPanelBody.innerHTML = list.map((n) => this._renderNotificationItem(n)).join('');
+		        this.elNotificationPanelBody.querySelectorAll('.notification-item-delete').forEach((btn) => {
+		          btn.addEventListener('click', (ev) => {
+		            ev.preventDefault();
+		            ev.stopPropagation();
+		            const nid = btn.dataset.id;
+		            if (nid) this._deleteNotification(nid);
+		          });
+		        });
+		        // Wire click handlers (delegated, one listener per item).
+		        this.elNotificationPanelBody.querySelectorAll('.notification-item').forEach((el) => {
+		          const id = el.dataset.id;
+		          const inner = el.querySelector('.notification-item-delete');
+		          el.addEventListener('click', (e) => {
+		            if (inner && inner.contains(e.target)) return; // delete handled above
+		            e.preventDefault();
+		            const link = el.dataset.link || '';
+		            const notif = list.find((n) => n.id === id);
+		            if (notif && !notif.read) this._markNotificationRead(id);
+		            if (link) this._navigateTo(link);
+		          });
+		        });
+		      }
+		    }
+		    // Badge on the sidebar label: show only when there are unread items.
+		    if (this.elSidebarNotificationBadge) {
+		      const text = unread > 99 ? '99+' : String(unread);
+		      this.elSidebarNotificationBadge.textContent = text;
+		      this.elSidebarNotificationBadge.hidden = !unread;
+		    }
+	  }
+
+	  _renderNotificationItem(n) {
+	    const title = this._escapeHtml(n.title || 'Notification');
+	    const body = this._escapeHtml(n.body || '');
+	    const time = n.createdAt ? this._formatRelativeTime(n.createdAt) : '';
+	    const cls = n.read ? 'notification-item' : 'notification-item notification-item-unread';
+	    const link = n.link || '#';
+	    return `<a class="${cls}" data-id="${this._escapeHtml(n.id || '')}" data-link="${this._escapeHtml(link)}" href="${this._escapeHtml(link)}" data-route="${this._escapeHtml(link)}">
+	      <span class="notification-item-dot"></span>
+	      <span class="notification-item-body">
+	        <span class="notification-item-title">${title}</span>
+	        ${body ? `<span class="notification-item-text">${body}</span>` : ''}
+	        ${time ? `<span class="notification-item-time">${this._escapeHtml(time)}</span>` : ''}
+	      </span>
+	      <button type="button" class="notification-item-delete" data-id="${this._escapeHtml(n.id || '')}" title="Delete notification" aria-label="Delete notification">
+	        <span class="material-symbols-outlined">close</span>
+	      </button>
+	    </a>`;
+	  }
+
+	  _formatRelativeTime(ts) {
+	    const now = Date.now();
+	    const delta = now - Number(ts || 0);
+	    if (!Number.isFinite(delta) || delta < 0) return '';
+	    const sec = Math.floor(delta / 1000);
+	    if (sec < 60) return 'just now';
+	    const min = Math.floor(sec / 60);
+	    if (min < 60) return `${min}m ago`;
+	    const hr = Math.floor(min / 60);
+	    if (hr < 24) return `${hr}h ago`;
+	    const day = Math.floor(hr / 24);
+	    if (day < 30) return `${day}d ago`;
+	    try { return new Date(Number(ts)).toLocaleDateString(); } catch (_) { return ''; }
+	  }
+
+	  // Open the sidebar and expose the Notifications section (bell shortcut).
+	  _openSidebarNotifications() {
+	    if (typeof window !== 'undefined' && typeof window.openSidebar === 'function') {
+	      window.openSidebar();
+	    }
+	    // Transiently highlight + scroll the Notifications section so the bell
+	    // visibly points somewhere, then drop the outline after a moment.
+	    const section = this.elSidebarNotificationsSection;
+	    if (section) {
+	      section.classList.add('is-highlighted');
+	      section.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+	      if (this._notifHighlightTimer) clearTimeout(this._notifHighlightTimer);
+	      this._notifHighlightTimer = setTimeout(() => section.classList.remove('is-highlighted'), 1400);
+	    }
+	  }
+
+	  async _markNotificationRead(id) {
+	    if (!id) return;
+	    try {
+	      await fetch(`/api/notifications/${encodeURIComponent(id)}/read`, {
+	        method: 'POST',
+	        headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
+	        body: '{}',
+	      });
+	    } catch (_err) { /* best-effort */ }
+	    // Optimistic local update so the badge drops without waiting for the next poll.
+	    const meNotifs = (this.authState.me && this.authState.me.notifications) || { list: [], unread: 0 };
+	    const list = (meNotifs.list || []).map((n) => n.id === id ? { ...n, read: true } : n);
+	    const unread = Math.max(0, (meNotifs.unread || 0) - 1);
+	    if (this.authState.me) this.authState.me = { ...this.authState.me, notifications: { list, unread } };
+	    this._renderNotificationPanel(list, unread);
+	  }
+
+	  async _deleteNotification(id) {
+	    if (!id) return;
+	    try {
+	      await fetch(`/api/notifications/${encodeURIComponent(id)}`, {
+	        method: 'DELETE',
+	        headers: await this._authHeaders(),
+	      });
+	    } catch (_err) { /* best-effort */ }
+	    // Optimistic local removal so the list + badge drop instantly.
+	    const meNotifs = (this.authState.me && this.authState.me.notifications) || { list: [], unread: 0 };
+	    const wasUnread = !!(meNotifs.list || []).find((n) => n.id === id && !n.read);
+	    const list = (meNotifs.list || []).filter((n) => n.id !== id);
+	    const unread = Math.max(0, (meNotifs.unread || 0) - (wasUnread ? 1 : 0));
+	    if (this.authState.me) this.authState.me = { ...this.authState.me, notifications: { list, unread } };
+	    this._renderNotificationPanel(list, unread);
+	  }
+
+	  async _markAllNotificationsRead() {
+	    const meNotifs = (this.authState.me && this.authState.me.notifications) || { list: [], unread: 0 };
+	    const unreadList = (meNotifs.list || []).filter((n) => !n.read);
+	    if (!unreadList.length) return;
+	    // Optimistic local clear.
+	    const list = (meNotifs.list || []).map((n) => ({ ...n, read: true }));
+	    const unread = 0;
+	    if (this.authState.me) this.authState.me = { ...this.authState.me, notifications: { list, unread } };
+	    this._renderNotificationPanel(list, unread);
+	    // Best-effort batch write — fire and forget; per-id errors are swallowed.
+	    for (const n of unreadList) {
+	      try {
+	        await fetch(`/api/notifications/${encodeURIComponent(n.id)}/read`, {
+	          method: 'POST',
+	          headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
+	          body: '{}',
+	        });
+	      } catch (_err) { /* swallow */ }
+	    }
+	    // Final poll to settle the authoritative badge.
+	    this._pollNotificationsNow();
+	  }
+
+	  _fireSystemNotifications(newOnes) {
+	    if (!('Notification' in window)) return;
+	    const settings = (this.authState.profile && this.authState.profile.notificationSettings) || {};
+	    if (!settings.browserPush) return;
+	    if (Notification.permission !== 'granted') return;
+	    for (const n of newOnes) {
+	      // Skip if the user opted out of this notification type (only
+	      // `anticheatComplete` exists today; future types add here).
+	      if (n.type === 'anticheat.done' && settings.anticheatComplete === false) continue;
+	      try {
+	        const sys = new Notification(n.title || 'Notification', {
+	          body: n.body || '',
+	          tag: (n.type || 'notification') + ':' + (n.reportId || n.id || ''),
+	        });
+	        sys.onclick = () => {
+	          try { window.focus(); } catch (_) {}
+	          if (n.link) this._navigateTo(n.link);
+	          sys.close();
+	        };
+	      } catch (_err) { /* system notifications can fail silently (e.g. iframe) */ }
+	    }
+	  }
+
+	  _loadNotificationSettingsIntoUi() {
+	    const settings = (this.authState.profile && this.authState.profile.notificationSettings) || {};
+	    if (this.elSettingsNotifyAnticheat) this.elSettingsNotifyAnticheat.checked = settings.anticheatComplete !== false;
+	    if (this.elSettingsNotifyPush) {
+	      this.elSettingsNotifyPush.checked = !!settings.browserPush;
+	      if (!('Notification' in window)) {
+	        this.elSettingsNotifyPush.disabled = true;
+	        this.elSettingsNotifyPush.title = 'Your browser does not support system notifications.';
+	      } else if (Notification.permission === 'denied') {
+	        this.elSettingsNotifyPush.disabled = true;
+	        this.elSettingsNotifyPush.title = 'Browser notifications are blocked. Update site permissions in your browser settings.';
+	      } else {
+	        this.elSettingsNotifyPush.disabled = false;
+	        this.elSettingsNotifyPush.title = '';
+	      }
+	    }
+	  }
+
+	  async _saveNotificationSettings() {
+	    const anticheatComplete = this.elSettingsNotifyAnticheat?.checked !== false;
+	    const browserPush = !!this.elSettingsNotifyPush?.checked;
+	    if (this.elNotifySettingsStatus) {
+	      this.elNotifySettingsStatus.textContent = 'Saving…';
+	      this.elNotifySettingsStatus.className = 'account-status';
+	    }
+	    try {
+	      const res = await fetch('/api/settings/notification-settings', {
+	        method: 'POST',
+	        headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
+	        body: JSON.stringify({ anticheatComplete, browserPush }),
+	      });
+	      if (!res.ok) throw new Error('Could not save.');
+	      if (this.elNotifySettingsStatus) {
+	        this.elNotifySettingsStatus.textContent = 'Saved.';
+	        this.elNotifySettingsStatus.className = 'account-status ok';
+	      }
+	      // Reflect on the profile immediately.
+	      if (this.authState.profile) {
+	        this.authState.profile.notificationSettings = { anticheatComplete, browserPush, browserPushGranted: !!browserPush };
+	      }
+	    } catch (err) {
+	      if (this.elNotifySettingsStatus) {
+	        this.elNotifySettingsStatus.textContent = err.message || 'Could not save.';
+	        this.elNotifySettingsStatus.className = 'account-status error';
+	      }
+	    }
+	  }
+
+
+	  // ── SPA navigation ─────────────────────────────────────────────────
+	  // Detect the new /anticheat/report/<jobId> route. Called from the
+	  // existing route resolver in main.js; if it returns a panel, we render.
+	  _renderAnticheatReportPage(jobId) {
+	    if (!jobId) return false;
+	    // The router has already entered the in-app layout and shown the panel
+	    // via _showRoutePage('anticheat-report'); here we just reset + load.
+	    if (this.elAnticheatReportPanel) this.elAnticheatReportPanel.hidden = false;
+	    if (this.elAnticheatReportJob) this.elAnticheatReportJob.textContent = `Job ${jobId}`;
+	    if (this.elAnticheatReportStatus) {
+	      this.elAnticheatReportStatus.textContent = 'Loading report…';
+	      this.elAnticheatReportStatus.className = 'anticheat-status';
+	    }
+	    if (this.elAnticheatReportResults) this.elAnticheatReportResults.innerHTML = '';
+	    if (this.elAnticheatReportExpiry) this.elAnticheatReportExpiry.textContent = '';
+	    this._loadAnticheatReport(jobId).catch(() => {});
+	    return true;
+	  }
+
+	  async _loadAnticheatReport(jobId) {
+	    // A manual reload supersedes any in-flight scheduled poll.
+	    if (this._anticheatReportPollTimer) {
+	      clearTimeout(this._anticheatReportPollTimer);
+	      this._anticheatReportPollTimer = null;
+	    }
+	    try {
+      const response = await fetch(`/api/anticheat/status?jobId=${encodeURIComponent(jobId)}`, {
+        headers: await this._authHeaders(),
+        cache: 'no-store',
+      });
+      if (response.status === 404) {
+        if (this.elAnticheatReportStatus) {
+          this.elAnticheatReportStatus.textContent = 'Report not found. It may have expired (3-day TTL).';
+          this.elAnticheatReportStatus.className = 'anticheat-status error';
+        }
+        return;
+      }
+      if (!response.ok) throw new Error(`Report load failed with ${response.status}`);
+      const report = await response.json();
+      this._renderAnticheatReport(report);
+    } catch (err) {
+      if (this.elAnticheatReportStatus) {
+        this.elAnticheatReportStatus.textContent = err.message || 'Could not load the report.';
+        this.elAnticheatReportStatus.className = 'anticheat-status error';
+      }
+    }
+  }
+
+	  _renderAnticheatReport(report) {
+	    if (!report || !this.elAnticheatReportStatus) return;
+	    if (report.status === 'running') {
+	      this.elAnticheatReportStatus.textContent = 'Review still running…';
+	      this.elAnticheatReportStatus.className = 'anticheat-report-running';
+      // Poll again in 5s — keeps the page live without SSE. Guard against
+      // compounding timers if the user navigates away + back to the page.
+      if (this._anticheatReportPollTimer) clearTimeout(this._anticheatReportPollTimer);
+      this._anticheatReportPollTimer = setTimeout(() => {
+        this._anticheatReportPollTimer = null;
+        this._loadAnticheatReport(report.jobId);
+      }, 5000);
+      return;
+    }
+	    if (report.status === 'error') {
+	      this.elAnticheatReportStatus.textContent = `Review failed: ${report.error || 'Unknown error.'}`;
+	      this.elAnticheatReportStatus.className = 'anticheat-report-error';
+	      return;
+	    }
+	    // Done — render a polished report card, visually consistent with the
+// live waiting view on the anticheat page (risk gauge, score, headline,
+// explanation, game rows).
+this.elAnticheatReportResults.innerHTML = this._anticheatReportSummaryHtml(report);
+if (this.elAnticheatReportStatus) {
+  this.elAnticheatReportStatus.textContent = '';
+  this.elAnticheatReportStatus.className = 'anticheat-status success';
+}
+    if (this.elAnticheatReportExpiry && report.expiresAt) {
+      const expiresAt = Number(report.expiresAt) || 0;
+      const remainingMs = expiresAt - Date.now();
+      const remainingHrs = Math.max(0, Math.floor(remainingMs / (60 * 60 * 1000)));
+      this.elAnticheatReportExpiry.textContent = remainingHrs > 0
+        ? `This report stays available for ~${remainingHrs} more hours (3-day cache).`
+        : 'This report has expired and will be cleaned up shortly.';
+    }
+  }
+
+
+	  _anticheatReportSummaryHtml(report) {
+	    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+	    if (!report || !report.summary) {
+	      return '<div class="anticheat-report-empty">No results detail in this report.</div>';
+	    }
+	    const rs = report.summary;
+	    const lvl = rs.riskLevel ? String(rs.riskLevel) : null;
+	    const score = (rs.score != null) ? Number(rs.score) : null;
+	    const lines = [];
+	    if (score != null) {
+	      let tone = 'low';
+	      const low = String(lvl || '').toLowerCase();
+	      if (low.includes('high')) tone = 'high';
+	      else if (low.includes('medium') || low.includes('moderate') || low.includes('mid')) tone = 'medium';
+	      lines.push('<div class="anticheat-report-gauge ' + tone + '">'
+	        + '<span class="anticheat-report-score">' + score + '</span><span class="anticheat-report-max">/100</span>'
+	        + (lvl ? '<span class="anticheat-report-level">' + esc(lvl) + ' risk</span>' : '')
+	        + '</div>');
+	    }
+	    if (rs.headline) lines.push('<p class="anticheat-headline">' + esc(rs.headline) + '</p>');
+	    if (rs.explanation) lines.push('<p class="anticheat-explanation">' + esc(rs.explanation) + '</p>');
+	    if (Array.isArray(report.games) && report.games.length) {
+	      lines.push('<div class="anticheat-report-games"><h4>Game breakdown</h4>');
+	      report.games.forEach((g) => {
+	        const note = g.note ? '<span class="anticheat-game-note">' + esc(g.note) + '</span>' : '';
+	        lines.push('<div class="anticheat-game-row">'
+	          + '<span class="anticheat-game-title">' + esc(g.title || 'Game') + '</span>'
+	          + '<span class="anticheat-game-meta">score ' + esc(g.score != null ? g.score : '') + ' ' + note + '</span>'
+	          + '</div>');
+	      });
+	      lines.push('</div>');
+	    }
+	    if (!lines.length) lines.push('<div class="anticheat-report-empty">No additional detail.</div>');
+	    return lines.join('\n');
+	  }
+	  // ── Background anticheat submission ─────────────────────────────────
+	  // Called by the anticheat card's "Run in background" toggle / button.
+	  // Reuses the same popup the sync path uses to collect source/limit, then
+	  // POSTs /api/anticheat/submit and shows the "we'll let you know" state.
+	  async _startBackgroundAnticheat(source, payload) {
+	    if (!this.authState.user) {
+      this._setAnticheatStatus('Background review needs an account.', 'error');
+      return;
+    }
+    if (this.authState.plan?.plan === 'free') {
+      this._setAnticheatStatus('Anticheat is a Plans feature.', 'error');
+      return;
+    }
+    if (this.authState.plan?.plan !== 'max') {
+      this._setAnticheatStatus('Background anticheat reviews are a Max feature. Run it with the tab open (Boost), or upgrade to Max.', 'error');
+      return;
+    }
+    if (this._isOutOfUsage('anticheat')) {
+      this._setAnticheatStatus('Weekly anticheat limit reached. It resets Monday — or upgrade to Max.', 'error');
+      return;
+    }
+    this._setAnticheatChecking(true);
+    try {
+      const response = await fetch('/api/anticheat/submit', {
+        method: 'POST',
+        headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ source: source || 'pgn', ...payload }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        const msg = data?.error || `Submit failed with ${response.status}`;
+        this._setAnticheatStatus(msg, 'error');
+        return;
+      }
+      const jobId = data.jobId;
+      this._setAnticheatStatus(
+        `Background review started. You'll get a notification when it's done (up to ~6 minutes).`,
+        'success'
+      );
+      // Also push an optimistic in-app notification card so the user sees it
+      // instantly without waiting for the server-side poll cycle.
+      if (jobId) {
+        this._optimisticNotification({
+          id: `pending-${jobId}`,
+          type: 'anticheat.pending',
+          title: 'Anticheat review started',
+          body: 'We\'ll let you know when it finishes.',
+          link: `/anticheat/report/${jobId}`,
+          reportId: jobId,
+          read: false,
+          createdAt: Date.now(),
+        });
+      }
+    } catch (err) {
+      this._setAnticheatStatus(err.message || 'Could not start the review.', 'error');
+    } finally {
+      this._setAnticheatChecking(false);
+    }
+  }
+
+	  _optimisticNotification(n) {
+	    const meNotifs = (this.authState.me && this.authState.me.notifications) || { list: [], unread: 0 };
+	    const list = [n, ...(meNotifs.list || []).filter((x) => x.id !== n.id)].slice(0, 20);
+	    const unread = (meNotifs.unread || 0) + 1;
+	    if (this.authState.me) this.authState.me = { ...this.authState.me, notifications: { list, unread } };
+	    this._renderNotificationPanel(list, unread);
+  }
 
 	  // Hide the header account text label on mobile so only the icon shows.
 	  _syncHeaderLabelVisibility() {
@@ -3706,9 +4235,144 @@ this._syncAnticheatForm();
 	    this._syncActionButtons();
 	    // Pull fresh quota + render the weekly anticheat usage bar.
 	    this._refreshUsageBeforeAction().finally(() => this._renderAnticheatUsageBar());
+	    // Load the saved-reviews list (every past & currently-running report).
+	    this._loadAnticheatReports().finally(() => {});
 	  }
 
-	  // Weekly anticheat-games usage bar shown on the anticheat page.
+	  // Load + render the user's saved anticheat reports (done/error/running).
+	  // Shows a loading state on first entry; keeps a cache so the usage-bar
+	  // refresh above and the Refresh button don't double-fetch.
+	  async _loadAnticheatReports(force) {
+	    if (!this.elAnticheatSavedList) return;
+	    if (!this.authState || !this.authState.userId) {
+	      if (this.elAnticheatSaved) this.elAnticheatSaved.hidden = true;
+	      return;
+	    }
+	    if (force) this._anticheatReportsCache = null;
+	    if (this._anticheatReportsCache) {
+	      this._renderAnticheatReviews(this._anticheatReportsCache);
+	      return;
+	    }
+	    this.elAnticheatSaved.hidden = false;
+	    this._setAnticheatReviewsLoading(true);
+	    try {
+	      const response = await fetch('/api/anticheat/list', {
+	        headers: await this._authHeaders(),
+	        cache: 'no-store',
+	      });
+	      if (!response.ok) throw new Error(`List load failed with ${response.status}`);
+	      const data = await response.json();
+	      const reports = (data && Array.isArray(data.reports)) ? data.reports : [];
+	      this._anticheatReportsCache = reports;
+	      this._renderAnticheatReviews(reports);
+	    } catch (err) {
+	      this._setAnticheatReviewsLoading(false);
+	      if (this.elAnticheatSavedList) {
+	        this.elAnticheatSavedList.innerHTML =
+	          `<div class="anticheat-saved-empty">Couldn't load saved reviews. <button type="button" class="btn btn-ghost btn-sm" data-ac-retry>Retry</button></div>`;
+	        const retry = this.elAnticheatSavedList.querySelector('[data-retry]');
+	        if (retry) retry.addEventListener('click', () => this._loadAnticheatReviews(true));
+	      }
+	    }
+	  }
+
+	  _setAnticheatReviewsLoading(loading) {
+	    if (!this.elAnticheatSavedList) return;
+	    if (loading) {
+	      this.elAnticheatSavedList.innerHTML =
+	        '<div class="anticheat-saved-item anticheat-saved-running"><span class="spinner"></span> Loading saved reviews…</div>';
+	    }
+	  }
+
+	  _renderAnticheatReviews(reports) {
+	    if (!this.elAnticheatSavedList) return;
+	    if (!reports.length) {
+	      this.elAnticheatSavedList.innerHTML =
+	        '<div class="anticheat-saved-empty">No saved reviews yet. Start one above and it will appear here.</div>';
+	      return;
+	    }
+	    // Split reports into "In progress" (running) and "Completed" groups so the
+    // user can see live reviews with progress on top, then everything finished.
+    const running = reports.filter((r) => r.status === 'running');
+    const done = reports.filter((r) => r.status !== 'running');
+    const parts = [];
+    if (running.length) {
+      parts.push(
+        `<div class="anticheat-saved-group"><div class="anticheat-saved-group-title">In progress</div>`
+        + running.map((r) => this._makeAnticheatReviewRow(r)).join('\n')
+        + `</div>`,
+      );
+    }
+    if (done.length) {
+      parts.push(
+        `<div class="anticheat-saved-group"><div class="anticheat-saved-group-title">Completed</div>`
+        + done.map((r) => this._makeAnticheatReviewRow(r)).join('\n')
+        + `</div>`,
+      );
+    }
+    this.elAnticheatSavedList.innerHTML = parts.join('\n');
+    // Keep a running report's progress live: while any report is in progress,
+    // re-fetch the list on a short interval. Stop as soon as none are running.
+    const hasRunning = running.length > 0;
+    if (this._anticheatListTimer) { clearTimeout(this._anticheatListTimer); this._anticheatListTimer = null; }
+    if (hasRunning && this.anticheatMode?.active) {
+      this._anticheatListTimer = setTimeout(() => this._loadAnticheatReports(true), 6000);
+    }
+	  }
+
+	  _makeAnticheatReviewRow(r) {
+	    const href = `/anticheat/report/${encodeURIComponent(r.jobId || '')}`;
+	    const when = r.completedAt || r.startedAt;
+	    const time = when ? this._formatRelativeTime(when) : '';
+	    const meta = [];
+	    if (r.limit != null) meta.push(`${r.limit} game${r.limit === 1 ? '' : 's'}`);
+	    if (r.status === 'done' && r.gamesAnalyzed != null) meta.push(`${r.gamesAnalyzed} analyzed`);
+	    if (r.status === 'error' && r.error) meta.push(r.error);
+	    const metaHtml = meta.length ? `<span class="anticheat-saved-meta">${this._escapeHtml(meta.join(' · '))}</span>` : '';
+	    let icon = '<span class="material-symbols-outlined anticheat-saved-icon">task_alt</span>';
+	    let badge = '<span class="anticheat-badge done">Completed</span>';
+	    let progressHtml = '';
+	    if (r.status === 'running') {
+	      icon = '<span class="material-symbols-outlined anticheat-saved-icon anticheat-saved-icon-running">schedule</span>';
+	      // Live progress — gamesAnalyzed/total are persisted incrementally by
+	      // the background job (fall back to an indeterminate bar otherwise).
+	      const doneN = Number(r.gamesAnalyzed) || 0;
+	      const totalN = Number(r.gamesTotal) || Number(r.limit) || 0;
+	      if (totalN > 0) {
+	        const pct = Math.max(2, Math.min(100, Math.round((doneN / totalN) * 100)));
+	        progressHtml = `<div class="anticheat-saved-progress" aria-hidden="true"><div class="anticheat-saved-progress-bar" style="width:${pct}%"></div></div>`;
+	        badge = `<span class="anticheat-badge running"><span class="spinner"></span> ${doneN}/${totalN}</span>`;
+	      } else {
+	        progressHtml = '<div class="anticheat-saved-progress anticheat-saved-progress-indet" aria-hidden="true"><div class="anticheat-saved-progress-bar"></div></div>';
+	      }
+	    } else if (r.status === 'error') {
+	      icon = '<span class="material-symbols-outlined anticheat-saved-icon anticheat-saved-icon-error">error</span>';
+	      badge = '<span class="anticheat-badge error">Failed</span>';
+	    } else if (r.summary && r.summary.riskLevel) {
+	      const lvl = String(r.summary.riskLevel);
+	      const score = (r.summary.score != null) ? ` · ${r.summary.score}/100` : '';
+	      badge = `<span class="anticheat-badge done">${this._escapeHtml(lvl)} risk${score}</span>`;
+	    }
+	    return `<a class="anticheat-saved-item" href="${href}">
+	      ${icon}
+	      <span class="anticheat-saved-main">
+	        <span class="anticheat-saved-title">${this._escapeHtml(this._anticheatSavedTitle(r))}</span>
+	        ${metaHtml}
+	        ${progressHtml}
+	      </span>
+	      <span class="anticheat-saved-side">${badge}</span>
+	      <span class="anticheat-saved-time">${this._escapeHtml(time)}</span>
+	    </a>`;
+	  }
+
+	  _anticheatSavedTitle(r) {
+	    if (r.status === 'running') return 'Review in progress';
+	    if (r.status === 'error') return 'Review failed';
+	    if (r.summary && r.summary.riskLevel) return `${r.summary.riskLevel} risk review`;
+	    return 'Anticheat review';
+	  }
+
+  // Weekly anticheat-games usage bar shown on the anticheat page.
 	  _renderAnticheatUsageBar() {
 	    const host = document.getElementById('anticheat-usage-bar');
 	    if (!host) return;
@@ -3878,6 +4542,25 @@ this._syncAnticheatForm();
 	    this.elPageAccountSignin?.addEventListener('click', () => this._navigateTo('/signin'));
 	    this.elPageAccountSignout?.addEventListener('click', () => this._handleSignOut());
 	    this.elPageClearCache?.addEventListener('click', () => this._clearLocalCache());
+		    // Notifications: the bell is now a shortcut that opens the sidebar
+		    // Notifications section; mark-all-read zeroes the badge.
+		    this.elNotificationBellButton?.addEventListener('click', (e) => {
+		      e.stopPropagation();
+		      this._openSidebarNotifications();
+		    });
+		    this.elNotificationMarkAll?.addEventListener('click', (e) => {
+		      e.stopPropagation();
+		      this._markAllNotificationsRead();
+		    });
+		    // Save notification settings.
+		    this.elBtnSaveNotifySettings?.addEventListener('click', () => this._saveNotificationSettings());
+		    // Refresh the bell when the tab becomes visible again (catches
+		    // notifications while the user was elsewhere).
+		    document.addEventListener('visibilitychange', () => {
+		      if (document.visibilityState === 'visible' && this.authState.user) {
+		        this._pollNotificationsNow();
+		      }
+		    });
 	    this.elAccountClose?.addEventListener('click', () => this._hideAccountModal());
 	    this.elAccountModal?.addEventListener('click', (e) => {
 	      if (e.target === this.elAccountModal) this._hideAccountModal();
@@ -3940,14 +4623,16 @@ this._syncAnticheatForm();
 		    this.elBtnPuzzleRetry?.addEventListener('click', () => this._retryCurrentPuzzle());
 		    this.elBtnPuzzleHint?.addEventListener('click', () => this._showPuzzleHint());
 		    this.elBtnPuzzleReview?.addEventListener('click', () => this._reviewCurrentPuzzleLine());
-		    this.elBtnExportPgn?.addEventListener('click', () => this._exportCurrentPgn());
-		    this.elBtnExportFen?.addEventListener('click', () => this._exportCurrentFen());
+		    this.elBtnExport?.addEventListener('click', () => this._openExportPopup());
 		    // Anticheat source: card click opens a SweetAlert popup that collects the
 // PGN or username and game count, then runs the streaming review.
 document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
   btn.addEventListener('click', () => this._openAnticheatSourcePopup(btn.dataset.source));
 });
-// (Legacy elBtnAnticheatRun binding removed; the source cards above + popup
+if (this.elBtnAnticheatRefresh) {
+  this.elBtnAnticheatRefresh.addEventListener('click', () => this._loadAnticheatReports(true));
+}
+// (Legacy route) elBtnAnticheatRun binding removed; the source cards above + popup
 //  drive the run. The legacy `btn-anticheat-run` button no longer exists.)
 	    this.elBtnReview.addEventListener('click', () => this._startReview());
 	    if (this.elBtnStopReview) {
@@ -3963,7 +4648,7 @@ document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
 	    this.elBtnReturnExplorer?.addEventListener('click', () => this._handleReturnButton());
 	    this.elBtnInsightCoach?.addEventListener('click', () => this._askCoachForMove());
 	    this.elBtnGameCoach?.addEventListener('click', () => this._askCoachForGame());
-	    this.elBtnReset.addEventListener('click', () => this._resetGame());
+	    this.elBtnReset.addEventListener('click', () => this._confirmResetGame());
     this.elEngineSource.addEventListener('change', () => this._handleEngineSourceChange());
 	    this.elEngineModule.addEventListener('change', () => this._handleEngineModuleChange());
 	    this.elEngineStrength.addEventListener('change', () => this._handleEngineStrengthChange());
@@ -3993,7 +4678,6 @@ document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
     this.elBtnPrev.addEventListener('click', () => this._goToMove(this.currentMoveIndex - 1));
     this.elBtnNext.addEventListener('click', () => this._goToMove(this.currentMoveIndex + 1));
     this.elBtnLast.addEventListener('click', () => this._goToMove(this.gameMoves.length - 1));
-    this.elBtnAuto.addEventListener('click', () => this._toggleAutoPlay());
 
     document.addEventListener('keydown', (e) => {
       if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
@@ -4116,7 +4800,6 @@ document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
 
 	  _showMainMenu() {
 	    this.autoPlaying = false;
-	    this._setButtonLabel(this.elBtnAuto, 'Auto');
 	    this.liveEvalToken += 1; this.liveDepthToken += 1;
 	    this.explorerReturnState = null;
     this.exploreLineMode = false;
@@ -4654,8 +5337,7 @@ document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
 			const needsBrowserEngine = !serverReview || !this.authState?.user;
     const heavyBusy = this._isBusyWithHeavyAction();
 		    this.elBtnReview.disabled = heavyBusy || this.isAnalyzing || this.gameMoves.length === 0 || (needsBrowserEngine && !engineReady);
-		    if (this.elBtnExportPgn) this.elBtnExportPgn.disabled = this.gameMoves.length === 0;
-		    if (this.elBtnExportFen) this.elBtnExportFen.disabled = this.isAnalyzing;
+		    if (this.elBtnExport) this.elBtnExport.disabled = this.gameMoves.length === 0;
 	    if (this.elBtnCoachStart) this.elBtnCoachStart.disabled = heavyBusy || this.isAnalyzing || !engineReady;
     if (this.elBtnCoachTakeback) {
       this.elBtnCoachTakeback.disabled = !this.coachMode.active || this.gameMoves.length === 0;
@@ -5887,6 +6569,7 @@ _showPuzzleSuccessOverlay() {
 			        body: JSON.stringify({
 			          userId: user.uid,
 			          won: !!won,
+			          puzzleId: String(this.puzzleMode.current?.puzzle?.id || '').trim(),
 			          puzzleRating: Number(this.puzzleMode.current?.puzzle?.rating) || 1500,
 			        }),
 	      });
@@ -5956,6 +6639,13 @@ _showPuzzleSuccessOverlay() {
 	    const black = String(headers.Black || '').trim().toLowerCase();
 	    if (black === 'you' || black === 'player') return 'b';
 	    if (white === 'you' || white === 'player') return 'w';
+	    // Auto-flip to the imported username (Lichess/Chess.com import): if the
+	    // imported player is Black, flip so they're at the bottom.
+	    const imported = String(this._importUsername || '').trim().toLowerCase();
+	    if (imported) {
+	      if (black === imported) return 'b';
+	      if (white === imported) return 'w';
+	    }
 	    return null;
 	  }
 
@@ -6884,6 +7574,16 @@ _showPuzzleSuccessOverlay() {
 		            <label class="select-row-item"><input type="radio" name="swal-anticheat-limit" value="15"><span>15</span></label>
 		          </div>
 		        </div>
+		        ${this.authState.plan?.plan === 'max'
+		          ? `
+		        <label class="anticheat-popup-background">
+		          <input id="swal-anticheat-background" type="checkbox">
+		          <span>Run in background — I'll get a notification when it's done</span>
+		        </label>`
+		          : `
+		        <p class="anticheat-popup-background anticheat-popup-maxnote">
+		          Run in background is a <strong>Max</strong> feature — with Max, review up to 100 games/week without keeping this tab open.
+		        </p>`}
 		      </div>
 		    `;
 		    const result = await this._showPopup({
@@ -6906,20 +7606,21 @@ _showPuzzleSuccessOverlay() {
 		        if (!root) return false;
 		        const limitRadio = root.querySelector('input[name="swal-anticheat-limit"]:checked');
 		        const limit = parseInt(limitRadio?.value || '10', 10) || 10;
+		        const background = !!root.querySelector('#swal-anticheat-background')?.checked;
 		        if (isPgn) {
 		          const pgn = (root.querySelector('#swal-anticheat-pgn')?.value || '').trim();
 		          if (!pgn) {
 		            window.Swal?.showValidationMessage?.('Paste at least one PGN first.');
 		            return false;
 		          }
-		          return { source: 'pgn', pgn, limit };
+		          return { source: 'pgn', pgn, limit, background };
 		        }
 		        const username = (root.querySelector('#swal-anticheat-username')?.value || '').trim();
 		        if (!username) {
 		          window.Swal?.showValidationMessage?.('Enter a username first.');
 		          return false;
 		        }
-		        return { source, username, limit };
+		        return { source, username, limit, background };
 		      },
 		    });
 		    if (!result?.isConfirmed || !result.value) return;
@@ -6929,6 +7630,16 @@ _showPuzzleSuccessOverlay() {
 		    if (this.elAnticheatLimit) this.elAnticheatLimit.value = String(result.value.limit);
 		    if (this.elAnticheatUsername) this.elAnticheatUsername.value = result.value.username || '';
 		    if (this.elAnticheatPgn) this.elAnticheatPgn.value = result.value.pgn || '';
+		    if (result.value.background) {
+		      // Background path: charge quota + write a job record server-side,
+		      // then show the "we'll let you know" status. The user can keep
+		      // using the app; the bell + system Notification fire on completion.
+		      const payload = { source: result.value.source, limit: result.value.limit };
+		      if (result.value.pgn) payload.pgn = result.value.pgn;
+		      if (result.value.username) payload.username = result.value.username;
+		      await this._startBackgroundAnticheat(result.value.source, payload);
+		      return;
+		    }
 		    await this._startAnticheatCheck();
 		  }
 
@@ -7071,6 +7782,10 @@ _showPuzzleSuccessOverlay() {
     if (this.anticheatMode.abortController) {
       try { this.anticheatMode.abortController.abort(); } catch (_) {}
       this.anticheatMode.abortController = null;
+    }
+    if (this._anticheatListTimer) {
+      clearTimeout(this._anticheatListTimer);
+      this._anticheatListTimer = null;
     }
     if (this.anticheatMode.checking) this._setAnticheatChecking(false);
   }
@@ -7266,6 +7981,9 @@ _showPuzzleSuccessOverlay() {
     const modalTool = this._getImportTool('modal');
     const pgn = (modalTool?.querySelector('.import-pgn-input')?.value || '').trim();
     if (!pgn) return;
+    // Direct PGN paste has no username context — clear any imported-username
+    // auto-flip so the board keeps its default orientation.
+    this._importUsername = null;
     try {
       const games = this._splitPgnGames(pgn);
       if (games.length > 1) {
@@ -7485,6 +8203,9 @@ _showPuzzleSuccessOverlay() {
 
     const siteLabel = source === 'chesscom' ? 'Chess.com' : 'Lichess';
     this._setImportStatus(`Loading ${siteLabel} games...`, 'loading');
+    // Remember the imported username so the board auto-flips to them when a
+    // game is loaded (see _playerColorFromHeaders).
+    this._importUsername = username;
     const tool = this._getImportTool('modal');
     const btn = tool?.querySelector(`.import-load-username-btn[data-source="${source}"]`);
     if (btn) btn.disabled = true;
@@ -8308,6 +9029,31 @@ _showPuzzleSuccessOverlay() {
     }
   }
 
+  _confirmResetGame() {
+    // The Reset button wipes progress back to the loaded game's start. If
+    // there's nothing to lose (no moves played, no analysis yet), reset
+    // straight away; otherwise ask first so a mid-review reset isn't a
+    // misclick.
+    const hasProgress = (this.gameMoves && this.gameMoves.length > 0)
+      || (this.analysisResults && this.analysisResults.length > 0)
+      || this.isAnalyzing;
+    if (!hasProgress || !window.Swal?.fire) {
+      this._resetGame();
+      return;
+    }
+    window.Swal.fire({
+      title: 'Reset board?',
+      text: 'This clears the moves you\'ve played and returns to the loaded position.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Reset',
+      cancelButtonText: 'Cancel',
+      confirmButtonColor: '#2d6cdf',
+    }).then((result) => {
+      if (result?.isConfirmed) this._resetGame();
+    });
+  }
+
   _resetGame() {
 	    this.liveEvalToken += 1; this.liveDepthToken += 1;
 		    this.analysisResults = null;
@@ -8488,6 +9234,78 @@ _saveGameState() {
 	      return true;
 	    }
 	    return false;
+	  }
+
+	  _downloadFile(filename, content) {
+	    if (typeof Blob === 'undefined') return;
+	    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+	    const url = URL.createObjectURL(blob);
+	    const a = document.createElement('a');
+	    a.href = url;
+	    a.download = filename;
+	    document.body.appendChild(a);
+	    a.click();
+	    document.body.removeChild(a);
+	    setTimeout(() => URL.revokeObjectURL(url), 1000);
+	  }
+
+	  // One Export button: shows the current main-line PGN and current-position
+	  // FEN in a popover, each with Copy + Download actions. Buttons are wired via
+	  // didOpen so they act inside the open dialog without a route change.
+	  _openExportPopup() {
+	    const pgn = this._currentPgn();
+	    const fen = (this.chess && this.chess.fen()) || '';
+	    if (!pgn && !fen) {
+	      this._showPopup({ icon: 'info', title: 'Nothing to export', text: 'Load or import moves first so there is a PGN to export.' });
+	      return;
+	    }
+	    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+	    const row = (label, value, rid) => (
+	      `<div class="export-field">
+	        <div class="export-field-head">
+	          <span class="export-field-label">${esc(label)}</span>
+	          <span class="export-field-actions">
+	            <button type="button" class="btn btn-ghost btn-sm export-copy" data-rid="${rid}">Copy</button>
+	            <button type="button" class="btn btn-ghost btn-sm export-download" data-rid="${rid}">Download</button>
+	          </span>
+	        </div>
+	        <textarea class="export-textarea" id="swal-export-${rid}" readonly spellcheck="false">${esc(value)}</textarea>
+	      </div>`
+	    );
+	    const html = [
+	      pgn ? row('PGN', pgn, 'pgn') : '',
+	      fen ? row('FEN', fen, 'fen') : '',
+	    ].join('');
+	    this._showPopup({
+	      title: 'Export game',
+	      html,
+	      showConfirmButton: false,
+	      customClass: { popup: 'export-popup' },
+	      didOpen: () => {
+	        const root = this._swalContentRoot();
+	        if (!root) return;
+	        root.querySelectorAll('.export-copy').forEach((btn) => {
+	          btn.addEventListener('click', async () => {
+	            const ta = root.querySelector(`#swal-export-${btn.dataset.rid}`);
+	            const text = ta ? ta.value : '';
+	            if (!text) return;
+	            const ok = await this._copyTextToClipboard(text).catch(() => false);
+	            const original = btn.textContent;
+	            btn.textContent = ok ? 'Copied ✓' : 'Copy failed';
+	            setTimeout(() => { btn.textContent = original; }, 1400);
+	          });
+	        });
+	        root.querySelectorAll('.export-download').forEach((btn) => {
+	          btn.addEventListener('click', () => {
+	            const ta = root.querySelector(`#swal-export-${btn.dataset.rid}`);
+	            const text = ta ? ta.value : '';
+	            if (!text) return;
+	            const ext = `${btn.dataset.rid}`;
+	            this._downloadFile(`game.${ext === 'fen' ? 'fen' : 'pgn'}`, text);
+	          });
+	        });
+	      },
+	    });
 	  }
 
 	  async _exportCurrentPgn() {
@@ -9579,7 +10397,13 @@ _saveGameState() {
 				        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
 				      }
 				      if (!dataLines.length) return;
-				      const data = JSON.parse(dataLines.join('\n'));
+				      let data;
+				      try {
+				        data = JSON.parse(dataLines.join('\n'));
+				      } catch (_) {
+				        data = {};
+				      }
+				      if (!data || typeof data !== 'object') data = {};
 				      if (event === 'queued') {
 				        this.elReviewBtnText.textContent = 'Queued';
 				        this._updateLiveEvalPanel({

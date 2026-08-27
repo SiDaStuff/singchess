@@ -527,7 +527,8 @@ TOOLS.
       rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
       \`\`\`
   - ask_question: need a choice to proceed (opening, time control, side, level)? ask via this tool — the user picks from buttons.
-  - web_search: verify external facts (openings, players, events, theory).
+  - web_search: verify external facts (openings, players, events, theory). No API key — Wikipedia + DuckDuckGo.
+  - exa_search: real-time web search via Exa (only available when the server has EXA_API_KEY set). Prefer this over web_search for ANY time-sensitive question — recent tournaments, current ratings, the latest news, a player's recent results, etc. Returns results with title, URL, published date, and a short snippet. Always cite the source URL inline.
   - coach_games: read the user's saved usernames/prefs for context.
   - lichess_opening: name an opening and get master-game White/Draw/Black stats for a line. Pass moves as UCI strings. Use for ANY "what opening is this" or opening-name question instead of guessing — always cite the name + W/D/B.
   - lichess_player: look up a Lichess player's public profile + ratings by username. Use when the user names a Lichess player; never invent ratings.

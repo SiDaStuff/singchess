@@ -1,0 +1,379 @@
+/* =============================================================================
+ * Sing Chess — globals.css (Redesign)
+ *
+ * ALL-WHITE theme. The only non-white surface on the entire site is the
+ * chessboard dark square, driven by body[data-board-theme] below so existing
+ * settings (sidastuff.appearanceSettings) keep working unchanged.
+ *
+ * Tailwind v4 reads tokens from @theme; a matching tailwind.config.js ships
+ * for v3 tooling. This file is the single source of truth for the new UI.
+ * ========================================================================== */
+
+@import 'tailwindcss';
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 1. THEME TOKENS
+ * ────────────────────────────────────────────────────────────────────── */
+
+@theme {
+  /* All-white surfaces */
+  --color-page: #ffffff;
+  --color-panel: #ffffff;
+  --color-elevated: #ffffff;
+  --color-muted: #f7f8fa;
+  --color-muted-2: #f1f3f6;
+
+  /* Soft gray borders (never dark) */
+  --color-border: #e6e8eb;
+  --color-border-soft: #eef0f3;
+  --color-border-strong: #d6d9dd;
+
+  /* Text */
+  --color-ink-900: #0f1115;
+  --color-ink-700: #2b3242;
+  --color-ink-500: #5c6573;
+  --color-ink-400: #8b94a3;
+
+  /* Accent (refined graphite) */
+  --color-accent: #272a31;
+  --color-accent-hover: #3a3f49;
+  --color-accent-contrast: #ffffff;
+
+  /* Move-quality */
+  --color-brilliant: #27c2a2;
+  --color-great: #749ac0;
+  --color-best: #6bbf59;
+  --color-book: #caa37a;
+  --color-inaccuracy: #eab308;
+  --color-mistake: #f59e0b;
+  --color-blunder: #ef4444;
+  --color-miss: #fb7185;
+
+  /* Chessboard squares — default "classic" warm-cream theme; overridden per
+   * board theme via body[data-board-theme]… below. These are the ONLY dark
+   * colors anywhere in the redesign. */
+  --color-sq-light: #f0d9b5;
+  --color-sq-dark: #b58863;
+  --color-sq-highlight-light: #f7ec74;
+  --color-sq-highlight-dark: #dac34b;
+  --color-sq-last-light: #f4e394;
+  --color-sq-last-dark: #d5b94a;
+  --color-sq-check-light: rgba(247, 105, 90, 0.55);
+  --color-sq-check-dark: rgba(247, 105, 90, 0.7);
+  --color-sq-selected: rgba(20, 85, 100, 0.28);
+  --color-arrow: #1c1e25;
+
+  /* Typography */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+
+  /* Radii / shadow / sidebar */
+  --radius-card: 16px;
+  --radius-pill: 999px;
+  --shadow-soft: 0 1px 2px rgba(15, 17, 21, 0.04);
+  --shadow-soft-md: 0 4px 14px rgba(15, 17, 21, 0.05);
+  --shadow-soft-lg: 0 12px 32px rgba(15, 17, 21, 0.07);
+  --width-sidebar: 300px;
+  --max-shell: 1440px;
+
+  /* Motion */
+  --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 2. BOARD THEMES — same keys as the existing settings system.
+ *    body[data-board-theme="..."] sets the --sq-* vars the Chessboard reads.
+ *    These OVERWRITE the single dark-square whitelist rule: only these
+ *    squares are allowed to be non-white anywhere in the UI.
+ * ────────────────────────────────────────────────────────────────────── */
+
+body[data-board-theme='classic'] {
+  --color-sq-light: #f0d9b5;
+  --color-sq-dark: #b58863;
+  --color-sq-highlight-light: #f7ec74;
+  --color-sq-highlight-dark: #dac34b;
+}
+body[data-board-theme='green'] {
+  --color-sq-light: #eeeed2;
+  --color-sq-dark: #769656;
+  --color-sq-highlight-light: #f6f682;
+  --color-sq-highlight-dark: #baca44;
+}
+body[data-board-theme='blue'] {
+  --color-sq-light: #d8e2e7;
+  --color-sq-dark: #799db3;
+  --color-sq-highlight-light: #e7eef2;
+  --color-sq-highlight-dark: #94b3c4;
+}
+body[data-board-theme='slate'] {
+  --color-sq-light: #dfe5ea;
+  --color-sq-dark: #6d7883;
+  --color-sq-highlight-light: #edf3f7;
+  --color-sq-highlight-dark: #9aa6b1;
+}
+body[data-board-theme='walnut'] {
+  --color-sq-light: #f1d8ae;
+  --color-sq-dark: #8a5a32;
+  --color-sq-highlight-light: #ffe7a5;
+  --color-sq-highlight-dark: #b77d42;
+}
+body[data-board-theme='rose'] {
+  --color-sq-light: #f7e2df;
+  --color-sq-dark: #b56a72;
+  --color-sq-highlight-light: #ffd9c7;
+  --color-sq-highlight-dark: #c88771;
+}
+
+/* Arrows / highlights honor the existing annotation color settings too. */
+:root {
+  --annotation-arrow-color: #1c1e25;
+  --annotation-highlight-color: rgba(20, 85, 100, 0.28);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 3. BASE STYLES
+ * ────────────────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--color-page);   /* pure white */
+  color: var(--color-ink-700);
+  min-height: 100vh;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4 {
+  color: var(--color-ink-900);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+p { margin: 0; }
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+button {
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+:focus-visible {
+  outline: 3px solid rgba(39, 42, 49, 0.32);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+::selection {
+  background: rgba(39, 42, 49, 0.12);
+}
+
+/* Thin, refined scrollbar (webkit) */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: #c0c4cb; background-clip: content-box; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 4. NOISE TEXTURES — subtle, light grain for premium all-white depth.
+ *    .noise         faint, all-white-safe
+ *    .noise-strong  slightly more visible (sidebar / large panels)
+ *    .noise-card    panel background + faint grain together
+ *
+ *    Implemented as a pointer-events:none ::after so it never blocks the
+ *    board or any interactive element.
+ * ────────────────────────────────────────────────────────────────────── */
+
+.noise {
+  position: relative;
+  isolation: isolate;
+}
+.noise::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0.025;                  /* very subtle on pure white */
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 220 220' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: multiply;
+}
+.noise-strong::after {
+  opacity: 0.045;
+}
+.noise-card {
+  background-color: var(--color-panel);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-soft);
+}
+
+/* Ensure real content sits above the grain layer */
+.noise > * {
+  position: relative;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 5. CHESSBOARD CORE — CSS grid, theme-driven, all-white-safe.
+ *    The board wrapper is white; only squares get --color-sq-*.
+ *    These rules are consumed by components/Chessboard.js.
+ * ────────────────────────────────────────────────────────────────────── */
+
+.sc-board-wrapper {
+  position: relative;
+  width: 100%;
+  background: var(--color-panel);     /* white */
+  border-radius: var(--radius-card);
+  padding: 16px;
+  border: 1px solid var(--color-border-soft);
+  box-shadow: var(--shadow-soft-md);
+}
+
+.sc-board {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  grid-template-rows: repeat(8, 1fr);
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+.sc-square {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sc-square.light { background: var(--color-sq-light); }
+.sc-square.dark  { background: var(--color-sq-dark); }
+
+.sc-square.selected { box-shadow: inset 0 0 0 3px var(--color-sq-selected); }
+.sc-square.highlight::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--color-sq-highlight-light);
+  opacity: 0.85;
+}
+.sc-square.highlight.dark::before {
+  background: var(--color-sq-highlight-dark);
+}
+.sc-square.last-move::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--color-sq-last-light);
+  opacity: 0.55;
+}
+.sc-square.last-move.dark::before {
+  background: var(--color-sq-last-dark);
+}
+.sc-square.check::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, var(--color-sq-check-light) 8%, transparent 78%);
+}
+
+.sc-piece {
+  width: 92%;
+  height: 92%;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.sc-hint {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.sc-hint.move {
+  width: 30%;
+  height: 30%;
+  background: rgba(20, 20, 25, 0.20);
+}
+.sc-hint.capture {
+  inset: 6%;
+  background: transparent;
+  border: 4px solid rgba(20, 20, 25, 0.22);
+  border-radius: 50%;
+}
+
+/* Coordinates (files a-h, ranks 1-8) */
+.sc-coord {
+  position: absolute;
+  font-size: clamp(9px, 1.6vw, 13px);
+  font-weight: 700;
+  font-family: var(--font-mono);
+  opacity: 0.7;
+  pointer-events: none;
+  z-index: 2;
+}
+.sc-coord.file { bottom: 2px; right: 4px; }
+.sc-coord.rank { top: 2px; left: 4px; }
+.sc-square.light .sc-coord { color: var(--color-sq-dark); }
+.sc-square.dark .sc-coord  { color: var(--color-sq-light); }
+
+/* SVG arrow overlay (drawArrows) */
+.sc-board-arrows {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* Pointer-active piece during drag */
+.sc-piece.is-dragging {
+  opacity: 0.3;
+}
+.sc-drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  width: 64px;
+  height: 64px;
+  transform: translate(-50%, -50%);
+}

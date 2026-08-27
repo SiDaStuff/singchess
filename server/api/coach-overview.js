@@ -23,7 +23,7 @@ const HEARTBEAT_MS = 20000;
 const OVERVIEW_RESERVE_TOKENS = 1500;
 // Cap the streamed reply length (keeps cost + latency low — overview is short).
 const OVERVIEW_MAX_TOKENS_MOVE = 320;
-const OVERVIEW_MAX_TOKENS_GAME = 700;
+const OVERVIEW_MAX_TOKENS_GAME = 900;
 
 // Dedicated reviewer prompt. NOT the conversational coach prompt — this one IS
 // a game reviewer that explains engine data concretely and briefly.
@@ -373,6 +373,16 @@ exports.streamHandler = async (req, res) => {
         : fallbackMoveExplanation(moveIndex, game, verified);
       if (!closed) sseWrite(res, 'token', { text: fallback });
       assistantText = fallback;
+    } else if (result && result.finishReason === 'length') {
+      // Model was cut off by maxTokens — content is usable but may be
+      // truncated mid-sentence. Append an ellipsis so it ends cleanly
+      // instead of looking broken.
+      const trimmed = assistantText.trim();
+      if (!/[.!?…]$/.test(trimmed)) {
+        const ellipsis = '…';
+        assistantText += ellipsis;
+        if (!closed) sseWrite(res, 'token', { text: ellipsis });
+      }
     }
 
     // Reconcile to the real cost (prefer provider usage; fall back to char est).

@@ -6,7 +6,8 @@
   <title>Sing CHESS</title>
   <link rel="icon" type="image/png" href="/assets/favicon.png">
   <link rel="apple-touch-icon" href="/assets/favicon.png">
-  <link rel="stylesheet" href="/css/style.css">
+  <!-- Board + app CSS is bundled via src/main.js -> src/ui/styles.css (which
+       imports public/css/style.css). Removed the old <link> to avoid double-load. -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
@@ -21,6 +22,73 @@
   </script>
 </head>
 <body class="menu-active">
+  <!-- ════════════════════════════════════════════════════════════════════
+       ALL-WHITE SIDEBAR (fixed, desktop) / slide-out drawer (mobile)
+       Reuses the existing data-route / data-nav attributes so the SPA
+       router (src/app.js) highlights and navigates exactly as before.
+       ════════════════════════════════════════════════════════════════════ -->
+  <aside class="sc-sidebar noise noise-strong" id="sc-sidebar" aria-label="Primary">
+    <a class="sc-sidebar-brand" href="/" data-route="/index">
+      <img src="/assets/icon.png" alt="Sing Chess logo">
+      <span>Sing Chess</span>
+    </a>
+
+    <div class="sc-sidebar-section">
+      <p class="sc-sidebar-label">Play &amp; Learn</p>
+      <nav class="flex flex-col gap-0.5">
+        <a class="sc-nav-link" href="/" data-route="/index" data-nav="home">
+          <span class="material-symbols-outlined">home</span> Home
+        </a>
+        <a class="sc-nav-link" href="/review" data-route="/review" data-nav="review">
+          <span class="material-symbols-outlined">upload</span> Review
+        </a>
+        <a class="sc-nav-link" href="/coach" data-route="/coach" data-nav="coach">
+          <span class="material-symbols-outlined">school</span> Coach
+        </a>
+        <a class="sc-nav-link" href="/puzzles" data-route="/puzzles" data-nav="puzzles">
+          <span class="material-symbols-outlined">extension</span> Puzzles
+        </a>
+      </nav>
+    </div>
+
+    <div class="sc-sidebar-section">
+      <p class="sc-sidebar-label">Tools</p>
+      <nav class="flex flex-col gap-0.5">
+        <a class="sc-nav-link" href="/anticheat" data-route="/anticheat" data-nav="anticheat">
+          <span class="material-symbols-outlined">shield</span> Anti-cheat
+        </a>
+        <a class="sc-nav-link" href="/plans" data-route="/plans" data-nav="plans">
+          <span class="material-symbols-outlined">bolt</span> Plans
+        </a>
+      </nav>
+    </div>
+
+    <div class="sc-sidebar-section sc-sidebar-notifications" id="sc-sidebar-notifications">
+      <div class="sc-sidebar-section-head">
+        <p class="sc-sidebar-label">Notifications <span class="sc-sidebar-badge" id="sidebar-notification-badge" hidden>0</span></p>
+        <button id="sidebar-notification-mark-all" class="btn-link sc-notification-mark-all" type="button" hidden>Mark all read</button>
+      </div>
+      <div class="sc-notification-list" id="sc-notification-list">
+        <p class="sc-notification-empty">No notifications yet.</p>
+      </div>
+    </div>
+
+    <div class="sc-sidebar-section mt-auto">
+      <p class="sc-sidebar-label">Account</p>
+      <nav class="flex flex-col gap-0.5">
+        <a class="sc-nav-link" href="/account" data-route="/account" data-nav="account">
+          <span class="material-symbols-outlined">account_circle</span> Account
+        </a>
+        <a class="sc-nav-link" href="/settings" data-route="/settings" data-nav="settings">
+          <span class="material-symbols-outlined">tune</span> Settings
+        </a>
+      </nav>
+    </div>
+  </aside>
+
+  <!-- Scrim behind the mobile sidebar drawer -->
+  <div class="sc-scrim" id="sc-scrim" hidden></div>
+
   <div id="app">
     <section id="main-menu" class="main-menu" aria-label="Home">
       <!-- Import card: the first thing a visitor sees -->
@@ -745,6 +813,31 @@
         <button id="btn-save-appearance-settings" class="btn btn-primary" type="button">Save Appearance</button>
         <p class="account-status" id="appearance-settings-status"></p>
         <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
+        <h2 style="font-size:1rem">Notifications</h2>
+        <p>Pick when you want to be notified. We never send marketing email.</p>
+        <label class="switch-row app-switch-row">
+          <span>
+            <strong>Anticheat completion</strong>
+            <small>Show a notification when a background anticheat review finishes.</small>
+          </span>
+          <span class="app-switch">
+            <input id="settings-notify-anticheat" type="checkbox" checked>
+            <span class="app-switch-track"></span>
+          </span>
+        </label>
+        <label class="switch-row app-switch-row">
+          <span>
+            <strong>Browser notifications</strong>
+            <small>Show a system popup when this tab is in the background. Your browser will ask for permission.</small>
+          </span>
+          <span class="app-switch">
+            <input id="settings-notify-push" type="checkbox">
+            <span class="app-switch-track"></span>
+          </span>
+        </label>
+        <button id="btn-save-notify-settings" class="btn btn-primary" type="button">Save Notification Settings</button>
+        <p class="account-status" id="notify-settings-status"></p>
+        <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
         <h2 style="font-size:1rem">Cache</h2>
         <p>Clear local settings and puzzle progress stored in this browser.</p>
         <button id="btn-clear-cache" class="btn btn-secondary" type="button">Clear Local Cache</button>
@@ -962,6 +1055,18 @@
       </div>
     </section>
 
+    <section id="page-anticheat-report" class="page-panel" hidden>
+      <div class="card panel-wide page-card">
+        <h1>Anticheat Report</h1>
+        <div class="anticheat-report-meta" id="anticheat-report-meta">
+          <span class="anticheat-status" id="anticheat-report-status">Loading report…</span>
+          <span class="anticheat-report-job" id="anticheat-report-job"></span>
+        </div>
+        <div class="anticheat-results" id="anticheat-report-results"></div>
+        <div class="anticheat-report-expiry" id="anticheat-report-expiry"></div>
+      </div>
+    </section>
+
     <section id="page-privacy" class="page-panel" hidden>
       <div class="card panel-wide page-card">
         <div class="page-card-head">
@@ -1153,42 +1258,35 @@
         </div>
 
         <div class="board-controls">
-          <button id="btn-flip" class="btn-control" title="Flip Board" aria-label="Flip Board">
-            <span class="material-symbols-outlined btn-symbol">swap_horiz</span>
-            <span class="btn-label">Flip</span>
-          </button>
-          <button id="btn-first" class="btn-control" title="First Move" aria-label="First Move">
-            <span class="material-symbols-outlined btn-symbol">first_page</span>
-            <span class="btn-label">Start</span>
-          </button>
-          <button id="btn-prev" class="btn-control" title="Previous Move" aria-label="Previous Move">
-            <span class="material-symbols-outlined btn-symbol">chevron_left</span>
-            <span class="btn-label">Prev</span>
-          </button>
-          <button id="btn-next" class="btn-control" title="Next Move" aria-label="Next Move">
-            <span class="material-symbols-outlined btn-symbol">chevron_right</span>
-            <span class="btn-label">Next</span>
-          </button>
-          <button id="btn-last" class="btn-control" title="Last Move" aria-label="Last Move">
-            <span class="material-symbols-outlined btn-symbol">last_page</span>
-            <span class="btn-label">End</span>
-          </button>
-          <button id="btn-auto" class="btn-control" title="Auto Play" aria-label="Auto Play">
-            <span class="material-symbols-outlined btn-symbol">play_arrow</span>
-            <span class="btn-label">Auto</span>
-          </button>
-          <button id="btn-reset" class="btn-control" title="Reset Board" aria-label="Reset Board">
-            <span class="material-symbols-outlined btn-symbol">restart_alt</span>
-            <span class="btn-label">Reset</span>
-          </button>
-          <button id="btn-export-pgn" class="btn-control" title="Export PGN" aria-label="Export PGN" disabled>
-            <span class="material-symbols-outlined btn-symbol">description</span>
-            <span class="btn-label">PGN</span>
-          </button>
-          <button id="btn-export-fen" class="btn-control" title="Export FEN" aria-label="Export FEN">
-            <span class="material-symbols-outlined btn-symbol">content_copy</span>
-            <span class="btn-label">FEN</span>
-          </button>
+          <div class="board-controls-side">
+            <button id="btn-flip" class="btn-control btn-icon-only" title="Flip Board" aria-label="Flip Board">
+              <span class="material-symbols-outlined btn-symbol">swap_horiz</span>
+            </button>
+            <button id="btn-export" class="btn-control btn-icon-only" title="Export FEN / PGN" aria-label="Export FEN or PGN">
+              <span class="material-symbols-outlined btn-symbol">download</span>
+            </button>
+            <button id="btn-reset" class="btn-control btn-icon-only" title="Reset Board" aria-label="Reset Board">
+              <span class="material-symbols-outlined btn-symbol">restart_alt</span>
+            </button>
+          </div>
+          <div class="board-controls-nav">
+            <button id="btn-first" class="btn-control" title="First Move" aria-label="First Move">
+              <span class="material-symbols-outlined btn-symbol">first_page</span>
+              <span class="btn-label">Start</span>
+            </button>
+            <button id="btn-prev" class="btn-control" title="Previous Move" aria-label="Previous Move">
+              <span class="material-symbols-outlined btn-symbol">chevron_left</span>
+              <span class="btn-label">Prev</span>
+            </button>
+            <button id="btn-next" class="btn-control" title="Next Move" aria-label="Next Move">
+              <span class="material-symbols-outlined btn-symbol">chevron_right</span>
+              <span class="btn-label">Next</span>
+            </button>
+            <button id="btn-last" class="btn-control" title="Last Move" aria-label="Last Move">
+              <span class="material-symbols-outlined btn-symbol">last_page</span>
+              <span class="btn-label">End</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1621,6 +1719,20 @@
             <textarea id="anticheat-pgn" class="anticheat-pgn" hidden placeholder="Paste one PGN or several PGNs here..." rows="8"></textarea>
             <div class="anticheat-status" id="anticheat-status">Pick a source above to start a review.</div>
             <div class="anticheat-results" id="anticheat-results"></div>
+          </div>
+
+          <!-- Saved reviews list — every past + currently-running report the
+               user has started. Loaded lazily by _loadAnticheatReports. -->
+          <div class="anticheat-saved card panel-wide" id="anticheat-saved" hidden>
+            <div class="anticheat-saved-header">
+              <h3>Saved reviews</h3>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-anticheat-refresh" title="Refresh list">
+                <span class="material-symbols-outlined">refresh</span> Refresh
+              </button>
+            </div>
+            <div class="anticheat-saved-list" id="anticheat-saved-list">
+              <div class="anticheat-saved-empty">Loading saved reviews…</div>
+            </div>
           </div>
         </div>
 

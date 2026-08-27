@@ -37,6 +37,7 @@ const coachOverviewFn = require('./api/coach-overview.js');
 const coachToolResultFn = require('./api/coach-tool-result.js');
 const openingExplorerFn = require('./api/opening-explorer.js');
 const adminAbuseReportFn = require('./api/admin-abuse-report.js');
+const notificationsFn = require('./api/notifications.js');
 
 function generateDeviceId() {
   const bytes = require('crypto').randomBytes(16);
@@ -213,18 +214,36 @@ function forwardResult(res, result) {
   return res.status(status).json(body);
 }
 
+// Validate that a handler module exports a callable .handler before the
+// request reaches the route, so a missing/mis-named export surfaces as a
+// 500 rather than a "fn.handler is not a function" stack trace in the logs.
 function wrapHandler(fn) {
-  return async (req, res) => {
-    try {
-      const event = makeEvent(req);
-      const result = await fn.handler(event, {});
-      forwardResult(res, result);
-    } catch (err) {
-      console.error('Handler error:', err);
-      res.status(500).json({ error: err.message || 'Server error' });
-    }
+  if (!fn || typeof fn.handler !== 'function') {
+    return (req, res) => {
+      console.error('wrapHandler: module has no .handler export');
+      res.status(500).json({ error: 'Server handler misconfigured.' });
+    };
+  }
+  return (req, res, next) => {
+    Promise.resolve()
+      .then(() => {
+        const event = makeEvent(req);
+        return fn.handler(event, {});
+      })
+      .then((result) => {
+        if (res.headersSent) return;
+        forwardResult(res, result);
+      })
+      .catch((err) => {
+        // Defer to the Express error handler so a single catch + format path
+        // (the global error-handler below) covers both sync throws and async
+        // rejections — no "unhandled promise rejection" noise.
+        next(err);
+      });
   };
 }
+
+// Global Express error handler — registered below AFTER all routes.
 
 // Allow CORS preflight for APIs
 app.options('/api/*', (req, res) => {
@@ -244,6 +263,9 @@ app.post('/api/analyze', analysisLimit, wrapHandler(analyzeFn));
 app.post('/api/analyze/stream', analysisLimit, analyzeFn.streamHandler);
 app.post('/api/anticheat', analysisLimit, wrapHandler(anticheatFn));
 app.post('/api/anticheat/stream', analysisLimit, anticheatFn.streamHandler);
+app.post('/api/anticheat/submit', analysisLimit, wrapHandler({ handler: anticheatFn.submit }));
+app.get('/api/anticheat/status', wrapHandler({ handler: anticheatFn.status }));
+app.get('/api/anticheat/list', wrapHandler({ handler: anticheatFn.list }));
 app.get('/api/puzzle', wrapHandler(getPuzzleFn));
 app.get('/api/recent-games', wrapHandler(recentGamesFn));
 app.get('/api/opening-explorer', wrapHandler(openingExplorerFn));
@@ -274,6 +296,14 @@ app.post('/api/report-abuse', writeLimit, wrapHandler(adminAbuseReportFn));
 app.get('/api/admin/abuse', wrapHandler(adminAbuseReportFn));
 app.post('/api/admin/abuse', writeLimit, wrapHandler(adminAbuseReportFn));
 app.post('/api/admin/abuse/notes', writeLimit, wrapHandler(adminAbuseReportFn));
+// Notifications: list / mark-all-read / per-id mark-read. The per-id route
+// accepts any subpath under /api/notifications/<id>/read so the bell can deep-
+// link to it without registering a new route per notification.
+app.get('/api/notifications', wrapHandler(notificationsFn));
+app.post('/api/notifications/mark-all-read', writeLimit, wrapHandler(notificationsFn));
+app.post(/^\/api\/notifications\/[^/]+\/read\/?$/i, writeLimit, wrapHandler(notificationsFn));
+// Delete a single notification: DELETE /api/notifications/<id>
+app.delete(/^\/api\/notifications\/[^/]+$/i, writeLimit, wrapHandler(notificationsFn));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
@@ -376,6 +406,19 @@ if (serveStatic) {
     return res.sendFile(staticIndexPath);
   });
 }
+
+// Global Express error handler — MUST be last (before app.listen). Catches
+// anything thrown or next(err)'d by a route/middleware, formats a clean JSON
+// 500, and logs ONCE (method + path + message) instead of the full Express
+// route chain flooding the logs.
+app.use((err, req, res, _next) => {
+  const status = err && err.statusCode ? err.statusCode : 500;
+  const msg = (err && err.message) || 'Server error';
+  console.error('[server] request error:', req.method, req.path, '-', msg);
+  if (!res.headersSent) {
+    res.status(status).json({ error: msg });
+  }
+});
 
 app.listen(PORT, () => {
   const mode = serveStatic ? 'web/API' : 'API';

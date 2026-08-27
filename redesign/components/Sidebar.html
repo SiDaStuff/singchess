@@ -1,0 +1,70 @@
+<!-- ======================================================================
+     Sidebar.html — Sing Chess redesign
+     Renders BOTH the desktop fixed sidebar and the mobile slide-out drawer.
+     The SAME markup is mounted into #sc-sidebar on desktop (CSS positions it
+     as a fixed 300px column) and into the drawer on mobile. Tabs.js /
+     Drawer.js (components/Drawer.js) toggle its visibility under 768px.
+
+     Navigation uses data-route + data-nav, mirroring the existing SPA router
+     contract so it can be wired to src/app.js without changes.
+     ====================================================================== -->
+
+<!-- Brand -->
+<a class="sc-sidebar-brand" href="/" data-route="/index" aria-label="Sing Chess home">
+  <img src="/assets/icon.png" alt="Sing Chess logo" width="30" height="30" />
+  <span class="brand-text">Sing Chess</span>
+</a>
+
+<!-- Play & Learn -->
+<div class="sc-sidebar-section">
+  <p class="sc-sidebar-label">Play &amp; Learn</p>
+  <nav class="nav-group">
+    <a class="sc-nav-link is-active" href="/" data-route="/index" data-nav="home">
+      <span class="material-symbols-outlined">home</span>
+      <span>Home</span>
+    </a>
+    <a class="sc-nav-link" href="/review" data-route="/review" data-nav="review">
+      <span class="material-symbols-outlined">upload</span>
+      <span>Review</span>
+    </a>
+    <a class="sc-nav-link" href="/coach" data-route="/coach" data-nav="coach">
+      <span class="material-symbols-outlined">school</span>
+      <span>Coach</span>
+    </a>
+    <a class="sc-nav-link" href="/puzzles" data-route="/puzzles" data-nav="puzzles">
+      <span class="material-symbols-outlined">extension</span>
+      <span>Puzzles</span>
+    </a>
+  </nav>
+</div>
+
+<!-- Tools -->
+<div class="sc-sidebar-section">
+  <p class="sc-sidebar-label">Tools</p>
+  <nav class="nav-group">
+    <!-- Sidebar.html is shared markup; the actual route wiring lives in JS. -->
+    <a class="sc-nav-link" href="/anticheat" data-route="/anticheat" data-nav="anticheat">
+      <span class="material-symbols-outlined">shield</span>
+      <span>Anti-cheat</span>
+    </a>
+    <a class="sc-nav-link" href="/plans" data-route="/plans" data-nav="plans">
+      <span class="material-symbols-outlined">bolt</span>
+      <span>Plans</span>
+    </a>
+  </nav>
+</div>
+
+<!-- Account (pinned to bottom) -->
+<div class="sc-sidebar-section sc-sidebar-footer">
+  <p class="sc-sidebar-label">Account</p>
+  <nav class="nav-group">
+    <a class="sc-nav-link" href="/account" data-route="/account" data-nav="account">
+      <span class="material-symbols-outlined">account_circle</span>
+      <span>Account</span>
+    </a>
+    <a class="sc-nav-link" href="/settings" data-route="/settings" data-nav="settings">
+      <span class="material-symbols-outlined">tune</span>
+      <span>Settings</span>
+    </a>
+  </nav>
+</div>

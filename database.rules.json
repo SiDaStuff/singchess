@@ -1,0 +1,101 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid",
+        "puzzleRating": { ".indexOn": [".value"] },
+        "usage": {
+          "$period": { ".read": "auth != null && auth.uid === $uid" }
+        },
+        "notifications": {
+          ".read": "auth != null && auth.uid === $uid",
+          ".indexOn": ["createdAt", "reportId"]
+        }
+      }
+    },
+    "profiles": {
+      ".read": true,
+      "$username": {
+        ".write": "auth != null"
+      }
+    },
+    "support": {
+      ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
+      ".write": "auth != null",
+      ".indexOn": ["createdAt"]
+    },
+    "contact": {
+      ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
+      ".write": "auth != null"
+    },
+    "abuse": {
+      "reports": {
+        ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
+        ".write": "auth != null",
+        ".indexOn": ["reportedAt", "reporterUid", "flaggedUid"]
+      },
+      "flagged": {
+        ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
+        ".write": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true"
+      },
+      "notes": {
+        ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
+        ".write": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true"
+      },
+      "actions": {
+        ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
+        ".write": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true"
+      },
+      "ipIndex": {
+        ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
+        ".write": "auth != null"
+      },
+      "cookieIndex": {
+        ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
+        ".write": "auth != null"
+      },
+      "multiAccount": {
+        ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
+        ".write": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true"
+      }
+    },
+    "puzzles": {
+      ".read": "auth != null"
+    },
+    "puzzleProgress": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "gameReviews": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "coachChats": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "anticheatReports": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".indexOn": ["createdAt", "startedAt"]
+      }
+    },
+    "publicStats": {
+      ".read": true,
+      ".write": "auth != null"
+    },
+    "siteVisits": {
+      ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
+      ".write": true
+    }
+  }
+}

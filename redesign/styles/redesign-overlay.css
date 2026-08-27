@@ -1,0 +1,1125 @@
+/* =============================================================================
+ * Sing Chess — Redesign Overlay  (apply the all-white premium look to the
+ * working production app WITHOUT touching its 11k-line logic or DOM bindings)
+ *
+ * Loaded AFTER public/css/style.css so every rule here has higher cascade
+ * priority. Every selector targets an existing class/id the app already uses,
+ * so all views (review, coach, puzzles, anticheat, settings, account, auth,
+ * boost, profile, legal, contact, home) inherit the new look at once.
+ *
+ * The ONLY dark surfaces allowed anywhere are board dark squares (controlled
+ * by --sq-dark under body[data-board-theme]) and a handful of status dots.
+ * ========================================================================== */
+
+:root {
+  /* Crisp clean palette — cool warm-white that reads as near-white on screen
+     but is never stark. Panels are a hair lighter than the page for depth.
+     --bg-strong + --accent-contrast form a dark/light pair used by selected
+     chips (settings, review strength, board themes). */
+  --bg-page: #f4f5f7;          /* cool warm-white page */
+  --bg-panel: #ffffff;         /* crisp white panels */
+  --bg-muted: #ebeef2;         /* cool muted fill */
+  --bg-strong: #2a3340;        /* dark fill for SELECTED chips/toggles */
+  --bg-elevated: rgba(255, 255, 255, 0.95);
+
+  --text-primary: #1a2030;     /* crisp near-black */
+  --text-secondary: #3c4458;   /* crisp secondary */
+  --text-muted: #5e6678;       /* crisp muted (AA contrast) */
+
+  --border-color: #dde1e7;     /* crisp cool border */
+  --border-soft: #e8ebf0;
+
+  --accent: #2a3340;           /* crisp slate accent */
+  --accent-contrast: #ffffff;  /* white text on dark — NOT cream */
+  --focus-ring: rgba(42, 51, 64, 0.35);
+  --review-primary: #2a3340;
+  --review-secondary: #3a4458;
+
+  --shadow-sm: 0 1px 2px rgba(26, 32, 48, 0.06);
+  --shadow: 0 1px 3px rgba(26, 32, 48, 0.07);
+  --shadow-lg: 0 6px 18px rgba(26, 32, 48, 0.08);
+  --shadow-xl: 0 14px 36px rgba(26, 32, 48, 0.10);
+  --radius: 14px;
+  --radius-sm: 12px;
+  --radius-lg: 24px;
+  --card-radius: 24px;
+  --card-padding: 18px;
+  /* Board size: give the board more room on wide screens. The square
+     aspect-ratio on .board-wrapper ensures it's always square. */
+  --board-size: min(680px, calc(100vw - 540px), calc(100vh - 220px));
+}
+
+/* Pages + app scaffold → warm cream page, cream-white panels */
+body {
+  background: var(--bg-page);
+  color: var(--text-secondary);
+}
+#app {
+  max-width: 1440px;
+  padding: 20px;
+}
+
+/* =============================================================================
+ * NOISE — subtle grain on big white panels/aside/header for premium depth
+ * ========================================================================== */
+.sc-sidebar,
+.app-header,
+.header,
+.sc-scrim ~ * { isolation: isolate; }
+
+.sc-sidebar::after,
+.header::after,
+.home-import-card::after,
+.live-eval::after,
+.engine-info::after,
+.puzzle-sidebar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 220 220' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: multiply;
+}
+/* NOTE: Do NOT set position on .sc-sidebar here. The production app's
+   src/ui/styles.css owns the sidebar layout (position: fixed on desktop,
+   translateX(-100%) drawer on mobile). Overriding it here breaks the fixed
+   positioning. We only restyle its colors/surface. */
+.sc-sidebar {
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border-soft);
+  box-shadow: 1px 0 0 rgba(58, 51, 38, 0.04);
+  padding: 16px 12px;
+}
+/* Keep the noise grain behind the sidebar's real content without forcing
+   position:relative on the sidebar itself (which would break fixed layout).
+   Only the direct children get a stacking context. */
+.sc-sidebar > * { position: relative; z-index: 1; }
+
+/* Brand — proper padding + premium look */
+.sc-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 20px;
+  color: var(--text-primary);
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.sc-sidebar-brand img {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+/* Sections + labels */
+.sc-sidebar-section {
+  padding: 6px 4px;
+}
+.sc-sidebar-label {
+  padding: 14px 12px 6px;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Nav links — proper padding, hover, active states */
+.sc-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: 0.9rem;
+  border-radius: 10px;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+.sc-nav-link:hover {
+  background: var(--bg-muted);
+  color: var(--text-primary);
+}
+.sc-nav-link.is-active,
+.sc-nav-link.active {
+  background: var(--bg-muted);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.sc-nav-link .material-symbols-outlined {
+  font-size: 1.25rem;
+  opacity: 0.9;
+}
+
+/* Legacy production header (.header/.apple-*) also goes cream */
+.header,
+.apple-nav {
+  background: var(--bg-panel);
+}
+.apple-nav a {
+  color: var(--text-secondary);
+  border-radius: 999px;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+.apple-nav a:hover,
+.apple-nav a.is-active {
+  background: var(--bg-muted);
+  color: var(--text-primary);
+}
+.apple-header-btn {
+  border-radius: 10px;
+  transition: background-color 0.16s ease;
+}
+.apple-header-btn:hover { background: var(--bg-muted); }
+
+/* =============================================================================
+ * SIDEBAR LAYOUT FIX  — make the fixed .sc-sidebar actually work.
+ *
+ * The production app ships a fixed .sc-sidebar (src/ui/styles.css) but its
+ * offset rule (body:not(.sc-sidebar-open) #app { margin-left: 300px }) is
+ * beaten by the unlayered body.menu-active #app / body.in-app-route #app
+ * rules, so the sidebar overlaps content. We re-assert the offset here with
+ * equal specificity and wire the mobile hamburger to open the drawer.
+ * ========================================================================== */
+
+/* Desktop: offset the app content so the fixed sidebar never overlaps it.
+   Must match the production specificity (body.menu-active #app /
+   body.in-app-route #app set margin:0) so the offset wins on every view. */
+@media (min-width: 1025px) {
+  body.menu-active #app,
+  body.in-app-route #app,
+  #app {
+    margin-left: var(--width-sidebar);
+    max-width: none;
+  }
+  /* The fixed sidebar replaces the old header nav on desktop. */
+  .apple-nav { display: none !important; }
+}
+
+/* Mobile: the sidebar is an off-canvas drawer opened by the hamburger.
+   The old .apple-nav drawer is redundant — hide it and let the hamburger
+   toggle the sidebar instead. */
+@media (max-width: 1024px) {
+  .apple-nav { display: none !important; }
+  #app {
+    margin-left: 0;
+    max-width: none;
+  }
+  /* Fully hide the sidebar off-canvas (fixes a sub-pixel sliver at the
+     exact 1024px breakpoint that could overlap content). */
+  .sc-sidebar {
+    transform: translateX(-100%);
+    left: 0;
+  }
+  /* The header is the 2nd child of #app (after #main-menu), so position:sticky
+     never pins it to the top on load. Make it fixed and offset #app so the
+     header is always visible at the top on mobile. Must match the production
+     specificity (body.menu-active #app / body.in-app-route #app set padding:0). */
+  .header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 80;
+  }
+  body.menu-active #app,
+  body.in-app-route #app,
+  #app {
+    padding-top: var(--header-h, 48px);
+  }
+  /* Drawer sits above the sticky header (header z-index 80). */
+  .sc-sidebar { z-index: 90; }
+  /* Scrim above the header but below the drawer. */
+  .sc-scrim { z-index: 85; }
+  .sc-sidebar.is-open { transform: translateX(0); }
+  body.sc-sidebar-open { overflow: hidden; }
+}
+
+/* =============================================================================
+ * CARDS / PANELS  (.card, .sc-card, .panel-wide, home cards, feature cards)
+ * ========================================================================== */
+.card,
+.sc-card,
+.panel-wide,
+.live-eval,
+.engine-info,
+.home-import-card,
+.home-stat-card,
+.feature-card,
+.puzzle-sidebar,
+.analysis-shell > .card,
+.move-insights,
+.opening-explorer-card,
+.coach-sidebar,
+.boost-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow);
+  padding: var(--card-padding);
+}
+
+.home-stat-card,
+.feature-card {
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.home-stat-card:hover,
+.feature-card:hover {
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
+}
+
+.card-header h3,
+.panel-title,
+.sc-card-title {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* =============================================================================
+ * BUTTONS  — cream surfaces with subtle noise texture, readable text.
+ * Primary = warm dark accent + cream text; secondary = cream + dark text.
+ * ========================================================================== */
+.btn,
+.btn-control {
+  position: relative;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  font-weight: 600;
+  transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+/* Subtle noise texture on buttons (pointer-events:none so it never blocks). */
+.btn::after,
+.btn-control::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 220 220' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: multiply;
+}
+.btn:hover:not(:disabled):not(.btn-primary),
+.btn-control:hover:not(:disabled) {
+  background: var(--bg-muted);
+  border-color: var(--border-color);
+}
+.btn:disabled,
+.btn-control:disabled { opacity: 0.5; }
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-color: var(--accent);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--review-secondary);
+  border-color: var(--review-secondary);
+  color: var(--accent-contrast);
+}
+.btn-secondary {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
+/* Buttons grid: soften the 7-up controls */
+.board-controls { gap: 8px; }
+.btn-control { height: 40px; }
+
+/* =============================================================================
+ * INPUTS / FORM FIELDS  — cream with soft warm borders
+ * ========================================================================== */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="search"],
+input[type="tel"],
+input[type="url"],
+textarea,
+select,
+.input-select,
+.import-pgn-input,
+.import-username,
+.import-limit {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+input:focus,
+textarea:focus,
+select:focus,
+.input-select:focus,
+.import-pgn-input:focus {
+  border-color: var(--text-muted);
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.field-label { color: var(--text-muted); font-weight: 600; }
+
+/* Import tabs (home + modal) → pill row on cream */
+.import-tabs {
+  background: var(--bg-muted);
+  border-radius: 999px;
+  padding: 4px;
+  gap: 2px;
+}
+.import-tab {
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+.import-tab.active {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  box-shadow: var(--shadow);
+}
+
+/* =============================================================================
+ * CHESSBOARD  — crisp white frame, soft border, square (never squashed).
+ * The OLD class names (.board-wrapper/.square/.piece/.coord-label) are kept;
+ * only their visual values move to the redesign language. CSS vars
+ * (--sq-*) are NOT touched, so all 6 board themes still apply.
+ * ========================================================================== */
+.board-wrapper {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  /* Force square: the production height rule (min(--board-size, 90vw)) can
+     make the board taller than wide when the column narrows. aspect-ratio
+     overrides the height so the board is always exactly square. */
+  aspect-ratio: 1 / 1;
+  height: auto;
+  max-height: none;
+}
+.chess-board { border-radius: 0; }
+
+/* Refined coordinate label text using board-theme-aware contrast */
+.square .coord-label {
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+/* Subtler, more premium legal-move dots */
+.square .legal-dot {
+  background: rgba(20, 22, 28, 0.22);
+}
+.square.has-piece .legal-dot {
+  border-color: rgba(20, 22, 28, 0.26);
+}
+
+/* Refined highlight rings for best-move suggestions */
+.square.best-from.light,
+.square.best-to.light {
+  box-shadow: inset 0 0 0 3px var(--clr-best);
+}
+.square.best-from.dark,
+.square.best-to.dark {
+  box-shadow: inset 0 0 0 3px var(--clr-best);
+}
+
+/* Loading overlay on cream, premium */
+.board-loading-overlay {
+  background: rgba(253, 250, 243, 0.92);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-lg);
+}
+.board-loading-progress {
+  background: var(--border-soft);
+}
+.board-skeleton-overlay {
+  background: rgba(253, 250, 243, 0.86);
+  backdrop-filter: blur(4px);
+}
+.board-skeleton-spinner {
+  border-color: var(--border-color);
+  border-top-color: var(--accent);
+}
+
+/* =============================================================================
+ * EVAL BAR + SCORES  — refine the evaluation indicator on cream
+ * ========================================================================== */
+.eval-bar {
+  background: var(--border-soft);
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--border-soft);
+}
+.eval-bar-black { background: #3a3326; }
+.eval-bar-white { background: var(--bg-panel); }
+.eval-score {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* =============================================================================
+ * MOVE LIST + MOVE QUALITY  — cleaner list, refined pills
+ * ========================================================================== */
+.move-list { font-family: 'IBM Plex Mono', monospace; }
+.move-list .move-num { color: var(--text-muted); }
+.move-list .move-cell { border-radius: 8px; transition: background-color 0.14s ease; }
+.move-list .move-cell:hover { background: var(--bg-muted); }
+.move-list .move-cell.current { background: var(--bg-muted); color: var(--text-primary); }
+
+/* Advantages/accuracy stats card */
+.accuracy-stat .stat-num,
+.stat-large,
+.review-summary .accuracy {
+  color: var(--text-primary);
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+/* =============================================================================
+ * HOME PAGE  — premium hero + stat cards + feature grid
+ * ========================================================================== */
+.home-import-card {
+  box-shadow: var(--shadow-lg);
+}
+.home-import-title {
+  color: var(--text-primary);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.home-import-sub { color: var(--text-muted); }
+.home-stat-value {
+  color: var(--text-primary);
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 800;
+}
+.home-stat-label,
+.home-about-text,
+.feature-card p {
+  color: var(--text-muted);
+}
+.feature-card strong { color: var(--text-primary); }
+.feature-icon {
+  color: var(--accent);
+}
+.apple-brand-name { color: var(--text-primary); font-weight: 700; }
+
+/* =============================================================================
+ * SETTINGS  — theme/piece chips go premium
+ * ========================================================================== */
+.theme-chip,
+.piece-set-chip {
+  border-radius: 14px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow);
+  transition: box-shadow 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+.theme-chip:hover,
+.piece-set-chip:hover {
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
+}
+
+/* =============================================================================
+ * AUTH / ACCOUNT / LEGAL  — centered panels, premium form look
+ * ========================================================================== */
+.auth-container,
+.account-container,
+.boost-panel,
+.contact-container {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-lg);
+}
+
+/* =============================================================================
+ * COACH CHAT  — calm cream chat bubbles
+ * ========================================================================== */
+.coach-chat-messages,
+.chat-message {
+  background: transparent;
+}
+.chat-message.user {
+  background: var(--bg-muted);
+  border-radius: 14px 14px 4px 14px;
+}
+.chat-message.coach {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: 14px 14px 14px 4px;
+}
+
+/* =============================================================================
+ * PUZZLES  — refined sidebar + rating badge
+ * ========================================================================== */
+.puzzle-rating,
+.puzzle-sidebar h2 {
+  color: var(--text-primary);
+}
+.puzzle-embed .board-wrapper { box-shadow: var(--shadow-lg); }
+
+/* =============================================================================
+ * TOASTS / POPUPS / MODALS  — cream premium dialogs
+ * ========================================================================== */
+.toast,
+.popup,
+.modal {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-xl);
+}
+
+/* =============================================================================
+ * SCROLLBAR (refined, warm)
+ * ========================================================================== */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: #d8cfba;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: #c4b99f; background-clip: content-box; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* =============================================================================
+ * ACCESSIBILITY  — strong focus rings, readable selection, reduced motion
+ * ========================================================================== */
+::selection { background: rgba(58, 51, 38, 0.18); }
+
+/* High-contrast, always-visible focus ring for keyboard users. */
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* =============================================================================
+ * PANEL REDESIGN  — responsive, nothing hidden or clipped, smooth on mobile
+ * and desktop. Targets the analysis panels (puzzle, coach, anticheat, review)
+ * and their internal grids so they adapt fluidly instead of squashing.
+ * ========================================================================== */
+
+/* Give the analysis column more breathing room on mobile: the production
+   main-content padding (16px sides) + app padding (20px sides) left panels
+   only ~270px wide on a 390px phone. Tighten the gutters so panels fill. */
+@media (max-width: 640px) {
+  #app { padding-left: 12px; padding-right: 12px; }
+  .main-content { padding-left: 10px; padding-right: 10px; }
+  .analysis-shell { width: 100%; }
+}
+
+/* --- Puzzle card: fluid internal grids that never clip --- */
+.puzzle-card {
+  display: grid;
+  gap: 14px;
+}
+/* Meta stats: 2-up on narrow, 4-up on wide — never a cramped single column
+   that hides the streak/goal. */
+.puzzle-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+/* Controls: primary button full-width, secondary actions wrap cleanly. */
+.puzzle-controls {
+  display: grid;
+  gap: 10px;
+}
+.puzzle-controls-secondary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+/* Level chips: fluid — 4-up when wide, wraps to 2-up when the card is
+   narrow (desktop analysis column ~360px), never a cramped 4-up stack. */
+.puzzle-level-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+/* Level embed: preview + meta side by side, meta never clipped. */
+.puzzle-level-embed {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 12px;
+  align-items: center;
+}
+.puzzle-level-embed-meta {
+  min-width: 0;
+}
+.puzzle-level-embed-meta span {
+  overflow-wrap: break-word;
+}
+/* Filters: full-width selects, never clipped. */
+.puzzle-filters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+.puzzle-filters .field,
+.puzzle-controls .field { min-width: 0; }
+
+/* --- Review / coach / anticheat panels: fluid, no clipping --- */
+.analysis-overview {
+  display: grid;
+  gap: 14px;
+}
+/* Opening info: header + stats + controls stack cleanly, name wraps. */
+.analysis-overview .opening-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.opening-name { overflow-wrap: anywhere; }
+.opening-stats { flex-wrap: wrap; }
+.opening-controls { min-width: 0; }
+.opening-filters { flex-wrap: wrap; }
+
+/* Anticheat source cards: fluid grid, never squished. */
+.anticheat-sources {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.anticheat-source-card { min-width: 0; }
+
+/* --- Saved reviews list (anticheat page) --- */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spinner-rotate 0.8s linear infinite;
+  vertical-align: -2px;
+}
+.anticheat-saved { margin-top: 18px; }
+.anticheat-saved-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.anticheat-saved-header h3 { margin: 0; }
+.anticheat-saved-list { display: flex; flex-direction: column; gap: 8px; }
+.anticheat-saved-empty {
+  padding: 14px 16px;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+.anticheat-saved-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel, #ffffff);
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.anticheat-saved-item:hover {
+  background: var(--bg-muted, #ebeef2);
+  border-color: var(--accent);
+}
+.anticheat-saved-icon {
+  flex: 0 0 auto;
+  font-size: 22px;
+  color: var(--accent);
+}
+.anticheat-saved-icon-running { color: var(--text-secondary); }
+.anticheat-saved-icon-error { color: var(--danger, #e5484d); }
+.anticheat-saved-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.anticheat-saved-title { font-weight: 600; font-size: 0.95rem; }
+.anticheat-saved-meta { font-size: 0.8rem; color: var(--text-secondary); }
+.anticheat-saved-side { flex: 0 0 auto; }
+.anticheat-saved-time { flex: 0 0 auto; font-size: 0.75rem; color: var(--text-secondary); }
+.anticheat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.anticheat-badge.done { background: var(--accent, #2a3340); color: var(--accent-contrast, #ffffff); }
+.anticheat-badge.running { background: var(--bg-muted, #ebeef2); color: var(--text-secondary); }
+.anticheat-badge.error { background: rgba(229, 72, 77, 0.16); color: var(--danger, #e5484d); }
+
+/* --- Anticheat report page — share the polished "waiting" card look --- */
+.anticheat-report-gauge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: var(--bg-muted, #ebeef2);
+  margin: 4px 0 14px;
+}
+.anticheat-report-gauge.low { background: rgba(46, 160, 67, 0.14); color: #1a7f37; }
+.anticheat-report-gauge.medium { background: rgba(191, 134, 22, 0.16); color: #9a6700; }
+.anticheat-report-gauge.high { background: rgba(207, 34, 46, 0.14); color: #cf222e; }
+.anticheat-report-score { font-size: 1.5rem; font-weight: 700; line-height: 1; }
+.anticheat-report-max { font-size: 0.85rem; color: var(--text-muted, #5e6678); margin-top: 4px; }
+.anticheat-report-level { font-size: 0.8rem; font-weight: 700; text-transform: capitalize; margin-left: 4px; }
+.anticheat-headline {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-primary, #1a2030);
+  margin: 10px 0 6px;
+}
+.anticheat-explanation {
+  color: var(--text-secondary, #3c4458);
+  line-height: 1.55;
+  margin: 0 0 14px;
+}
+.anticheat-report-games { display: grid; gap: 8px; margin-top: 6px; }
+.anticheat-report-games h4 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #5e667a);
+  margin: 6px 0 2px;
+}
+.anticheat-game-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color, #dde1e7);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel, #ffffff);
+}
+.anticheat-game-title { font-weight: 600; color: var(--text-primary, #1a2030); }
+.anticheat-game-meta { display: inline-flex; gap: 8px; align-items: center; color: var(--text-muted, #5e667a); font-size: 0.85rem; }
+.anticheat-game-note { color: var(--danger, #cf222e); }
+.anticheat-report-empty {
+  padding: 14px 16px;
+  color: var(--text-secondary, #3c4458);
+  font-size: 0.9rem;
+  border: 1px dashed var(--border-color, #dde1e7);
+  border-radius: var(--radius-sm);
+}
+/* Running / error status pills match the premium accent, not the old blue. */
+.anticheat-report-running {
+  color: var(--accent, #2a3340);
+}
+.anticheat-report-running::before { background: var(--accent, #2a3340); }
+.anticheat-report-error { color: var(--danger, #cf222e); }
+@media (max-width: 480px) {
+  .anticheat-saved-item { flex-wrap: wrap; }
+  .anticheat-saved-time { width: 100%; padding-left: 34px; }
+}
+
+/* Coach chat: input + send always visible, never hidden. */
+.coach-chat-input {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.coach-chat-textarea { flex: 1; min-width: 0; }
+
+/* FIX: the history toggle should simply HIDE the sidebar, not collapse the
+   grid to `0 1fr` (which shrinks the chat pane to its min-content ~38px and
+   "breaks the page"). Hide the sidebar and let the main chat fill the shell. */
+.coach-chat-shell.sidebar-collapsed { grid-template-columns: 1fr; }
+.coach-chat-shell.sidebar-collapsed .coach-sidebar { display: none; }
+.coach-chat-main { min-width: 0; width: 100%; }
+.coach-chat-shell { min-width: 0; }
+
+/* --- Mobile refinements --- */
+@media (max-width: 640px) {
+  /* Puzzle meta: 2-up so streak/goal are always visible. */
+  .puzzle-meta-grid { grid-template-columns: repeat(2, 1fr); }
+  /* Level chips: 2-up on phones. */
+  .puzzle-level-row { grid-template-columns: repeat(2, 1fr); }
+  /* Level embed: stack preview above meta on very narrow screens. */
+  .puzzle-level-embed { grid-template-columns: 1fr; }
+  .puzzle-level-embed-preview { max-width: 120px; }
+  /* Secondary controls: 2-up so buttons aren't a tall single column. */
+  .puzzle-controls-secondary { grid-template-columns: repeat(2, 1fr); }
+/* Anticheat sources: single column on phones. */
+  .anticheat-sources { grid-template-columns: 1fr; }
+}
+
+/* =============================================================================
+ * BOARD CONTROLS LAYOUT  — flip + export beside the board, nav under it.
+ * The board-section is a grid: left column = board stack (player-top, board,
+ * player-bottom), right column = side controls (flip/export), and the nav
+ * controls (start/prev/next/end/auto/reset) span full width below.
+ * ========================================================================== */
+.board-section {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "board side"
+    "nav nav";
+  gap: 12px;
+  align-items: start;
+}
+/* Board stack: player-top, board-wrapper, player-bottom flow in the board col. */
+.board-wrapper { grid-area: board; }
+.player-info.player-top { grid-area: board; align-self: start; }
+.player-info.player-bottom { grid-area: board; align-self: end; }
+/* Side controls (flip/export) sit beside the board. */
+.board-controls-side { grid-area: side; align-self: center; }
+/* Nav controls span full width under the board. */
+.board-controls-nav { grid-area: nav; }
+.board-controls {
+  display: contents; /* let the two groups place into the grid areas */
+}
+.board-controls-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.board-controls-nav {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  width: 100%;
+}
+/* Icon-only controls (flip / export / reset) beside the board: square, no label. */
+.board-controls-side .btn-icon-only {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+}
+
+/* Mobile: stack everything — side controls become a row above the nav. */
+@media (max-width: 640px) {
+  .board-section {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "board"
+      "side"
+      "nav";
+  }
+  .board-controls-side {
+    flex-direction: row;
+    justify-content: center;
+    width: 100%;
+  }
+  .board-controls-nav {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* ── Sidebar Notifications section ─────────────────────────────
+   Replaces the old header dropdown panel. Renders into the fixed
+   sidebar; the header bell is now a shortcut that opens the drawer
+   (a no-op on desktop where the sidebar is always visible). */
+.sc-sidebar-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-right: 4px;
+}
+.sc-sidebar-section-head .sc-sidebar-label {
+  padding: 14px 12px 6px;
+  margin: 0;
+}
+.sc-notification-mark-all {
+  font-size: 0.68rem;
+  color: var(--accent, #2a3340);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sc-notification-mark-all:hover {
+  background: var(--bg-muted);
+}
+.sc-notification-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(42vh, 320px);
+  overflow-y: auto;
+  padding: 2px;
+}
+.sc-notification-list .notification-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 10px;
+  border-radius: var(--radius-sm, 12px);
+  border-bottom: 0;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: background-color 0.15s ease;
+}
+.sc-notification-list .notification-item:hover {
+  background: var(--bg-muted);
+}
+.sc-notification-list .notification-item-unread {
+  background: rgba(42, 51, 64, 0.05);
+  font-weight: 600;
+}
+.sc-notification-list .notification-item-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: var(--accent, #2a3340);
+}
+.sc-notification-list .notification-item-unread .notification-item-dot {
+  background: #2f7a4d;
+}
+.sc-notification-list .notification-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.sc-notification-list .notification-item-title {
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+.sc-notification-list .notification-item-text {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+.sc-notification-list .notification-item-time {
+  font-size: 0.66rem;
+  color: var(--text-muted);
+}
+.sc-notification-empty {
+  padding: 10px 12px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.sc-sidebar-notifications.is-highlighted {
+  outline: 1px solid var(--border-color, #dde1e7);
+  border-radius: var(--radius-sm, 12px);
+}
+
+/* Unread count pill on the sidebar "Notifications" label */
+.sc-sidebar-badge {
+  display: inline-block;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  padding: 0 6px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: var(--accent, #2a3340);
+  color: var(--accent-contrast, #fff);
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-align: center;
+  vertical-align: middle;
+}
+.sc-sidebar-badge[hidden] { display: none; }
+
+/* Delete button on each notification item */
+.sc-notification-list .notification-item-delete {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+.sc-notification-list .notification-item:hover .notification-item-delete,
+.sc-notification-list .notification-item-delete:focus-visible {
+  opacity: 1;
+}
+.sc-notification-list .notification-item-delete:hover {
+  background: rgba(210, 60, 60, 0.12);
+  color: #c0392b;
+}
+.sc-notification-list .notification-item-delete .material-symbols-outlined {
+  font-size: 14px;
+  width: 14px;
+  height: 14px;
+  line-height: 14px;
+}
+
+/* Squircle pass — rounder, softer buttons across the app. */
+.btn,
+.btn-primary,
+.btn-secondary,
+.btn-ghost {
+  border-radius: var(--radius-sm);
+}
+.page-card,
+.card {
+  border-radius: var(--card-radius);
+}
+.input-select,
+.switch-row,
+.apple-nav-toggle {
+  border-radius: var(--radius-sm);
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
