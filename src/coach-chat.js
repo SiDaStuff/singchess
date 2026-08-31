@@ -330,23 +330,37 @@
         try { const j = await response.json(); msg = j.error || msg; } catch (_) {}
         throw new Error(msg);
       }
+      // Speed: throttled markdown render. Rendering the WHOLE markdown on every
+      // SSE token is O(n²) and janks on long replies — cap it to ~4 frames/s
+      // (every ~60ms) while the reply streams; the final full render happens in
+      // onDone so the finished bubble is always exact.
+      let pendingRender = null;
+      const scheduleRender = () => {
+        if (pendingRender) return;
+        pendingRender = setTimeout(() => {
+          pendingRender = null;
+          if (assistantEl) {
+            assistantEl.innerHTML = renderMarkdown(assistantText);
+            scrollMessages();
+          }
+        }, 60);
+      };
       await readStream(response, {
         onInit: (data) => { if (data && data.pid) state.chatPid = data.pid; },
         onToken: (t) => {
           if (!assistantEl) { skeleton?.remove(); hideTyping(); assistantEl = buildBubble('assistant', ''); assistantEl.classList.add('streaming'); el['coach-chat-messages'].appendChild(assistantEl); }
           assistantText += t;
-          // Re-render markdown progressively (cheap for short replies).
-          assistantEl.innerHTML = renderMarkdown(assistantText);
-          scrollMessages();
+          scheduleRender();
         },
         onToolCall: (call) => handleBrowserTool(call),
         onToolStatus: ({ label }) => showTyping(label),
         onToolResultVisible: ({ name, summary }) => { hideTyping(); appendToolCard(name, summary); },
         onDone: (data) => {
+          if (pendingRender) { clearTimeout(pendingRender); pendingRender = null; }
           skeleton?.remove();
           hideTyping();
           if (el['coach-chat-messages']) el['coach-chat-messages'].setAttribute('aria-busy', 'false');
-          if (assistantEl) assistantEl.classList.remove('streaming');
+          if (assistantEl) { assistantEl.innerHTML = renderMarkdown(assistantText); assistantEl.classList.remove('streaming'); }
           const cleaned = assistantText || '';
           if (!cleaned) { appendBubble('error', 'No response.'); }
           else {
@@ -667,8 +681,54 @@
     d.innerHTML = `<span class="material-symbols-outlined">${icon}</span><span>${escapeHtml(summary)}</span>`;
     el['coach-chat-messages'].appendChild(d); scrollMessages();
   }
-  function showTyping(label) { el['coach-typing-text'] && (el['coach-typing-text'].textContent = label || 'Coach is thinking…'); el['coach-typing'] && (el['coach-typing'].hidden = false); }
-  function hideTyping() { el['coach-typing'] && (el['coach-typing'].hidden = true); }
+  // ── "Thinking" indicator ───────────────────────────────────────────────
+// A visible, reason-aware indicator while the coach is working: a spinner icon
+// plus animated dots that cycle while the model reasons or calls tools. The
+// label is updated to reflect what the coach is actually doing (verifying with
+// Stockfish, searching the web, thinking) so it's never just a dead "…".
+  let thinkingTimer = null;
+  let dotsTimer = null;
+  let dotsCount = 0;
+  const TYPING_BASE_LABELS = {
+    coach: 'Coach is thinking',
+    stockfish: 'Checking with Stockfish',
+    search: 'Searching the web',
+    lichess: 'Checking Lichess',
+    plan: 'Checking your plan',
+  };
+
+  function showTyping(label) {
+    const textEl = el['coach-typing-text'];
+    const dotsEl = el['coach-typing-dots'];
+    if (el['coach-typing']) el['coach-typing'].hidden = false;
+    // Update the base label text (keep the animated dots span as its child).
+    if (textEl) {
+      let base = label
+        || (TYPING_BASE_LABELS[label] ? TYPING_BASE_LABELS[label] : null)
+        || 'Coach is thinking';
+      // Strip a trailing ellipsis / dots from the incoming label — the animated
+      // dots span owns the ellipsis, so we don't double up ("thinking……").
+      base = String(base).replace(/(?:\.\.\.|…|\s+)$/g, '');
+      // Only replace the label text node, never the dots span.
+      textEl.firstChild && (textEl.firstChild.textContent = base);
+    }
+    if (dotsEl) {
+      // Cycle dots 0 → … → ……
+      dotsCount = 0;
+      clearInterval(dotsTimer);
+      dotsTimer = setInterval(() => {
+        dotsCount = (dotsCount + 1) % 4;
+        dotsEl.textContent = '.'.repeat(dotsCount);
+      }, 350);
+    }
+  }
+
+  function hideTyping() {
+    clearInterval(dotsTimer); dotsTimer = null;
+    const dotsEl = el['coach-typing-dots'];
+    if (dotsEl) dotsEl.textContent = '';
+    if (el['coach-typing']) el['coach-typing'].hidden = true;
+  }
   function autoGrow() { const ta = el['coach-chat-textarea']; if (!ta) return; ta.style.height = 'auto'; ta.style.height = Math.min(120, ta.scrollHeight) + 'px'; }
 
   // Stop/abort the in-flight stream (user clicked the Stop button).

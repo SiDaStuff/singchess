@@ -1157,6 +1157,9 @@ body.in-app-route .header { display: flex !important; }
 .coach-typing:not([hidden]) { display: inline-flex; }
 .coach-typing-icon { font-size: 1rem; color: var(--text-secondary); animation: coachSpin 0.8s linear infinite; }
 @keyframes coachSpin { to { transform: rotate(360deg); } }
+/* Animated dots after the "thinking" label (driven by a fixed-width span the
+   JS updates so it works in every browser). */
+.coach-typing-dots { display: inline-block; width: 1.2em; text-align: left; letter-spacing: 0.1em; }
 .coach-chat-input { display: flex; gap: 8px; align-items: flex-end; border-top: 1px solid var(--border-soft); padding-top: 12px; }
 .coach-chat-textarea { flex: 1; min-width: 0; resize: none; max-height: 120px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: var(--radius); background: var(--bg-page); color: var(--text-primary); font: inherit; font-size: 0.9rem; line-height: 1.4; }
 .coach-chat-textarea:focus { outline: none; border-color: var(--text-muted); }

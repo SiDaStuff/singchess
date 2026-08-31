@@ -179,6 +179,14 @@ async function callNvidia({ opts, model }) {
     err.model = model;
     err.statusCode = res.status;
     err.code = 'llm_provider_error';
+    // Quota/exhaustion signals mean this model is OUT — don't bother retrying
+    // it (the fallback model should be tried immediately). NVIDIA returns 429
+    // with details like "quota" / "exceeded" / "rate", and a 503 when the model
+    // is temporarily unavailable. Either is the signal to fail over fast.
+    const rejectedForQuota = res.status === 429
+      || (res.status === 503)
+      || /quota|exhaust|exceed|rate|temporarily|unavailable/i.test(detail.slice(0, 400));
+    if (res.status === 429 || res.status === 503 || rejectedForQuota) err.quotaExhausted = true;
     throw err;
   }
   return res;
@@ -197,9 +205,10 @@ function isRetryable(err) {
 }
 
 // chatCompletion tries each model in nvidiaModelList() in order (120b first,
-// then 20b), retrying each on transient errors before failing over to the next.
-// `opts.model` is accepted for back-compat but IGNORED — the tier no longer
-// exists; the model list fully governs. Returns the winning Response.
+// then 20b). Goal is SPEED: on a quota-exhaustion/rate-limit error from a model
+// we fail over to the next model IMMEDIATELY (no retry backoff on the one that
+// is out) so the user isn't stuck waiting while 120b restarts. `opts.model` is
+// accepted for back-compat but IGNORED — the model list fully governs.
 async function chatCompletion(opts) {
   if (!keySet('NVIDIA_API_KEY')) {
     const err = new Error('No LLM provider configured (set NVIDIA_API_KEY).');
@@ -209,22 +218,34 @@ async function chatCompletion(opts) {
   const models = nvidiaModelList();
 
   let lastErr;
+  // Whether the PREVIOUS model was quota-exhausted. If so, we skip retrying it
+  // and fail over to the next model immediately — that's the whole point of the
+  // 120b→20b fallback being fast when 120b "runs out".
   for (const model of models) {
-    for (let attempt = 1; attempt <= PROVIDER_RETRIES; attempt++) {
+    if (lastErr && lastErr.quotaExhausted) {
+      console.warn(`[llm] nvidia/${lastErr.model} quota-exhausted; failing over to ${model} immediately (speed).`);
+      try { return await callNvidia({ opts, model }); } catch (err) { lastErr = err; continue; }
+    }
+    let tried = 0;
+    for (; tried < PROVIDER_RETRIES; tried++) {
       try {
         return await callNvidia({ opts, model });
       } catch (err) {
         lastErr = err;
-        if (attempt < PROVIDER_RETRIES && isRetryable(err)) {
-          console.warn(`[llm] nvidia/${model} attempt ${attempt}/${PROVIDER_RETRIES} failed (${err.statusCode}); retrying…`);
-          await sleep(RETRY_DELAY_MS * attempt);
-          continue;
+        const applyNoRetry = !isRetryable(err) || err.quotaExhausted;
+        if (tried < PROVIDER_RETRIES - 1 && !applyNoRetry) {
+          const wait = RETRY_DELAY_MS * (tried + 1);
+          console.warn(`[llm] nvidia/${model} attempt ${tried + 1}/${PROVIDER_RETRIES} failed (${err.statusCode}); retrying in ${wait}ms…`);
+          await sleep(wait);
+        } else {
+          // Quota error or exhausted retries → move to the next model now.
+          break;
         }
-        break; // exhausted retries → failover to the next (cheaper) model
       }
     }
-    const next = models.indexOf(model) < models.length - 1;
-    console.warn(`[llm] nvidia/${model} failed after retries; ${next ? 'falling back' : 'no more models'}.`);
+    if (tried > 0) {
+      console.warn(`[llm] nvidia/${model} gave up; ${models.indexOf(model) < models.length - 1 ? 'failing over' : 'no more models'}.`);
+    }
   }
   throw lastErr || new Error('All LLM models on NVIDIA failed.');
 }
