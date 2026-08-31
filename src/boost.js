@@ -167,9 +167,10 @@
   }
 
   function renderBoostState(user, me) {
-    // The pricing tiers are always visible — even to signed-out visitors — so
-    // the upgrade page is informative on every visit.
-    if (elAuthRequired) elAuthRequired.hidden = true;
+    // Signed-out visitors: show a clear path to sign in / create an account,
+    // alongside the pricing info. The auth panel was bound but permanently
+    // hidden before, so a guest could never act on the upgrade call-to-action.
+    if (elAuthRequired) elAuthRequired.hidden = !!(user && me);
     if (elContent) elContent.hidden = false;
     if (elStatusContainer) elStatusContainer.hidden = true;
 
@@ -179,6 +180,14 @@
       const el = document.getElementById(`plan-tier-current-${key}`);
       if (el) el.hidden = plan.plan !== key;
     });
+
+    // Don't offer an upgrade-to-itself CTA on the plan the user already owns —
+    // a Boost subscriber shouldn't see "Contact us to upgrade" (to Boost) beside
+    // their "Your plan" chip on the same card.
+    if (user && me && (plan.plan === 'boost' || plan.plan === 'max')) {
+      const subscribedCta = document.getElementById(plan.plan === 'boost' ? 'btn-boost-subscribe' : 'btn-max-subscribe');
+      if (subscribedCta) subscribedCta.hidden = true;
+    }
 
     if (!user || !me) return;
 

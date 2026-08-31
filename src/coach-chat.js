@@ -94,10 +94,15 @@
     if (state.streaming) return;
     state.chats = state.chats.filter((c) => c.id !== id);
     if (state.activeId === id) state.activeId = state.chats[0] ? state.chats[0].id : null;
-    if (!state.chats.length) { createChat(); return; }
+    const hadChats = state.chats.length > 0;
+    if (!state.chats.length) { createChat(); }
     saveChats();
     renderSidebar();
     renderMessages();
+    // Restore keyboard focus after the deleted row is removed from the DOM —
+    // otherwise focus falls to <body>. Move it to "New chat" (always present).
+    const newChatBtn = el['btn-coach-new-chat'];
+    if (newChatBtn && typeof newChatBtn.focus === 'function') newChatBtn.focus();
   }
 
   // ── Rendering ────────────────────────────────────────────────────────
@@ -288,6 +293,10 @@
     scrollMessages();
 
     state.streaming = true;
+    applyLockedState(); // disable the textarea + send while the reply streams
+    // Screen readers: mark the live region busy so intermediate markdown
+    // re-renders aren't announced as complete messages.
+    if (el['coach-chat-messages']) el['coach-chat-messages'].setAttribute('aria-busy', 'true');
     if (app && typeof app._setBusyAction === 'function') app._setBusyAction('coach');
     el['coach-chat-card']?.querySelector('.coach-chat-main')?.classList.add('busy');
     el['btn-coach-send'] && (el['btn-coach-send'].disabled = true);
@@ -337,6 +346,7 @@
         onDone: (data) => {
           skeleton?.remove();
           hideTyping();
+          if (el['coach-chat-messages']) el['coach-chat-messages'].setAttribute('aria-busy', 'false');
           if (assistantEl) assistantEl.classList.remove('streaming');
           const cleaned = assistantText || '';
           if (!cleaned) { appendBubble('error', 'No response.'); }
@@ -352,6 +362,7 @@
       });
     } catch (err) {
       skeleton?.remove();
+      if (el['coach-chat-messages']) el['coach-chat-messages'].setAttribute('aria-busy', 'false');
       hideTyping();
       if (err && err.name === 'AbortError') {
         // User clicked Stop (save partial) vs 180s timeout (show error).
@@ -384,6 +395,7 @@
       clearTimeout(timeout);
       state.streaming = false;
       state.abortController = null;
+      applyLockedState(); // re-enable the textarea/send now that streaming ended
       if (app && typeof app._setBusyAction === 'function') app._setBusyAction(null);
       el['coach-chat-card']?.querySelector('.coach-chat-main')?.classList.remove('busy');
       el['btn-coach-send'] && (el['btn-coach-send'].disabled = false);
@@ -701,9 +713,20 @@
       const isStrong = b.dataset.model === 'strong';
       const allowed = !isStrong || canUseStrong();
       b.setAttribute('aria-pressed', String(b.dataset.model === state.model));
-      b.disabled = !allowed;
-      b.classList.toggle('locked', !allowed);
-      b.title = allowed ? '' : 'Strong model is a Boost feature';
+      // Keep the Strong button focusable & clickable even when not allowed, so
+      // clicking it can fire the upgrade nudge (a `disabled` button never fires
+      // clicks, which is why flashStrongLocked was previously unreachable). Use
+      // aria-disabled + a lock class for the "not available" state instead.
+      b.disabled = false;
+      if (allowed) {
+        b.setAttribute('aria-disabled', 'false');
+        b.classList.remove('locked');
+        b.title = '';
+      } else {
+        b.setAttribute('aria-disabled', 'true');
+        b.classList.add('locked');
+        b.title = 'Strong model is a Boost feature';
+      }
     });
   }
   function flashStrongLocked() {
@@ -795,9 +818,12 @@
     const reviewRunning = app && typeof app._isBusyWithHeavyAction === 'function' && app.busyAction === 'review';
     const locked = isLocked();
     if (ta) {
-      ta.disabled = locked || reviewRunning;
+      // Disable during streaming too, so typing "silently dies" on Enter isn't
+      // possible — the user can't send a second message until the first finishes.
+      ta.disabled = locked || reviewRunning || state.streaming;
       if (locked) ta.placeholder = 'This conversation has been ended.';
       else if (reviewRunning) ta.placeholder = 'A game review is running. Wait for it to finish.';
+      else if (state.streaming) ta.placeholder = 'Waiting for the coach to finish…';
       else ta.placeholder = 'Ask the coach anything about chess…';
     }
     if (send) send.disabled = locked || state.streaming || reviewRunning;

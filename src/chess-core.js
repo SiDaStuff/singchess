@@ -6,9 +6,9 @@
 const MoveClassification = Object.freeze({
   BRILLIANT: { key: 'BRILLIANT', name: 'Brilliant', symbol: '!!', color: '#27c2a2', icon: 'brillant', iconType: 'image', description: 'The best move — and a hard one to find!' },
   GREAT: { key: 'GREAT', name: 'Great', symbol: '!', color: '#749ac0', icon: 'great', iconType: 'image', description: 'A move that altered the course of the game!' },
-  BEST: { key: 'BEST', name: 'Best', symbol: '★', color: '#82b64c', icon: 'best', iconType: 'image', description: "The chess engine's top choice" },
+  BEST: { key: 'BEST', name: 'Best', symbol: '★', color: '#3eb08a', icon: 'best', iconType: 'image', description: "The chess engine's top choice" },
   EXCELLENT: { key: 'EXCELLENT', name: 'Excellent', symbol: '👍', color: '#82b64c', icon: 'excellent', iconType: 'image', description: 'Almost as good as the Best move' },
-  GOOD: { key: 'GOOD', name: 'Good', symbol: '✓', color: '#a6cf7c', icon: 'good', iconType: 'image', description: 'A decent move, but not the best' },
+  GOOD: { key: 'GOOD', name: 'Good', symbol: '✓', color: '#a8cf83', icon: 'good', iconType: 'image', description: 'A decent move, but not the best' },
   BOOK: { key: 'BOOK', name: 'Book', symbol: '📖', color: '#d5a47d', icon: 'book', iconType: 'image', description: 'A conventional opening move' },
   INACCURACY: { key: 'INACCURACY', name: 'Inaccuracy', symbol: '?!', color: '#f7c631', icon: 'inaccuracy', iconType: 'image', description: 'A weak move' },
   MISTAKE: { key: 'MISTAKE', name: 'Mistake', symbol: '?', color: '#ffa459', icon: 'mistake', iconType: 'image', description: 'A bad move that immediately worsens your position' },

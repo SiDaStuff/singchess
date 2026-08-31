@@ -13,6 +13,7 @@ class ChessBoard {
     this.annotationPointer = null;
     this.selectedSquare = null;
     this.legalMoves = [];
+    this.checkSquare = null; // set by the app when a side is in check
     this.onMove = null; // callback(from, to)
     this.onFlip = null;
     this.interactive = false;
@@ -208,6 +209,10 @@ class ChessBoard {
 
   // Update board display
   _render() {
+    // Make the board a semantic, keyboard-navigable grid for assistive tech and
+    // keyboard users alike (WCAG 2.1.1 / 2.1.2 / 4.1.2).
+    this.container.setAttribute('role', 'grid');
+    this.container.setAttribute('aria-label', 'Chess board');
     this.container.innerHTML = '';
     for (let row = 0; row < 8; row++) {
       for (let col = 0; col < 8; col++) {
@@ -221,6 +226,10 @@ class ChessBoard {
         const div = document.createElement('div');
         div.className = `square ${isLight ? 'light' : 'dark'}`;
         div.dataset.square = sq;
+        div.setAttribute('role', 'gridcell');
+        div.setAttribute('tabindex', '0');
+        div.setAttribute('aria-label', `Square ${file}${rank}`);
+        div.addEventListener('keydown', (e) => this._onSquareKeyDown(sq, e));
 
         // Coordinate labels
         if (col === 0) {
@@ -271,7 +280,18 @@ class ChessBoard {
 		          if (fallback && img.src !== fallback) img.src = fallback;
 		        };
 		        img.draggable = false;
+		        // Accessible name for the piece so a screen reader enumerates the
+		        // board ("White knight on g1"). The sharing/screenshot PNG is
+		        // decorative; the individual SVG gets its own name.
+		        img.alt = this._describePiece(piece);
+		        img.setAttribute('role', 'img');
+		        img.setAttribute('aria-label', this._describePiece(piece));
 		        sqEl.appendChild(img);
+		        // Reflect the piece in the square's accessible name too, so arrow-key
+		        // navigation announces "White knight on g1".
+		        sqEl.setAttribute('aria-label', `${this._describePiece(piece)} on ${sq}`);
+		      } else if (sqEl) {
+		        sqEl.setAttribute('aria-label', `Square ${sq}`);
 		      }
 	    });
 	    this.changedSquares = [];
@@ -280,7 +300,7 @@ class ChessBoard {
 	  _updateHighlights() {
 	    const squares = this.container.querySelectorAll('.square');
 		    squares.forEach(sqEl => {
-			      sqEl.classList.remove('highlight', 'selected', 'best-from', 'best-to', 'has-piece', 'inverted');
+			      sqEl.classList.remove('highlight', 'selected', 'best-from', 'best-to', 'has-piece', 'inverted', 'in-check');
 	      sqEl.style.removeProperty('--move-highlight-color');
 	      sqEl.style.removeProperty('--move-highlight-ring');
 	      // Remove legal dots
@@ -288,7 +308,14 @@ class ChessBoard {
 	      if (dot) dot.remove();
 	    });
 
-	    // Apply highlights
+	    // King in check — a red square so the threat is visible at a glance even
+    // without sound, and for review/puzzle playback.
+    if (this.checkSquare) {
+      const checkEl = this.container.querySelector(`[data-square="${this.checkSquare}"]`);
+      if (checkEl) checkEl.classList.add('in-check');
+    }
+
+    // Apply highlights
 		    this.invertedSquares.forEach((square) => {
 		      const sqEl = this.container.querySelector(`[data-square="${square}"]`);
 		      if (sqEl) sqEl.classList.add('inverted');
@@ -451,7 +478,61 @@ class ChessBoard {
 	    this._updateHighlights();
 	  }
 
-	  toggleInvertedSquare(sq) {
+	  
+  // Human-readable name for a piece code ("wK" → "White king"). Used as the
+  // accessible label on piece images and squares.
+  _describePiece(piece) {
+    if (!piece || typeof piece !== 'string' || piece.length < 2) return 'chess piece';
+    const color = piece[0] === 'b' ? 'Black' : 'White';
+    const names = { k: 'king', q: 'queen', r: 'rook', b: 'bishop', n: 'knight', p: 'pawn' };
+    return `${color} ${names[piece[1]] || 'piece'}`;
+  }
+
+  // Keyboard play: arrows move focus between squares, Enter/Space reuse the same
+  // select→commit flow as a mouse click. Keyboard input only works when the
+  // board is interactive (not during a passive review/puzzle playback).
+  _onSquareKeyDown(sq, e) {
+    if (!this.interactive || (e.ctrlKey || e.metaKey || e.altKey)) return;
+    const key = e.key;
+    if (key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight') {
+      e.preventDefault();
+      const next = this._squareByKey(sq, key);
+      if (next) {
+        const el = this.container.querySelector(`[data-square="${next}"]`);
+        if (el) el.focus();
+      }
+      return;
+    }
+    if (key === 'Enter' || key === ' ') {
+      e.preventDefault();
+      this._onSquareClick(sq);
+      // Keep focus on the originating cell so subsequent arrows/Enter keep working
+      // even after the board redraws.
+      const el = this.container.querySelector(`[data-square="${sq}"]`);
+      if (el && document.activeElement !== el) setTimeout(() => el.focus(), 0);
+      return;
+    }
+  }
+
+  // Arrow-key → adjacent square, respecting the visual flip. Keys are relative to
+  // the picture on screen (Up visually = toward rank 8 / rank 1 for white/black).
+  _squareByKey(sq, key) {
+    const f = sq.charCodeAt(0) - 97;      // 0..7 file (a..h)
+    const rn = parseInt(sq[1], 10);       // 1..8 rank
+    let nf = f, nr = rn;
+    // Chess-conventional navigation, independent of the visual flip: arrow keys
+    // move in file/rank space (Left → a-file side, Up → rank 8 side). This is
+    // non-ambiguous for chess players and stable whether or not the board flips.
+    if (key === 'ArrowLeft') nf = f - 1;
+    else if (key === 'ArrowRight') nf = f + 1;
+    else if (key === 'ArrowUp') nr = rn + 1;
+    else if (key === 'ArrowDown') nr = rn - 1;
+    else return null;
+    if (nf < 0 || nf > 7 || nr < 1 || nr > 8) return null;
+    return String.fromCharCode(97 + nf) + nr;
+  }
+
+  toggleInvertedSquare(sq) {
 	    if (!sq) return;
 	    if (this.invertedSquares.has(sq)) this.invertedSquares.delete(sq);
 	    else this.invertedSquares.add(sq);

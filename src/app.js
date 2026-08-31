@@ -5,6 +5,13 @@ class ChessReviewApp {
     this.engine = null;
     this.analyzer = new MoveAnalyzer();
     this.chess = new Chess();
+    // Modal focus management state (see _openDialog/_closeDialog).
+    this._dialogStack = [];
+    this._dialogLastFocus = null;
+    this._dialogKeyBound = false;
+    // Route-change focus management: skip the first render so app boot doesn't
+    // steal focus, then move focus to each page's h1 on navigation.
+    this._hasShownInitialRoute = false;
 		const _savedEngineSettings = (() => { try { const r = window.localStorage?.getItem('sidastuff.engineSettings'); return r ? JSON.parse(r) : {}; } catch (_) { return {}; } })();
 		// Back-compat: users saved before the strength tier existed have only
 		// legacy depthProfile/maxTimeMs. Migrate those onto the tier model so the
@@ -340,6 +347,8 @@ class ChessReviewApp {
     this.elSettingsForcedDepth = document.getElementById('settings-forced-depth');
     this.elSettingsForcedDepthField = document.getElementById('settings-forced-depth-field');
     this.elSettingsReviewStrength = document.getElementById('settings-review-strength');
+    this.elSettingsReviewStrengthChips = document.getElementById('settings-review-strength-chips');
+    this.elSettingsReviewStrengthNote = document.getElementById('settings-review-strength-note');
     this.elSettingsAdvancedToggle = document.getElementById('settings-advanced-toggle');
     this.elSettingsAdvancedEngine = document.getElementById('settings-advanced-engine');
     this.elBtnSaveEngineSettings = document.getElementById('btn-save-engine-settings');
@@ -351,6 +360,7 @@ class ChessReviewApp {
     this.elArrowColor = document.getElementById('settings-arrow-color');
     this.elHighlightColor = document.getElementById('settings-highlight-color');
     this.elPieceAnimations = document.getElementById('settings-piece-animations');
+	    this.elAnimSpeedGroup = document.getElementById('settings-anim-speed-group');
 	    this.elAnimSpeed = document.querySelector('input[name="settings-anim-speed"]:checked');
 	    this.elAnalysisLocation = document.getElementById('analysis-location');
 	    this.elServerBoostToggle = document.getElementById('server-boost-toggle');
@@ -584,7 +594,7 @@ class ChessReviewApp {
 		    this.elPageAccountSignin = document.getElementById('btn-page-account-signin');
 		    this.elPageAccountSignout = document.getElementById('btn-page-account-signout');
 		    this.elSettingsSummary = document.getElementById('settings-summary');
-		    this.elPageClearCache = document.getElementById('btn-page-clear-cache');
+		    this.elPageClearCache = document.getElementById('btn-clear-cache');
 		    // Notifications live in the sidebar (header icon was removed). These
 		    // refs drive the sidebar list + unread badge + mark-all button.
 		    this.elNotificationPanelBody = document.getElementById('sc-notification-list');
@@ -667,7 +677,7 @@ class ChessReviewApp {
 	    if (this.elServerStrongReview) this.elServerStrongReview.checked = !!this.engineSettings.serverStrongReview;
 	    // Populate the /settings page engine form with the saved values.
 	    if (this.elSettingsEngineModule) this.elSettingsEngineModule.value = this.engineSettings.module;
-	    if (this.elSettingsReviewStrength) this.elSettingsReviewStrength.value = this.engineSettings.reviewStrength || 'standard';
+	    this._syncSettingsStrengthChips();
 	    if (this.elSettingsAdvancedToggle) this.elSettingsAdvancedToggle.checked = this.engineSettings.advancedEngine === true;
 	    if (this.elSettingsEngineDepth) this.elSettingsEngineDepth.value = String(this.engineSettings.customDepth || 16);
 	    if (this.elSettingsEngineTimeout) this.elSettingsEngineTimeout.value = String(this.engineSettings.customTimeMs || 8000);
@@ -692,6 +702,43 @@ class ChessReviewApp {
     if (!this.elSettingsAdvancedEngine) return;
     const advanced = this.elSettingsAdvancedToggle ? this.elSettingsAdvancedToggle.checked : false;
     this.elSettingsAdvancedEngine.hidden = !advanced;
+  }
+
+  // Review-strength chips on /settings drive the hidden #settings-review-strength
+  // value-carrier and update the helper note. This was previously a hidden+disabled
+  // select that silently forced "standard"; now users can actually pick a tier.
+  _syncSettingsStrengthChips() {
+    const strength = this.engineSettings.reviewStrength || 'standard';
+    if (this.elSettingsReviewStrength) this.elSettingsReviewStrength.value = strength;
+    if (this.elSettingsReviewStrengthChips) {
+      const chip = this.elSettingsReviewStrengthChips.querySelector(`input[value="${strength}"]`);
+      if (chip) chip.checked = true;
+      if (!this.elSettingsReviewStrengthChips.dataset.bound) {
+        this.elSettingsReviewStrengthChips.addEventListener('change', (e) => {
+          if (e.target?.name !== 'settings-review-strength-chip') return;
+          this._onSettingsStrengthChipChange(e.target.value);
+        });
+        this.elSettingsReviewStrengthChips.dataset.bound = '1';
+      }
+    }
+    this._updateSettingsStrengthNote(strength);
+  }
+
+  _onSettingsStrengthChipChange(value) {
+    const strength = ['quick', 'standard', 'thorough'].includes(value) ? value : 'standard';
+    if (this.elSettingsReviewStrength) this.elSettingsReviewStrength.value = strength;
+    this.engineSettings.reviewStrength = strength;
+    this._updateSettingsStrengthNote(strength);
+  }
+
+  _updateSettingsStrengthNote(strength) {
+    if (!this.elSettingsReviewStrengthNote) return;
+    const notes = {
+      quick: 'Quick review favors speed (depth 12, ~3s per move).',
+      standard: 'Standard review balances speed and accuracy (depth 14).',
+      thorough: 'Thorough review is the most accurate (depth 18, ~8s per move).',
+    };
+    this.elSettingsReviewStrengthNote.textContent = notes[strength] || notes.standard;
   }
 
   // Show the "Forced Depth" row only when live deepening is OFF.
@@ -897,6 +944,20 @@ class ChessReviewApp {
       const speedEl = document.querySelector(`input[name="settings-anim-speed"][value="${saved.animSpeed}"]`);
       if (speedEl) speedEl.checked = true;
     }
+    // Hide the Animation Speed chooser when Piece Animations is off — a speed
+    // only matters if pieces animate. Wire once; keep it in sync with the saved
+    // value and with later toggles.
+    this._syncAnimSpeedVisibility();
+    if (this.elPieceAnimations && !this.elPieceAnimations.dataset.bound) {
+      this.elPieceAnimations.addEventListener('change', () => this._syncAnimSpeedVisibility());
+      this.elPieceAnimations.dataset.bound = '1';
+    }
+  }
+
+  _syncAnimSpeedVisibility() {
+    if (!this.elAnimSpeedGroup) return;
+    const on = !!(this.elPieceAnimations && this.elPieceAnimations.checked);
+    this.elAnimSpeedGroup.hidden = !on;
   }
 
   _applyAppearanceSettings(settings = null) {
@@ -1199,6 +1260,23 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    } else if (name === 'incompatible-browser' && this.elIncompatiblePanel) {
 		      this.elIncompatiblePanel.hidden = false;
 		    }
+
+    // Focus management on SPA route change (WCAG 2.4.3): move focus to the
+    // newly-shown page's h1 so a keyboard/screen-reader user lands at the top
+    // of the new content. Skip the very first render (app on-load) so focus
+    // isn't yanked before interaction.
+    if (this._hasShownInitialRoute) {
+      const target = document.querySelector(`#page-${name}`);
+      const pageEl = (target && !target.hidden) ? target : null;
+      if (pageEl && pageEl.querySelector) {
+        const h1 = pageEl.querySelector('h1');
+        if (h1) {
+          if (!h1.hasAttribute('tabindex')) h1.setAttribute('tabindex', '-1');
+          try { h1.focus({ preventScroll: true }); } catch (_) { h1.focus(); }
+        }
+      }
+    }
+    this._hasShownInitialRoute = true;
 		  }
 
 	  // ── Onboarding wizard (multi-step signup) ─────────────────────────
@@ -1348,7 +1426,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
     }
   }
 
-		  // ── Public profile ────────────────────────────────────────────────
+  // ── Public profile ────────────────────────────────────────────────
 	  async _loadPublicProfile(username) {
 	    const show = (id, on) => { const el = document.getElementById(id); if (el) el.hidden = !on; };
 	    show('profile-loading', true); show('profile-not-found', false); show('profile-content', false);
@@ -2161,28 +2239,54 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		  }
 
 		  _injectClearSavedGamesButton() {
-		    // Clear saved coach chats (localStorage keys per-uid).
-		    const chatBtn = document.getElementById('btn-clear-coach-chats');
-		    if (chatBtn && !chatBtn.dataset.bound) {
-		      chatBtn.addEventListener('click', () => {
-		        // Remove all sidastuff.coachChats.* + sidastuff.coachActiveChat.* keys.
-		        try {
-		          const keys = [];
-		          for (let i = 0; i < localStorage.length; i++) {
-		            const k = localStorage.key(i);
-		            if (k && (k.startsWith('sidastuff.coachChats.') || k.startsWith('sidastuff.coachActiveChat.'))) keys.push(k);
-		          }
-		          keys.forEach((k) => localStorage.removeItem(k));
-		        } catch (_) {}
-		        // Reload so the in-memory chat state is fully reset and any active
-		        // coach UI rebuilds from a clean slate.
-		        window.location.reload();
-		      });
-		      chatBtn.dataset.bound = '1';
-		    }
-		  }
+    // Shared runner that removes every saved coach-chat / coach-game key.
+    const clearCoachChats = () => {
+      try {
+        const keys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && (k.startsWith('sidastuff.coachChats.') || k.startsWith('sidastuff.coachActiveChat.'))) keys.push(k);
+        }
+        keys.forEach((k) => localStorage.removeItem(k));
+      } catch (_) {}
+    };
 
-		  async _handlePageEmailAuth(mode) {
+    // "Clear Saved Coach Chats" clears the coach chat history keys only.
+    const chatBtn = document.getElementById('btn-clear-coach-chats');
+    if (chatBtn && !chatBtn.dataset.bound) {
+      chatBtn.addEventListener('click', () => {
+        clearCoachChats();
+        window.location.reload();
+      });
+      chatBtn.dataset.bound = '1';
+    }
+
+    // "Clear Saved Games" was visible but never wired. Clears saved coach
+    // games/chats plus any cached PGN/board position, then resets the board.
+    const savedGamesBtn = document.getElementById('btn-clear-saved-games');
+    if (savedGamesBtn && !savedGamesBtn.dataset.bound) {
+      savedGamesBtn.addEventListener('click', () => {
+        clearCoachChats();
+        try { localStorage.removeItem('sidastuff.lastPosition'); } catch (_) {}
+        try {
+          const keys = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && /^sidastuff\.(review|game|position|pgn|history)/.test(k)) keys.push(k);
+          }
+          keys.forEach((k) => localStorage.removeItem(k));
+        } catch (_) {}
+        this._showPopup({
+          icon: 'success',
+          title: 'Saved games cleared',
+          text: 'Saved coach games and cached positions were removed.',
+        }).then(() => { setTimeout(() => { try { window.location.reload(); } catch (_) {} }, 250); });
+      });
+      savedGamesBtn.dataset.bound = '1';
+    }
+  }
+
+  async _handlePageEmailAuth(mode) {
 		    const isSignup = mode === 'signup';
 		    this._setAuthMode(isSignup ? 'signup' : 'signin');
 		    const statusEl = isSignup ? this.elSignupStatus : this.elLoginStatus;
@@ -3408,25 +3512,31 @@ _syncAccountUi() {
 	  }
 
 	  _renderNotificationItem(n) {
-	    const title = this._escapeHtml(n.title || 'Notification');
-	    const body = this._escapeHtml(n.body || '');
-	    const time = n.createdAt ? this._formatRelativeTime(n.createdAt) : '';
-	    const cls = n.read ? 'notification-item' : 'notification-item notification-item-unread';
-	    const link = n.link || '#';
-	    return `<a class="${cls}" data-id="${this._escapeHtml(n.id || '')}" data-link="${this._escapeHtml(link)}" href="${this._escapeHtml(link)}" data-route="${this._escapeHtml(link)}">
-	      <span class="notification-item-dot"></span>
-	      <span class="notification-item-body">
-	        <span class="notification-item-title">${title}</span>
-	        ${body ? `<span class="notification-item-text">${body}</span>` : ''}
-	        ${time ? `<span class="notification-item-time">${this._escapeHtml(time)}</span>` : ''}
-	      </span>
-	      <button type="button" class="notification-item-delete" data-id="${this._escapeHtml(n.id || '')}" title="Delete notification" aria-label="Delete notification">
-	        <span class="material-symbols-outlined">close</span>
-	      </button>
-	    </a>`;
-	  }
+    const title = this._escapeHtml(n.title || 'Notification');
+    const body = this._escapeHtml(n.body || '');
+    const time = n.createdAt ? this._formatRelativeTime(n.createdAt) : '';
+    const cls = n.read ? 'notification-item' : 'notification-item notification-item-unread';
+    const link = n.link || '#';
+    // Avoid interactive-inside-interactive: the row is a region whose navigate
+    // link and delete button are SIBLINGS (a <button> inside an <a> was invalid
+    // and broke tab semantics). aria-current marks the unread state so it is
+    // not colour-only.
+    return `<div class="${cls}" data-id="${this._escapeHtml(n.id || '')}" data-link="${this._escapeHtml(link)}"${n.read ? '' : ' aria-current="unread"'}>
+      <span class="notification-item-dot"${n.read ? '' : ' aria-label="Unread" role="img"'}></span>
+      <span class="notification-item-body">
+        <a class="notification-item-link" href="${this._escapeHtml(link)}" data-route="${this._escapeHtml(link)}">
+          <span class="notification-item-title">${title}</span>
+          ${body ? `<span class="notification-item-text">${body}</span>` : ''}
+          ${time ? `<span class="notification-item-time">${this._escapeHtml(time)}</span>` : ''}
+        </a>
+      </span>
+      <button type="button" class="notification-item-delete" data-id="${this._escapeHtml(n.id || '')}" title="Delete notification" aria-label="Delete notification">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>`;
+  }
 
-	  _formatRelativeTime(ts) {
+  _formatRelativeTime(ts) {
 	    const now = Date.now();
 	    const delta = now - Number(ts || 0);
 	    if (!Number.isFinite(delta) || delta < 0) return '';
@@ -3743,9 +3853,13 @@ if (this.elAnticheatReportStatus) {
       }
       const jobId = data.jobId;
       this._setAnticheatStatus(
-        `Background review started. You'll get a notification when it's done (up to ~6 minutes).`,
+        `Background review started. You'll get a notification when it's done. You can keep reviewing — other reviews pause this one temporarily.`,
         'success'
       );
+      // Refresh the saved-reviews list so the new running job shows up in the
+      // "In progress" section (with a live progress bar) instead of waiting for
+      // the next poll cycle.
+      this._loadAnticheatReports(true).catch(() => {});
       // Also push an optimistic in-app notification card so the user sees it
       // instantly without waiting for the server-side poll cycle.
       if (jobId) {
@@ -4270,7 +4384,7 @@ this._syncAnticheatForm();
 	      if (this.elAnticheatSavedList) {
 	        this.elAnticheatSavedList.innerHTML =
 	          `<div class="anticheat-saved-empty">Couldn't load saved reviews. <button type="button" class="btn btn-ghost btn-sm" data-ac-retry>Retry</button></div>`;
-	        const retry = this.elAnticheatSavedList.querySelector('[data-retry]');
+	        const retry = this.elAnticheatSavedList.querySelector('[data-ac-retry]');
 	        if (retry) retry.addEventListener('click', () => this._loadAnticheatReviews(true));
 	      }
 	    }
@@ -4500,10 +4614,13 @@ this._syncAnticheatForm();
 	      this.elEngineChoiceRecommendation.textContent = this._engineRecommendationText(selected);
 	    });
 	    this.elPromotionOptions?.addEventListener('click', (e) => {
-	      const button = e.target.closest?.('[data-piece]');
-	      if (button) this._finishPromotionChoice(button.dataset.piece);
-	    });
-	    this.elBtnImport.addEventListener('click', () => this._navigateTo('/review', { disableRestore: true }));
+      const button = e.target.closest?.('[data-piece]');
+      if (button) this._finishPromotionChoice(button.dataset.piece);
+    });
+    // The promotion dialog's close button (and Escape) aborts the pending move.
+    const promotionClose = document.getElementById('promotion-close');
+    if (promotionClose) promotionClose.addEventListener('click', () => this._cancelPromotion());
+this.elBtnImport.addEventListener('click', () => this._navigateTo('/review', { disableRestore: true }));
 	    this.elBtnPuzzles?.addEventListener('click', () => this._navigateTo('/puzzles', { disableRestore: true }));
 	    this.elBtnAnticheat?.addEventListener('click', () => this._navigateTo('/anticheat', { disableRestore: true }));
 			    this.elBtnAccount?.addEventListener('click', () => this._navigateTo('/account', { disableRestore: true }));
@@ -5583,6 +5700,7 @@ if (this.elBtnAnticheatRefresh) {
     this.elPgnModal.style.display = 'flex';
     document.body.classList.add('modal-open');
     document.getElementById('app')?.removeAttribute('aria-hidden');
+    this._openDialog(this.elPgnModal);
     this._setImportStatus('');
     this._renderImportResults([]);
     // Render saved username quick-load bar (logged-in users only)
@@ -5635,6 +5753,82 @@ if (this.elBtnAnticheatRefresh) {
     this.elPgnModal.style.display = 'none';
     document.body.classList.remove('modal-open');
     document.getElementById('app')?.removeAttribute('aria-hidden');
+    this._closeDialog(this.elPgnModal);
+  }
+
+  // ── Modal focus management ─────────────────────────────────────────────
+  // The modal overlays (#pgn-modal, #promotion-modal, and the dead
+  // settings/account/coach-setup ones) all carry role="dialog" now. These
+  // helpers trap Tab inside the open dialog, let Escape close it, and restore
+  // focus to whatever element opened it when it closes (WCAG 2.1.1 / 2.4.3).
+
+  _openDialog(overlay) {
+    if (!overlay) return;
+    // Remember what had focus so we can restore it on close.
+    if (this._dialogLastFocus !== overlay) {
+      if (this._dialogStack.length === 0) {
+        this._dialogLastFocus = document.activeElement || null;
+      }
+      this._dialogStack = this._dialogStack.filter((el) => el !== overlay);
+      this._dialogStack.push(overlay);
+      overlay.setAttribute('aria-hidden', 'false');
+      // Move focus into the dialog immediately.
+      const first = overlay.querySelector('[data-autofocus], button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (first) setTimeout(() => first.focus(), 0);
+    }
+    this._ensureDialogKeyHandler();
+  }
+
+  _closeDialog(overlay) {
+    if (!overlay) return;
+    this._dialogStack = this._dialogStack.filter((el) => el !== overlay);
+    overlay.setAttribute('aria-hidden', 'true');
+    const opener = this._dialogLastFocus;
+    this._dialogLastFocus = null;
+    if (typeof opener?.focus === 'function') {
+      try { opener.focus(); } catch (_) {}
+    }
+  }
+
+  _closeTopDialog() {
+    const overlay = this._dialogStack[this._dialogStack.length - 1];
+    if (!overlay) return;
+    const closeBtn = overlay.querySelector('.modal-close');
+    if (overlay.id === 'promotion-modal') {
+      // Promotion: Escape/cancel must resolve the pending promotion as a cancel
+      // (otherwise the board waits forever), then close.
+      this._cancelPromotion();
+      return;
+    }
+    if (closeBtn) { closeBtn.click(); return; }
+    // Fallback: hide + release.
+    overlay.style.display = 'none';
+    overlay.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('modal-open');
+    this._closeDialog(overlay);
+  }
+
+  _ensureDialogKeyHandler() {
+    if (this._dialogKeyBound) return;
+    this._dialogKeyBound = true;
+    document.addEventListener('keydown', (e) => {
+      if (this._dialogStack.length === 0) return;
+      const overlay = this._dialogStack[this._dialogStack.length - 1];
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this._closeTopDialog();
+        return;
+      }
+      if (e.key === 'Tab') {
+        // Trap focus within the open dialog.
+        const focusables = overlay.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    });
   }
 
   _hideSettingsModal() {
@@ -7542,7 +7736,7 @@ _showPuzzleSuccessOverlay() {
 		    const validSources = ['pgn', 'lichess', 'chesscom'];
 		    if (!validSources.includes(source)) return;
 		    document.querySelectorAll('.anticheat-source-card').forEach((btn) => {
-		      btn.setAttribute('aria-checked', btn.dataset.source === source ? 'true' : 'false');
+		      btn.setAttribute('aria-pressed', btn.dataset.source === source ? 'true' : 'false');
 		    });
 		    const titleBySource = {
 		      pgn: 'Paste PGN games',
@@ -8371,23 +8565,36 @@ _showPuzzleSuccessOverlay() {
 	    return (piece.color === 'w' && to[1] === '8') || (piece.color === 'b' && to[1] === '1');
 	  }
 
-	  _requestPromotionPiece() {
-	    if (!this.elPromotionModal) return Promise.resolve('q');
-	    this.elPromotionModal.style.display = 'flex';
-	    this.elPromotionOptions?.querySelector('[data-piece="q"]')?.focus();
-	    return new Promise((resolve) => {
-	      this.pendingPromotionResolve = resolve;
-	    });
-	  }
+	    _requestPromotionPiece() {
+    if (!this.elPromotionModal) return Promise.resolve('q');
+    this.elPromotionModal.style.display = 'flex';
+    this.elPromotionModal.setAttribute('aria-hidden', 'false');
+    this._openDialog(this.elPromotionModal);
+    this.elPromotionOptions?.querySelector('[data-piece="q"]')?.focus();
+    return new Promise((resolve) => {
+      this.pendingPromotionResolve = resolve;
+    });
+  }
 
-	  _finishPromotionChoice(piece = 'q') {
-	    const resolve = this.pendingPromotionResolve;
-	    this.pendingPromotionResolve = null;
-	    if (this.elPromotionModal) this.elPromotionModal.style.display = 'none';
-	    if (resolve) resolve(['q', 'r', 'b', 'n'].includes(piece) ? piece : 'q');
-	  }
+  _finishPromotionChoice(piece = 'q', { wasCancel = false } = {}) {
+    const resolve = this.pendingPromotionResolve;
+    this.pendingPromotionResolve = null;
+    if (this.elPromotionModal) {
+      this.elPromotionModal.style.display = 'none';
+      this.elPromotionModal.setAttribute('aria-hidden', 'true');
+      this._closeDialog(this.elPromotionModal);
+    }
+    // A resolved 'cancel' means the move was aborted (Escape / close button) —
+    // resolve with null so the caller bails out of the pending move.
+    if (resolve) resolve(wasCancel ? null : (['q', 'r', 'b', 'n'].includes(piece) ? piece : 'q'));
+  }
 
-			  async _handleBoardMove(from, to) {
+  // Escape / the new close button on the promotion dialog aborts the move.
+  _cancelPromotion() {
+    this._finishPromotionChoice(null, { wasCancel: true });
+  }
+
+  async _handleBoardMove(from, to) {
 			    if (this.isAnalyzing) return;
 			    if (this.puzzleMode.active && !this.puzzleMode.solved && !this.puzzleMode.failed) {
 			      await this._handlePuzzleMove(from, to);
@@ -9615,6 +9822,25 @@ _saveGameState() {
 
   _updateBoard() {
     this.board.setPositionFromFen(this.chess.fen());
+    // Mark the checked king's square so the board highlights it red (WCAG: not
+    // colour-only — it sits on a distinct ring, and the move list announces it).
+    if (this.chess && typeof this.chess.in_check === 'function' && this.chess.in_check()) {
+      const turn = this.chess.turn(); // 'w' | 'b'
+      const king = `${turn}K`;
+      const board = this.chess.board();
+      let kingSq = null;
+      for (let r = 0; r < board.length && !kingSq; r++) {
+        for (let c = 0; c < board[r].length; c++) {
+          if (board[r][c] && board[r][c].type === 'k' && board[r][c].color === turn) {
+            kingSq = String.fromCharCode(97 + c) + (8 - r);
+            break;
+          }
+        }
+      }
+      this.board.checkSquare = kingSq;
+    } else {
+      this.board.checkSquare = null;
+    }
   }
 
 	  _updateEvalBar(cpScore) {
@@ -9629,14 +9855,21 @@ _saveGameState() {
 	    this.elEvalBarBlack.style.height = blackPct + '%';
 	    this.elEvalBarBlack.style.width = '100%';
 	    if (Math.abs(cpScore) >= 10000) {
-	      this.elEvalScore.textContent = 'Checkmate';
-	    } else {
-	      const formattedScore = this.analyzer.formatScore(cpScore);
-	      this.elEvalScore.textContent = formattedScore;
-	    }
-	  }
+      this.elEvalScore.textContent = 'Checkmate';
+    } else {
+      const formattedScore = this.analyzer.formatScore(cpScore);
+      this.elEvalScore.textContent = formattedScore;
+    }
+    // Screen readers: describe the bar in words, not just colour/height.
+    const elEvalBar = document.getElementById('eval-bar');
+    if (elEvalBar && typeof this.analyzer?.evalBarPercent === 'function') {
+      const pct = this.analyzer.evalBarPercent(cpScore);
+      elEvalBar.setAttribute('aria-label',
+        cpScore === 0 ? 'Balanced position' : `White ${pct}% chance of winning`);
+    }
+  }
 
-	  _showMoveBadge(classification, targetSquare, options = {}) {
+_showMoveBadge(classification, targetSquare, options = {}) {
     if (!classification) {
       this.elMoveBadge.style.display = 'none';
       return;
@@ -9667,7 +9900,10 @@ _saveGameState() {
     } else {
       this.elBadgeIcon.textContent = classification.icon;
     }
-    this.elBadgeText.textContent = '';
+    // Show the classification name under the icon so the badge isn't glyph-only,
+    // and tint it with the category colour (WCAG: colour is paired with the word).
+    this.elBadgeText.textContent = classification.name || '';
+    if (classification.color) this.elBadgeText.style.color = classification.color;
 
     // No special animation or treatment for Brilliant/Great/Blunder — every
     // classification badge renders identically, in the standard square-corner
@@ -10604,7 +10840,9 @@ _saveGameState() {
     if (!this.elOpeningControls) return;
     const source = this._openingSource || 'masters';
     this.elOpeningControls.querySelectorAll('.opening-source-btn').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.source === source);
+      const on = btn.dataset.source === source;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
     if (this.elOpeningFilters) {
       this.elOpeningFilters.hidden = source !== 'lichess';
@@ -10613,7 +10851,9 @@ _saveGameState() {
         const key = group.dataset.filter; // 'speeds' | 'ratings'
         const selected = new Set((filters[key] || []).map(String));
         group.querySelectorAll('.opening-chip').forEach((chip) => {
-          chip.classList.toggle('active', selected.has(chip.dataset.val));
+          const on = selected.has(chip.dataset.val);
+          chip.classList.toggle('active', on);
+          chip.setAttribute('aria-pressed', on ? 'true' : 'false');
         });
       });
     }

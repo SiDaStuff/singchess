@@ -22,6 +22,7 @@
   </script>
 </head>
 <body class="menu-active">
+  <a class="skip-link" href="#app">Skip to content</a>
   <!-- ════════════════════════════════════════════════════════════════════
        ALL-WHITE SIDEBAR (fixed, desktop) / slide-out drawer (mobile)
        Reuses the existing data-route / data-nav attributes so the SPA
@@ -89,7 +90,7 @@
   <!-- Scrim behind the mobile sidebar drawer -->
   <div class="sc-scrim" id="sc-scrim" hidden></div>
 
-  <div id="app">
+  <div id="app" tabindex="-1">
     <section id="main-menu" class="main-menu" aria-label="Home">
       <!-- Import card: the first thing a visitor sees -->
       <div class="home-import-card">
@@ -123,6 +124,7 @@
           <div class="import-panels">
             <!-- PGN panel -->
             <div class="import-panel active" data-import-panel="pgn">
+              <label class="field" for="home-pgn-input">Your game (PGN)</label>
               <textarea id="home-pgn-input" class="import-pgn-input input-select" placeholder="Paste your PGN here...&#10;&#10;Example:&#10;1. e4 e5 2. Nf3 Nc6 3. Bb5 a6..." rows="8"></textarea>
               <div class="import-actions">
                 <button type="button" id="btn-home-load-pgn" class="btn btn-primary import-load-btn">
@@ -622,22 +624,31 @@
     <section id="page-settings" class="page-panel" hidden>
       <div class="card panel-wide page-card">
         <h1>Settings</h1>
-        <!-- Review Strength is fixed at Standard and not user-adjustable. The
-             selects below are kept (hidden + disabled) so the engine-settings
-             save handler in app.js still resolves a value; they hold the
-             locked defaults and are never shown or changed. -->
-        <div id="settings-advanced-engine" hidden aria-hidden="true">
-          <select id="settings-review-strength" class="input-select" disabled>
-            <option value="standard" selected>Standard</option>
-          </select>
-          <input id="settings-advanced-toggle" type="checkbox" disabled>
-          <select id="settings-engine-depth" class="input-select" disabled>
-            <option value="14" selected>Depth 14</option>
-          </select>
-          <select id="settings-engine-timeout" class="input-select" disabled>
-            <option value="4500" selected>4.5 seconds</option>
-          </select>
+        <h2 style="font-size:1rem;margin-top:4px">Review Strength</h2>
+        <p>How deeply the engine analyses each move. Quick is fastest; Thorough is most accurate.</p>
+        <div class="field">
+          <div class="chip-row" id="settings-review-strength-chips" role="radiogroup" aria-label="Review strength"
+               data-target="settings-review-strength">
+            <label class="chip-label">
+              <input type="radio" name="settings-review-strength-chip" value="quick">
+              <span class="chip">Quick</span>
+            </label>
+            <label class="chip-label">
+              <input type="radio" name="settings-review-strength-chip" value="standard" checked>
+              <span class="chip">Standard</span>
+            </label>
+            <label class="chip-label">
+              <input type="radio" name="settings-review-strength-chip" value="thorough">
+              <span class="chip">Thorough</span>
+            </label>
+          </div>
+          <p class="account-status" id="settings-review-strength-note" style="font-size:0.82rem">Standard review balances speed and accuracy (depth 14).</p>
         </div>
+        <!-- Hidden value-carrier so the existing _saveEngineSettings parser keeps
+             resolving a strength. It is REPLACED by the chip row above; never shown. -->
+        <input type="hidden" id="settings-review-strength" value="standard">
+        <!-- Advanced: custom depth + per-move time, folded into the browser engine
+             section below rather than a separate hidden block. -->
         <h2 style="font-size:1rem;margin-top:18px">Review Source</h2>
         <p>Choose where game reviews run. Server reviews are faster and stronger but require an account.</p>
         <label class="field">
@@ -681,6 +692,45 @@
             <option value="24">Depth 24</option>
           </select>
         </label>
+        <label class="switch-row app-switch-row">
+          <span>
+            <strong>Advanced engine settings</strong>
+            <small>Pin a custom search depth and per-move time cap, overriding the strength tier.</small>
+          </span>
+          <span class="app-switch">
+            <input id="settings-advanced-toggle" type="checkbox">
+            <span class="app-switch-track"></span>
+          </span>
+        </label>
+        <div id="settings-advanced-engine" class="settings-advanced-engine-fields" hidden>
+          <label class="field">
+            <span class="field-label">Custom Search Depth</span>
+            <select id="settings-engine-depth" class="input-select">
+              <option value="8">Depth 8</option>
+              <option value="10">Depth 10</option>
+              <option value="12">Depth 12</option>
+              <option value="14">Depth 14</option>
+              <option value="16" selected>Depth 16</option>
+              <option value="18">Depth 18</option>
+              <option value="20">Depth 20</option>
+              <option value="22">Depth 22</option>
+              <option value="26">Depth 26</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Per-Move Time Cap</span>
+            <select id="settings-engine-timeout" class="input-select">
+              <option value="500">0.5s</option>
+              <option value="1000">1s</option>
+              <option value="2000">2s</option>
+              <option value="3000">3s</option>
+              <option value="4500" selected>4.5s</option>
+              <option value="8000">8s</option>
+              <option value="15000">15s</option>
+              <option value="30000">30s</option>
+            </select>
+          </label>
+        </div>
         <button id="btn-save-engine-settings" class="btn btn-primary" type="button">Save Engine Settings</button>
         <p class="account-status" id="engine-settings-status"></p>
         <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
@@ -1211,7 +1261,7 @@
             </div>
           </div>
           <form class="coach-chat-input" id="coach-chat-form">
-            <textarea id="coach-chat-textarea" class="coach-chat-textarea" placeholder="Ask the coach anything about chess…" rows="1" autocomplete="off"></textarea>
+            <textarea id="coach-chat-textarea" class="coach-chat-textarea" aria-label="Message the coach" placeholder="Ask the coach anything about chess…" rows="1" autocomplete="off"></textarea>
             <button type="submit" id="btn-coach-send" class="btn btn-primary coach-send-btn" aria-label="Send">
               <span class="material-symbols-outlined btn-symbol">send</span>
             </button>
@@ -1225,7 +1275,7 @@
 
     <main class="main-content">
       <div class="eval-bar-container">
-        <div class="eval-bar">
+        <div class="eval-bar" id="eval-bar" role="img" aria-label="Position evaluation">
           <div class="eval-bar-black" id="eval-bar-black"></div>
           <div class="eval-bar-white" id="eval-bar-white"></div>
         </div>
@@ -1291,7 +1341,7 @@
       </div>
 
       <div class="analysis-shell analysis-panel">
-        <div class="live-eval card panel-wide" id="live-eval" hidden>
+        <div class="live-eval card panel-wide" id="live-eval" role="tabpanel" hidden>
           <div class="card-header">
 	            <h3>Move Feedback</h3>
             <div class="feedback-meta">
@@ -1440,14 +1490,14 @@
           </span>
         </button>
 
-        <div class="move-list-container card panel-wide">
+        <div class="move-list-container card panel-wide" id="move-list-container" role="tabpanel">
           <h3>Moves</h3>
           <div class="move-list" id="move-list">
             <div class="move-list-empty">Import a PGN or start coach to begin.</div>
           </div>
         </div>
 
-        <div class="eval-graph-card card panel-wide">
+        <div class="eval-graph-card card panel-wide" id="eval-graph-card" role="tabpanel">
 	          <h3>Evaluation Graph</h3>
           <canvas id="eval-graph" width="320" height="120"></canvas>
         </div>
@@ -1686,8 +1736,8 @@
               <p><strong>Server-side cheat detection.</strong> Anticheat is a Boost (25 games/week) and Max (100 games/week) feature. Each game you scan counts against your weekly budget, which resets Monday. Don't close this tab while checking.</p>
             </details>
             <div class="anticheat-usage-bar" id="anticheat-usage-bar"></div>
-            <div class="anticheat-sources" role="radiogroup" aria-label="Anticheat source">
-              <button type="button" class="anticheat-source-card" data-source="pgn" role="radio" aria-checked="false">
+            <div class="anticheat-sources" role="group" aria-label="Anticheat source">
+              <button type="button" class="anticheat-source-card" data-source="pgn" aria-pressed="true">
                 <span class="anticheat-source-icon" aria-hidden="true">
                   <span class="material-symbols-outlined">content_paste</span>
                 </span>
@@ -1696,13 +1746,13 @@
                   <small>Paste one or several games</small>
                 </span>
               </button>
-              <button type="button" class="anticheat-source-card" data-source="lichess" role="radio" aria-checked="false">
+              <button type="button" class="anticheat-source-card" data-source="lichess" aria-pressed="false">
                 <span class="anticheat-source-meta">
                   <strong>Lichess username</strong>
                   <small>Pull their last games</small>
                 </span>
               </button>
-              <button type="button" class="anticheat-source-card" data-source="chesscom" role="radio" aria-checked="false">
+              <button type="button" class="anticheat-source-card" data-source="chesscom" aria-pressed="false">
                 <span class="anticheat-source-meta">
                   <strong>Chess.com username</strong>
                   <small>Pull their last games</small>
@@ -1716,7 +1766,7 @@
             <input type="hidden" id="anticheat-source" value="pgn">
             <input type="hidden" id="anticheat-username" value="">
             <input type="hidden" id="anticheat-limit" value="10">
-            <textarea id="anticheat-pgn" class="anticheat-pgn" hidden placeholder="Paste one PGN or several PGNs here..." rows="8"></textarea>
+            <textarea id="anticheat-pgn" class="anticheat-pgn" hidden aria-label="One PGN or several PGNs" placeholder="Paste one PGN or several PGNs here..." rows="8"></textarea>
             <div class="anticheat-status" id="anticheat-status">Pick a source above to start a review.</div>
             <div class="anticheat-results" id="anticheat-results"></div>
           </div>
@@ -1807,10 +1857,29 @@
       </div>
     </main>
 
-    <div class="modal-overlay" id="settings-modal" style="display:none">
+    <!-- Mobile review bottom tab bar (shown only on ≤1024px review view).
+         Added by the redesign for thumb-friendly navigation between the core
+         analysis sections. The panels it toggles (live-eval, move-list,
+         eval-graph) stay visible/on-screen one at a time on mobile. -->
+    <nav class="sc-mobile-tabs" id="sc-mobile-tabs" role="tablist" aria-label="Analysis sections" hidden>
+      <button type="button" class="sc-tab is-active" data-tab="feedback" role="tab" aria-selected="true" aria-controls="live-eval">
+        <span class="material-symbols-outlined">feedback</span>
+        <span class="sc-tab-label">Feedback</span>
+      </button>
+      <button type="button" class="sc-tab" data-tab="moves" role="tab" aria-selected="false" aria-controls="move-list-container">
+        <span class="material-symbols-outlined">format_list_numbered</span>
+        <span class="sc-tab-label">Moves</span>
+      </button>
+      <button type="button" class="sc-tab" data-tab="graph" role="tab" aria-selected="false" aria-controls="eval-graph-card">
+        <span class="material-symbols-outlined">show_chart</span>
+        <span class="sc-tab-label">Graph</span>
+      </button>
+    </nav>
+
+    <div class="modal-overlay" id="settings-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" aria-hidden="true">
       <div class="modal modal-settings">
         <div class="modal-header">
-          <h2>Engine Settings</h2>
+          <h2 id="settings-modal-title">Engine Settings</h2>
           <button type="button" class="modal-close material-symbols-outlined" id="settings-close" aria-label="Close">close</button>
         </div>
         <div class="modal-body">
@@ -1851,10 +1920,10 @@
       </div>
     </div>
 
-    <div class="modal-overlay" id="pgn-modal" style="display:none">
+    <div class="modal-overlay" id="pgn-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="pgn-modal-title">
       <div class="modal modal-import">
         <div class="modal-header">
-          <h2>Import Games</h2>
+          <h2 id="pgn-modal-title">Import Games</h2>
           <button type="button" class="modal-close material-symbols-outlined" id="modal-close" aria-label="Close">close</button>
         </div>
         <div class="modal-body">
@@ -1881,6 +1950,7 @@
             <div class="import-panels">
               <!-- PGN panel -->
               <div class="import-panel active" data-import-panel="pgn">
+                <label class="field" for="pgn-input">Your game (PGN)</label>
                 <textarea id="pgn-input" class="import-pgn-input input-select" placeholder="Paste your PGN here...&#10;&#10;Example:&#10;1. e4 e5 2. Nf3 Nc6 3. Bb5 a6..." rows="10"></textarea>
                 <div class="import-actions">
                   <button type="button" id="btn-pgn-load" class="btn btn-primary import-load-btn">
@@ -1954,10 +2024,10 @@
       </div>
     </div>
 
-    <div class="modal-overlay" id="account-modal" style="display:none">
+    <div class="modal-overlay" id="account-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="account-modal-title" aria-hidden="true">
       <div class="modal modal-account">
         <div class="modal-header">
-          <h2>Account</h2>
+          <h2 id="account-modal-title">Account</h2>
           <button type="button" class="modal-close material-symbols-outlined" id="account-close" aria-label="Close">close</button>
         </div>
         <div class="modal-body">
@@ -2063,10 +2133,10 @@
       </div>
     </div>
 
-    <div class="modal-overlay" id="coach-setup-modal" style="display:none">
+    <div class="modal-overlay" id="coach-setup-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="coach-setup-modal-title" aria-hidden="true">
       <div class="modal modal-coach-setup">
         <div class="modal-header">
-          <h2>Play Coach</h2>
+          <h2 id="coach-setup-modal-title">Play Coach</h2>
           <button type="button" class="modal-close material-symbols-outlined" id="coach-setup-close" aria-label="Close">close</button>
         </div>
         <div class="modal-body">
@@ -2113,10 +2183,11 @@
       </div>
     </div>
 
-    <div class="modal-overlay" id="promotion-modal" style="display:none">
+    <div class="modal-overlay" id="promotion-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="promotion-modal-title">
       <div class="modal modal-promotion">
         <div class="modal-header">
-          <h2>Promote Pawn</h2>
+          <h2 id="promotion-modal-title">Promote Pawn</h2>
+          <button type="button" class="modal-close material-symbols-outlined" id="promotion-close" aria-label="Close promotion">close</button>
         </div>
         <div class="modal-body">
           <div class="promotion-options" id="promotion-options">

@@ -1588,6 +1588,16 @@ body.in-app-route .header { display: flex !important; }
 .square.highlight.dark { background: var(--move-highlight-color, var(--sq-highlight-dark)); }
 .square.best-from.light, .square.best-to.light { background: var(--sq-best-light); box-shadow: inset 0 0 0 3px var(--clr-best); }
 .square.best-from.dark, .square.best-to.dark { background: var(--sq-best-dark); box-shadow: inset 0 0 0 3px var(--clr-best); }
+/* Selected piece: a clear ring so a mouse user always knows which piece is
+   armed (and a keyboard user can see focus location). */
+.square.selected { box-shadow: inset 0 0 0 3px var(--clr-selected, #2d6cdf); }
+.square.selected.light, .square.selected.dark { background: var(--sq-selected, rgba(77,110,180,0.55)); }
+/* King in check: standard red highlight so the threat is visible at a glance,
+   independent of any sound cue. */
+.square.in-check { box-shadow: inset 0 0 0 3px var(--clr-check, #d33); }
+.square.in-check.light, .square.in-check.dark { background: var(--sq-check, rgba(221,51,51,0.45)); }
+/* Focus visibility for keyboard board navigation. */
+.square:focus-visible { outline: 3px solid var(--clr-check, #d33); outline-offset: -2px; }
 .square .piece { width: 94%; height: 94%; position: absolute; pointer-events: none; z-index: 1; inset: 3%; }
 .square .coord-label { position: absolute; font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 600; z-index: 2; }
 .square .coord-file { right: 3px; bottom: 2px; }
@@ -3269,3 +3279,18 @@ body[data-theme="dark"] .export-textarea { color: var(--text-primary, #e8eef4); 
   .notification-bell-badge { box-shadow: 0 0 0 2px var(--bg-panel, #181d22); }
 }
 
+
+/* Skip-to-content link: visually hidden until keyboard focus (WCAG 2.4.1). */
+.skip-link {
+  position: absolute; left: -9999px; top: 0; width: 1px; height: 1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  background: var(--accent, #1976d2); color: #fff; padding: 10px 16px;
+  border-radius: 0 0 8px 0; z-index: 9999; font-weight: 600;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  left: 0; width: auto; height: auto; clip: auto; overflow: visible;
+  outline: 3px solid var(--focus-ring, #b3c7ff);
+}
+/* Keyboard focus on the board grid cells and other custom controls. */
+.square:focus-visible { outline: 3px solid var(--focus-ring, #2d6cdf); outline-offset: -2px; }
