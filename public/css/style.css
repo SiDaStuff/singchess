@@ -1096,7 +1096,6 @@ body.in-app-route .header { display: flex !important; }
   color: #fff; vertical-align: middle; margin-left: 3px; line-height: 1.3;
   letter-spacing: 0.03em;
 }
-.coach-model-seg .beta-badge { font-size: 0.55rem; padding: 0 4px; margin-left: 2px; }
 
 .coach-coming-soon { display: block; font-size: 0.8rem; color: var(--text-muted); font-weight: 600; line-height: 1.2; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
 .coach-dialog { min-height: 54px; padding: 12px; background: var(--bg-muted); border: 1px solid var(--border-soft); border-radius: 8px; font-size: 0.9rem; font-weight: 600; }
@@ -1131,12 +1130,6 @@ body.in-app-route .header { display: flex !important; }
 .coach-chat-shell.sidebar-collapsed .coach-icon-btn,
 .coach-chat-shell:not(.sidebar-collapsed) .coach-icon-btn { display: inline-flex; }
 @media (max-width: 900px) { .coach-icon-btn { display: inline-flex !important; } }
-.coach-model-toggle { display: inline-flex; background: var(--bg-muted); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 2px; }
-.coach-model-seg { border: none; background: transparent; padding: 5px 12px; border-radius: 4px; font-size: 0.78rem; font-weight: 700; color: var(--text-secondary); cursor: pointer; }
-.coach-model-seg[aria-pressed="true"] { background: var(--bg-strong); color: var(--accent-contrast); }
-.coach-model-seg.locked { opacity: 0.55; cursor: not-allowed; }
-.coach-model-seg.locked::after { content: 'lock'; font-family: 'Material Symbols Outlined'; font-size: 0.82rem; margin-left: 4px; vertical-align: -1px; }
-.coach-model-seg.locked:hover { opacity: 0.75; }
 .coach-chat-locked { display: grid; gap: 10px; justify-items: center; text-align: center; padding: 28px 16px; background: var(--bg-panel); border-radius: 12px; }
 .coach-chat-locked[hidden] { display: none; }
 .coach-chat-locked .coach-locked-icon { font-size: 2.2rem; color: var(--boost-primary); }
@@ -1235,8 +1228,7 @@ body.in-app-route .header { display: flex !important; }
   .coach-chat-header-actions { gap: 6px; flex-wrap: wrap; justify-content: flex-start; }
   .coach-chat-main { min-height: calc(100vh - 320px); }
   .coach-chat-messages { min-height: 160px; max-height: calc(100vh - 420px); }
-  .coach-model-toggle { flex-shrink: 0; }
-  .coach-play-btn .btn-label { display: none; }
+    .coach-play-btn .btn-label { display: none; }
 }
 
 /* ===== Puzzle Card ===== */
@@ -2175,7 +2167,6 @@ body.app-dialog-open { overflow: hidden; }
 .boost-waitlist-form { display: flex; gap: 8px; max-width: 420px; margin: 0 auto; }
 .boost-waitlist-form .input-select { flex: 1; }
 
-
 .account-status { min-height: 20px; color: var(--text-secondary); font-size: 0.82rem; font-weight: 600; }
 .account-status.error { color: var(--clr-blunder); }
 .account-status.success { color: var(--clr-best); }
@@ -2333,8 +2324,6 @@ body[data-anim-speed="0.2"] { --piece-slide-duration: 0.2s; }
 body[data-anim-speed="0.5"] { --piece-slide-duration: 0.3s; }
 body[data-anim-speed="1"] { --piece-slide-duration: 0.5s; }
 :root { --piece-slide-duration: 0.3s; }
-
-
 
 .settings-anim-speed { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
 .settings-anim-speed .chip-row { display: flex; gap: 0; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; background: var(--bg-muted); }
@@ -3278,7 +3267,6 @@ body[data-theme="dark"] .export-textarea { color: var(--text-primary, #e8eef4); 
   .notification-item-unread { background: rgba(120, 160, 255, 0.06); }
   .notification-bell-badge { box-shadow: 0 0 0 2px var(--bg-panel, #181d22); }
 }
-
 
 /* Skip-to-content link: visually hidden until keyboard focus (WCAG 2.4.1). */
 .skip-link {

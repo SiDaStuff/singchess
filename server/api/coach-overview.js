@@ -349,7 +349,6 @@ exports.streamHandler = async (req, res) => {
     const maxTokens = scope === 'game' ? OVERVIEW_MAX_TOKENS_GAME : OVERVIEW_MAX_TOKENS_MOVE;
     const streamRes = await llm.chatCompletion({
       messages: llmMessages,
-      model: 'fast',
       stream: true,
       maxTokens,
       temperature: 0.4,

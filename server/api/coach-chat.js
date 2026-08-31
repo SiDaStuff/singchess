@@ -9,7 +9,7 @@
 //
 // SSE events: init | token | tool_call | tool_status | tool_result_visible | done | error | heartbeat
 
-const { requireUser, isPaidOrAbove, activePlan, initAdmin, usageDay, reserveCoachTokens, reconcileCoachTokens } = require('./_lib/user-service');
+const { requireUser, activePlan, initAdmin, usageDay, reserveCoachTokens, reconcileCoachTokens } = require('./_lib/user-service');
 const llm = require('./_lib/llm-service');
 const { TOOL_DEFINITIONS, getToolDefinitions, BROWSER_TOOLS, runServerTool } = require('./_lib/coach-tools');
 const { acquireHeavyAction, releaseHeavyAction, getBusyAction } = require('./_lib/action-lock');
@@ -51,17 +51,15 @@ function coachReleaseUid(uid) {
   if (recent.length === 0) coachRecent.delete(uid);
   else coachRecent.set(uid, recent);
 }
-// Daily-quota charge multiplier per model tier. Strong models are far larger
-// (gpt-oss-120b / llama-3.3-70b / mistral-large vs. their fast siblings), so a
-// Strong message costs 2x the daily token allowance of a Fast one — making the
-// toggle a real tradeoff rather than a free upgrade.
-const COACH_TIER_MULTIPLIER = { fast: 1, strong: 2 };
+// No Fast/Strong tiers anymore — a single model is used for every coach
+// message (see llm-service.js: gpt-oss-120b, falling back to gpt-oss-20b).
+// Quota cost is flat per message.
+const COACH_TIER_MULTIPLIER = 1;
 // Worst-case token cost reserved up front per request (before the real cost is
-// known). Sized to comfortably cover a max-length reply + a tool-loop turn at
-// the Strong multiplier, so the atomic pre-reserve can't under-count a real
-// request. Any over-reservation is refunded after the stream via reconcile.
-const COACH_RESERVE_FAST = Math.round(3000 * COACH_TIER_MULTIPLIER.fast);
-const COACH_RESERVE_STRONG = Math.round(6000 * COACH_TIER_MULTIPLIER.strong);
+// known). Sized to comfortably cover a max-length reply + a tool-loop turn, so
+// the atomic pre-reserve can't under-count a real request. Any over-reservation
+// is refunded after the stream via reconcile.
+const COACH_RESERVE = Math.round(3000 * COACH_TIER_MULTIPLIER);
 
 function sseWrite(res, event, data) {
   if (res.writableEnded) return;
@@ -140,14 +138,6 @@ exports.streamHandler = async (req, res) => {
 
   const payload = parseBody(req);
   const text = String(payload.message || '').slice(0, 4000).trim();
-  const modelTier = payload.model === 'strong' ? 'strong' : 'fast';
-  // Strong model is a Boost+ perk. The client locks it too, but enforce here so
-  // a hand-crafted request from a free user can never reach a Strong LLM.
-  if (modelTier === 'strong' && !isPaidOrAbove(plan.plan, 'boost')) {
-    sseWrite(res, 'error', { error: 'The Strong model is a Boost feature. Upgrade on the Plans page to use it.', code: 'upgrade_required' });
-    res.end();
-    return;
-  }
   if (!text) {
     sseWrite(res, 'error', { error: 'Empty message.', code: 'bad_request' });
     res.end();
@@ -173,7 +163,7 @@ exports.streamHandler = async (req, res) => {
   // parallel requests can't all pass the gate on the same stale read and run up
   // the LLM bill past the cap). The over-reservation is refunded after the
   // stream once the real cost is known. `reserveTotal` is the post-reserve total.
-  const reserveAmount = modelTier === 'strong' ? COACH_RESERVE_STRONG : COACH_RESERVE_FAST;
+  const reserveAmount = COACH_RESERVE;
   let reservedTotal;
   try {
     const r = await reserveCoachTokens(user.uid, reserveAmount, tokenLimit);
@@ -223,7 +213,7 @@ exports.streamHandler = async (req, res) => {
     // Run the tool loop, then stream the final answer.
     let assistantText = '';
     const conv = await runConversation({
-      res, llmMessages, modelTier, user, closedRef: () => closed,
+      res, llmMessages, user, closedRef: () => closed,
       onToken: (t) => { assistantText += t; sseWrite(res, 'token', { text: t }); },
       onToolCall: (call) => sseWrite(res, 'tool_call', call),
       onToolStatus: (status) => sseWrite(res, 'tool_status', status),
@@ -241,7 +231,7 @@ exports.streamHandler = async (req, res) => {
     const realOutput = Number(usage && usage.completion) || 0;
     const inputTokens = realInput || Math.ceil(JSON.stringify(llmMessages).length / 4);
     const outputTokens = realOutput || Math.ceil(assistantText.length / 4);
-    const totalTokens = Math.round((inputTokens + outputTokens) * (COACH_TIER_MULTIPLIER[modelTier] || 1));
+    const totalTokens = Math.round((inputTokens + outputTokens) * COACH_TIER_MULTIPLIER);
     const delta = totalTokens - reserveAmount; // negative → refund the over-reservation
     let chargedTotal = reservedTotal;
     try {
@@ -313,11 +303,11 @@ function buildLlmMessages(history, currentText, reviewContext) {
 // Guards against the "No response." failure mode: (a) every token is counted in
 // `emitted` via the `emit` wrapper, and (b) a guaranteed non-empty fallback is
 // streamed if nothing was emitted, so the client always receives ≥1 token.
-async function runConversation({ res, llmMessages, modelTier, user, closedRef, onToken, onToolCall, onToolStatus, onToolResultVisible }) {
+async function runConversation({ res, llmMessages, user, closedRef, onToken, onToolCall, onToolStatus, onToolResultVisible }) {
   // Wrap onToken so we know whether ANY content was streamed across all rounds.
   let emitted = '';
   const emit = (t) => { if (t) { emitted += t; onToken(t); } };
-  const maxTokens = modelTier === 'strong' ? 4096 : 3072;
+  const maxTokens = 3072;
   // Accumulate real token usage across rounds (for charging thinking tokens).
   const tokenUsage = { prompt: 0, completion: 0 };
   const trackUsage = (u) => {
@@ -345,7 +335,7 @@ async function runConversation({ res, llmMessages, modelTier, user, closedRef, o
     // to emit) and tool_calls (assembled from deltas) in parallel.
     const streamRes = await llm.chatCompletion({
       messages: llmMessages, tools: getToolDefinitions(), toolChoice: 'auto',
-      model: modelTier, stream: true, maxTokens, temperature: 0.3,
+      stream: true, maxTokens, temperature: 0.3,
     });
     const result = await llm.streamDeltas(streamRes, emit);
     trackUsage(result && result.usage);
@@ -418,7 +408,7 @@ async function runConversation({ res, llmMessages, modelTier, user, closedRef, o
   // nudging the model to answer from what it already knows.
   llmMessages.push({ role: 'system', content: 'Answer the user now in plain prose using the information you already have. Do not call any more tools.' });
   const finalRes = await llm.chatCompletion({
-    messages: llmMessages, model: modelTier, stream: true, temperature: 0.4, maxTokens,
+    messages: llmMessages, stream: true, temperature: 0.4, maxTokens,
   });
   const finalStream = await llm.streamDeltas(finalRes, emit);
   trackUsage(finalStream && finalStream.usage);

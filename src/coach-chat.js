@@ -9,13 +9,13 @@
 // History sent to the backend on each request (the backend no longer persists).
 
 (function () {
-  const MODEL_PREF_KEY = 'sidastuff.coachModel'; // 'fast' | 'strong'
+  // No Fast/Strong model preference anymore — the coach uses a single model
+  // (gpt-oss-120b, with a gpt-oss-20b fallback on the server).
 
   const state = {
     app: null,            // the ChessReviewApp instance (for auth + engine)
     mounted: false,
     uid: null,
-    model: 'fast',
     chats: [],            // [{id, title, createdAt, messages:[]}]
     activeId: null,
     streaming: false,
@@ -33,7 +33,6 @@
       'btn-coach-send', 'btn-coach-stop', 'coach-sidebar-list', 'btn-coach-new-chat',
       'btn-coach-play-bot', 'btn-coach-sidebar-toggle', 'coach-chat-subtitle', 'coach-usage-bar',
     ].forEach((id) => { el[id] = $(id); });
-    el.modelSegs = document.querySelectorAll('.coach-model-seg');
   }
 
   // ── localStorage (scoped per uid) ────────────────────────────────────
@@ -314,7 +313,7 @@
     let assistantText = '';
 
     try {
-      // Send the conversation history (client-owned) + the model tier.
+      // Send the conversation history (client-owned).
       const history = chat.messages
         .filter((m) => m.role === 'user' || m.role === 'assistant')
         .slice(-20)
@@ -324,7 +323,7 @@
         headers: await state.app._authHeaders({ 'Content-Type': 'application/json', Accept: 'text/event-stream' }),
         signal: controller.signal,
         cache: 'no-store',
-        body: JSON.stringify({ message: text, model: state.model, history, reviewContext: chat.reviewContext || undefined }),
+        body: JSON.stringify({ message: text, history, reviewContext: chat.reviewContext || undefined }),
       });
       if (!response.ok) {
         let msg = `Coach error (${response.status}).`;
@@ -680,65 +679,6 @@
     }
   }
 
-  // ── Model toggle ─────────────────────────────────────────────────────
-  // The Strong model is a Boost+ perk. Free users are locked to Fast — both in
-  // the UI (the Strong button is disabled) and at the send site. The server
-  // independently enforces this, so the lock here is UX, not security.
-  function canUseStrong() {
-    const app = state.app;
-    return !!(app && typeof app._isPaidOrAbove === 'function' && app._isPaidOrAbove('boost'));
-  }
-  function setModel(m) {
-    if (m !== 'fast' && m !== 'strong') return;
-    if (m === 'strong' && !canUseStrong()) {
-      // Free user can't pick Strong: bounce back to Fast and nudge them.
-      applyModelToggle();
-      flashStrongLocked();
-      return;
-    }
-    state.model = m;
-    applyModelToggle();
-    try { localStorage.setItem(MODEL_PREF_KEY, m); } catch (_) {}
-    // Also persist onto the server profile prefs (app helper).
-    if (state.app) {
-      const prefs = { ...((state.app.authState && state.app.authState.profile && state.app.authState.profile.coachMode) || {}), model: m };
-      state.app.authState.profile = { ...(state.app.authState.profile || {}), coachMode: prefs };
-      state.app._saveUserProfile && state.app._saveUserProfile(state.app.authState.profile).catch(() => {});
-    }
-  }
-  // Reflect the active model + Strong availability on the toggle buttons. The
-  // Strong button is disabled (and badged) for free users so it reads as locked.
-  function applyModelToggle() {
-    el.modelSegs?.forEach((b) => {
-      const isStrong = b.dataset.model === 'strong';
-      const allowed = !isStrong || canUseStrong();
-      b.setAttribute('aria-pressed', String(b.dataset.model === state.model));
-      // Keep the Strong button focusable & clickable even when not allowed, so
-      // clicking it can fire the upgrade nudge (a `disabled` button never fires
-      // clicks, which is why flashStrongLocked was previously unreachable). Use
-      // aria-disabled + a lock class for the "not available" state instead.
-      b.disabled = false;
-      if (allowed) {
-        b.setAttribute('aria-disabled', 'false');
-        b.classList.remove('locked');
-        b.title = '';
-      } else {
-        b.setAttribute('aria-disabled', 'true');
-        b.classList.add('locked');
-        b.title = 'Strong model is a Boost feature';
-      }
-    });
-  }
-  function flashStrongLocked() {
-    const box = el['coach-chat-messages'];
-    if (!box) return;
-    const notice = document.createElement('div');
-    notice.className = 'coach-bubble coach-bubble-error coach-strong-locked-notice';
-    notice.textContent = 'The Strong model is a Boost feature — upgrade on the Plans page to use it.';
-    box.appendChild(notice); scrollMessages();
-    setTimeout(() => notice.remove(), 4000);
-  }
-
   // ── Gate + mount ────────────────────────────────────────────────────
   function renderGate() {
     if (!el['coach-chat-locked'] || !el['coach-chat-body']) return;
@@ -753,7 +693,6 @@
     el['coach-chat-body'].hidden = !signedIn;     // show chat when logged in
     if (signedIn) focusInput();
     applyLockedState();
-    applyModelToggle(); // Strong lock state depends on the resolved plan
     renderUsageBar();
   }
 
@@ -853,7 +792,6 @@
     el['btn-coach-sidebar-toggle']?.addEventListener('click', () => {
       el['coach-chat-card']?.classList.toggle('sidebar-collapsed');
     });
-    el.modelSegs?.forEach((b) => b.addEventListener('click', () => setModel(b.dataset.model)));
   }
 
   // Load (or reload) the persisted chats for a uid into state + render them.
@@ -881,12 +819,6 @@
     if (!state.mounted) { bindEvents(); state.mounted = true; }
     // Collapse sidebar on mobile by default
     if (window.innerWidth <= 720) el['coach-chat-card']?.classList.add('sidebar-collapsed');
-    // model preference
-    try { state.model = localStorage.getItem(MODEL_PREF_KEY) || (app.authState && app.authState.profile && app.authState.profile.coachMode && app.authState.profile.coachMode.model) || 'fast'; } catch (_) { state.model = 'fast'; }
-    if (state.model !== 'strong') state.model = 'fast';
-    // Strong is a Boost+ perk: downgrade a free user's persisted 'strong' pref.
-    if (state.model === 'strong' && !canUseStrong()) state.model = 'fast';
-    applyModelToggle();
     renderGate();
     const uid = app.authState && app.authState.user && app.authState.user.uid;
     loadForUid(uid);

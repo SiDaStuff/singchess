@@ -1232,10 +1232,8 @@
               <button type="button" class="btn btn-secondary coach-icon-btn" id="btn-coach-sidebar-toggle" title="Chat history" aria-label="Toggle chat history">
                 <span class="material-symbols-outlined">history</span>
               </button>
-              <div class="coach-model-toggle" role="group" aria-label="Coach model">
-                <button type="button" class="coach-model-seg" data-model="fast" aria-pressed="true">Fast <span class="beta-badge">Beta</span></button>
-                <button type="button" class="coach-model-seg" data-model="strong" aria-pressed="false">Strong <span class="beta-badge">Beta</span></button>
-              </div>
+              <!-- Fast/Strong model toggle removed: the coach uses a single model.
+                   See llm-service.js (gpt-oss-120b → gpt-oss-20b fallback). -->
               <button type="button" class="btn btn-secondary coach-play-btn" id="btn-coach-play-bot" title="Play a game against the Stockfish bot">
                 <span class="material-symbols-outlined">sports_esports</span>
                 <span class="btn-label">Play the bot</span>
