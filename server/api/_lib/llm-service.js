@@ -1,6 +1,6 @@
 // Unified LLM service for the AI Coach.
 //
-// Inference runs on GROQ ONLY. There is no Fast/Strong tier anymore — the
+// Inference runs on NVIDIA ONLY. There is no Fast/Strong tier anymore — the
 // feature set was simplified to a single model, with a cheap fallback:
 //
 //   model list = [ openai/gpt-oss-120b, openai/gpt-oss-20b ]
@@ -10,19 +10,19 @@
 // so the coach keeps answering. All models are OpenAI-compatible; no adapter
 // is needed.
 //
-// API keys live ONLY on the server (process.env.GROQ_API_KEY) and never reach
+// API keys live ONLY on the server (process.env.NVIDIA_API_KEY) and never reach
 // the browser.
 
 const { fetchCompat } = require('./fetch-compat');
 
-const GROQ_BASE_URL = process.env.GROQ_BASE_URL || 'https://api.groq.com/openai';
+const NVIDIA_BASE_URL = process.env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1';
 
 // Ordered model fallback list. openai/gpt-oss-120b is the primary/recommended model;
-// openai/gpt-oss-20b is used when 120b runs out. EVERY model here must be Groq-hosted.
+// openai/gpt-oss-20b is used when 120b runs out. EVERY model here must be NVIDIA-hosted.
 // The first configured, non-empty entry wins per-run (all listed are tried in
 // order until one succeeds).
-function groqModelList() {
-  const fromEnv = String(process.env.GROQ_MODELS || '').split(',').map((m) => m.trim()).filter(Boolean);
+function nvidiaModelList() {
+  const fromEnv = String(process.env.NVIDIA_MODELS || '').split(',').map((m) => m.trim()).filter(Boolean);
   const defaults = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
   return fromEnv.length ? fromEnv : defaults;
 }
@@ -151,17 +151,18 @@ function assembleStreamResult(content, toolCalls, finishReason, usage) {
   return { content, toolCalls: calls, finishReason, usage: usage || null };
 }
 
-// One Groq call. Returns the raw fetch Response (already OpenAI-shaped).
-// modelKey is an entry from groqModelList(), e.g. 'openai/gpt-oss-120b'.
-async function callGroq({ opts, model }) {
-  const apiKey = process.env.GROQ_API_KEY;
+// One NVIDIA call. Returns the raw fetch Response (already OpenAI-shaped).
+// modelKey is an entry from nvidiaModelList(), e.g. 'openai/gpt-oss-120b'.
+// NVIDIA's base URL already ends in /v1, so chat/completions is appended directly.
+async function callNvidia({ opts, model }) {
+  const apiKey = process.env.NVIDIA_API_KEY;
   if (!apiKey) {
-    const err = new Error('Groq not configured (set GROQ_API_KEY).');
-    err.provider = 'groq';
+    const err = new Error('NVIDIA not configured (set NVIDIA_API_KEY).');
+    err.provider = 'nvidia';
     err.code = 'llm_not_configured';
     throw err;
   }
-  const res = await fetchCompat(`${GROQ_BASE_URL}/v1/chat/completions`, {
+  const res = await fetchCompat(`${NVIDIA_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -173,8 +174,8 @@ async function callGroq({ opts, model }) {
   if (!res.ok) {
     let detail = '';
     try { detail = JSON.stringify(await res.json()); } catch (_) { try { detail = await res.text(); } catch (_e) {} }
-    const err = new Error(`Groq API error ${res.status} (${model}): ${detail.slice(0, 300)}`);
-    err.provider = 'groq';
+    const err = new Error(`NVIDIA API error ${res.status} (${model}): ${detail.slice(0, 300)}`);
+    err.provider = 'nvidia';
     err.model = model;
     err.statusCode = res.status;
     err.code = 'llm_provider_error';
@@ -195,27 +196,27 @@ function isRetryable(err) {
   return sc === 429 || (sc >= 500 && sc <= 599);
 }
 
-// chatCompletion tries each model in groqModelList() in order (120b first,
+// chatCompletion tries each model in nvidiaModelList() in order (120b first,
 // then 20b), retrying each on transient errors before failing over to the next.
 // `opts.model` is accepted for back-compat but IGNORED — the tier no longer
 // exists; the model list fully governs. Returns the winning Response.
 async function chatCompletion(opts) {
-  if (!keySet('GROQ_API_KEY')) {
-    const err = new Error('No LLM provider configured (set GROQ_API_KEY).');
+  if (!keySet('NVIDIA_API_KEY')) {
+    const err = new Error('No LLM provider configured (set NVIDIA_API_KEY).');
     err.code = 'llm_not_configured';
     throw err;
   }
-  const models = groqModelList();
+  const models = nvidiaModelList();
 
   let lastErr;
   for (const model of models) {
     for (let attempt = 1; attempt <= PROVIDER_RETRIES; attempt++) {
       try {
-        return await callGroq({ opts, model });
+        return await callNvidia({ opts, model });
       } catch (err) {
         lastErr = err;
         if (attempt < PROVIDER_RETRIES && isRetryable(err)) {
-          console.warn(`[llm] groq/${model} attempt ${attempt}/${PROVIDER_RETRIES} failed (${err.statusCode}); retrying…`);
+          console.warn(`[llm] nvidia/${model} attempt ${attempt}/${PROVIDER_RETRIES} failed (${err.statusCode}); retrying…`);
           await sleep(RETRY_DELAY_MS * attempt);
           continue;
         }
@@ -223,9 +224,9 @@ async function chatCompletion(opts) {
       }
     }
     const next = models.indexOf(model) < models.length - 1;
-    console.warn(`[llm] groq/${model} failed after retries; ${next ? 'falling back' : 'no more models'}.`);
+    console.warn(`[llm] nvidia/${model} failed after retries; ${next ? 'falling back' : 'no more models'}.`);
   }
-  throw lastErr || new Error('All LLM models on Groq failed.');
+  throw lastErr || new Error('All LLM models on NVIDIA failed.');
 }
 
 const SYSTEM_PROMPT = `You are the Coach, a chess coach inside the Sing Chess Review web app.
@@ -280,5 +281,5 @@ module.exports = {
   parseToolCalls,
   streamDeltas,
   SYSTEM_PROMPT,
-  groqModelList,
+  nvidiaModelList,
 };

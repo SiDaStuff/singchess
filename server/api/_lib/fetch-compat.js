@@ -7,6 +7,7 @@ const https = require('https');
 // cloud metadata endpoints (169.254.169.254), or localhost.
 const ALLOWED_HOSTNAMES = new Set([
   // AI Coach LLM providers
+  'integrate.api.nvidia.com',
   'api.llm7.io',
   'api.cerebras.ai',
   'api.groq.com',
