@@ -3,9 +3,9 @@
 // Inference runs on GROQ ONLY. There is no Fast/Strong tier anymore — the
 // feature set was simplified to a single model, with a cheap fallback:
 //
-//   model list = [ gpt-oss-120b, gpt-oss-20b ]
+//   model list = [ openai/gpt-oss-120b, openai/gpt-oss-20b ]
 //
-// chatCompletion tries the list in order. If gpt-oss-120b is unavailable
+// chatCompletion tries the list in order. If openai/gpt-oss-120b is unavailable
 // (quota exhausted, rate-limited, or any error), it falls back to gpt-oss-20b
 // so the coach keeps answering. All models are OpenAI-compatible; no adapter
 // is needed.
@@ -17,13 +17,13 @@ const { fetchCompat } = require('./fetch-compat');
 
 const GROQ_BASE_URL = process.env.GROQ_BASE_URL || 'https://api.groq.com/openai';
 
-// Ordered model fallback list. gpt-oss-120b is the primary/recommended model;
-// gpt-oss-20b is used when 120b runs out. EVERY model here must be Groq-hosted.
+// Ordered model fallback list. openai/gpt-oss-120b is the primary/recommended model;
+// openai/gpt-oss-20b is used when 120b runs out. EVERY model here must be Groq-hosted.
 // The first configured, non-empty entry wins per-run (all listed are tried in
 // order until one succeeds).
 function groqModelList() {
   const fromEnv = String(process.env.GROQ_MODELS || '').split(',').map((m) => m.trim()).filter(Boolean);
-  const defaults = ['gpt-oss-120b', 'gpt-oss-20b'];
+  const defaults = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
   return fromEnv.length ? fromEnv : defaults;
 }
 
@@ -152,7 +152,7 @@ function assembleStreamResult(content, toolCalls, finishReason, usage) {
 }
 
 // One Groq call. Returns the raw fetch Response (already OpenAI-shaped).
-// modelKey is an entry from groqModelList(), e.g. 'gpt-oss-120b'.
+// modelKey is an entry from groqModelList(), e.g. 'openai/gpt-oss-120b'.
 async function callGroq({ opts, model }) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
