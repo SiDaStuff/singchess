@@ -23,14 +23,44 @@ const { resolveStockfishBinary } = require('./stockfish-binary');
 // are serialized on _operationChain (see _runExclusive). Interleaving two `go`
 // commands on a single stream would corrupt it.
 
-// Auto-detect a thread count for the engine. Clamp to [1, 8] and leave a core
-// free for the event loop. SERVER_STOCKFISH_THREADS overrides.
+// Auto-detect a thread count for the engine.
+//
+// The engine is the process-wide singleton owned by THIS Node instance, and
+// PM2 runs N cluster instances (ecosystem.config.cjs defaults PM2_INSTANCES=2),
+// each spawning its OWN Stockfish child. Searches serialize per child
+// (`_operationChain`: one `go` at a time), so instances can overlap.
+//
+// This box is a small VM: ~4 vCPU and the SAME host runs the Node backend, HTTP
+// serving, and puzzle builds. Stockfish must NOT crowd the rest out — it only
+// gets a slice of the cores, sized conservatively:
+//
+//   threads = min( floor(cores / instances), 2 )
+//
+//   - `floor(cores/instances)` keeps per-instance threads proportional to the
+//     machine's fair share of REAL cores.
+//   - the hard cap of 2 is the safety net for bursty shared hosts. Two search
+//     threads (2 per instance × 2 PM2 instances = 4 at peak across the box) is
+//     enough parallelism for the 200–2000ms review budgets without starving the
+//     Node event loop or puzzle builds. Reviews are latency-bound at these
+//     budgets; past ~2 threads a hybrid/shared vCPU returns diminishing returns
+//     and only adds thread-sync overhead.
+//
+// SERVER_STOCKFISH_THREADS overrides the whole thing (clamped [1, 8]) — set it
+// on a beefier dedicated box (e.g. =4) where Stockfish can have more. The boot
+// log prints the effective count so the operator can verify.
 function detectThreadCount() {
   const env = parseInt(String(process.env.SERVER_STOCKFISH_THREADS || '').trim(), 10);
-  if (Number.isFinite(env) && env > 0) return Math.min(env, 8);
+  if (Number.isFinite(env) && env > 0) return Math.max(1, Math.min(env, 8));
   const os = require('os');
-  const cores = Math.max(1, os.cpus?.length || 1);
-  return Math.max(1, Math.min(cores - 1, 4));
+  // NOTE: `os.cpus?.length` would read the FUNCTION's `.length` (arity), not the
+  // core count — `os.cpus()` must be CALLED. Missing this `()` silently returns
+  // 1 thread on any real host.
+  const cores = Math.max(1, os.cpus?.().length || 1);
+  // PM2 cluster count — each instance owns its own Stockfish child.
+  const instances = Math.max(1, parseInt(String(process.env.PM2_INSTANCES || '1').trim(), 10) || 1);
+  const perInstance = Math.max(1, Math.floor(cores / instances));
+  // Safety cap: this is a shared 4-vCPU VM (backend + puzzle builds + HTTP).
+  return Math.max(1, Math.min(perInstance, 2));
 }
 
 // Hash size (MB) for the native engine. The native binary handles large hashes
@@ -181,6 +211,14 @@ class ServerStockfishEngine {
   async configure() {
     this._cancelActiveSearch();
     this._send('stop');
+    // Explicitly pin the full-strength NNUE nets (SF 18's defaults, but pinning
+    // makes a config regress fail loudly instead of silently degrading to a
+    // weaker/no net — the net is what gives the search real strength per node).
+    // `EvalFile` = large net (125MiB), `EvalFileSmall` = the 6MiB net used once
+    // the large net is loaded for incremental evals.
+    this._send('setoption name EvalFile value nn-c288c895ea92.nnue');
+    this._send('setoption name EvalFileSmall value nn-37f18f62d772.nnue');
+    this._send('setoption name Ponder value false');
     this._send('setoption name MultiPV value 1');
     this._send(`setoption name Threads value ${this.threads}`);
     this._send(`setoption name Hash value ${this.hashMb}`);
@@ -542,4 +580,4 @@ if (!process._stockfishTeardownRegistered) {
   }
 }
 
-module.exports = { ServerStockfishEngine, getServerEngine, resetServerEngine };
+module.exports = { ServerStockfishEngine, getServerEngine, resetServerEngine, detectThreadCount };

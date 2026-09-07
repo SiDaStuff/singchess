@@ -245,6 +245,39 @@ function buildGamePrompt(game, verifiedCritical) {
   return `Summarize this game in 5-8 sentences using ONLY the data above: one overall takeaway, the opening story, where it was decided, and 1-2 things to work on.\n\n${lines.join('\n')}`;
 }
 
+// Per-uid concurrency + burst limits — mirror of coach-chat.js's limiter,
+// which this endpoint previously lacked (a user could run 2 chats AND
+// unlimited parallel overviews, each reserving tokens + engine time).
+const OVERVIEW_MAX_CONCURRENT_PER_UID = 2;
+const OVERVIEW_MAX_PER_MIN_PER_UID = 12;
+const overviewInFlight = new Map(); // uid -> count
+const overviewRecent = new Map();   // uid -> [timestamps]
+
+function overviewAllowUid(uid) {
+  if (!uid) return true;
+  const now = Date.now();
+  const win = 60000;
+  const recent = (overviewRecent.get(uid) || []).filter((t) => now - t < win);
+  if (recent.length >= OVERVIEW_MAX_PER_MIN_PER_UID) { overviewRecent.set(uid, recent); return false; }
+  const inFlight = overviewInFlight.get(uid) || 0;
+  if (inFlight >= OVERVIEW_MAX_CONCURRENT_PER_UID) { overviewRecent.set(uid, recent); return false; }
+  recent.push(now); overviewRecent.set(uid, recent);
+  overviewInFlight.set(uid, inFlight + 1);
+  return true;
+}
+
+function overviewReleaseUid(uid) {
+  if (!uid) return;
+  const inFlight = overviewInFlight.get(uid) || 0;
+  const next = Math.max(0, inFlight - 1);
+  if (next === 0) overviewInFlight.delete(uid);
+  else overviewInFlight.set(uid, next);
+  const now = Date.now();
+  const recent = (overviewRecent.get(uid) || []).filter((t) => now - t < 60000);
+  if (recent.length === 0) overviewRecent.delete(uid);
+  else overviewRecent.set(uid, recent);
+}
+
 exports.streamHandler = async (req, res) => {
   res.set({
     'Content-Type': 'text/event-stream; charset=utf-8',
@@ -266,11 +299,20 @@ exports.streamHandler = async (req, res) => {
   const plan = activePlan(user._profile || {});
   const tokenLimit = (plan.limits && plan.limits.coachTokensPerDay) || 0;
 
+  // Per-uid concurrency + burst gate (see limiter above). Released in the
+  // handler's finally.
+  if (!overviewAllowUid(user.uid)) {
+    sseWrite(res, 'error', { error: 'Too many coach requests at once. Please slow down.', code: 'rate_limited' });
+    res.end();
+    return;
+  }
+
   const payload = parseBody(req);
   const scope = payload.scope === 'game' ? 'game' : 'move';
   const game = payload.game && typeof payload.game === 'object' ? payload.game : null;
   const moveIndex = Math.max(0, Math.min(Math.floor(Number(payload.moveIndex)) || 0, 1000));
   if (!game) {
+    overviewReleaseUid(user.uid);
     sseWrite(res, 'error', { error: 'Missing game data.', code: 'bad_request' });
     res.end();
     return;
@@ -279,6 +321,7 @@ exports.streamHandler = async (req, res) => {
   // Heavy-action lock: don't run an overview while a review is mid-flight for
   // the same user (and vice versa) — defense in depth on the frontend gate.
   if (!acquireHeavyAction(user.uid, 'coach')) {
+    overviewReleaseUid(user.uid);
     const busy = getBusyAction(user.uid);
     sseWrite(res, 'error', {
       error: busy === 'review'
@@ -298,6 +341,7 @@ exports.streamHandler = async (req, res) => {
     const r = await reserveCoachTokens(user.uid, reserveAmount, tokenLimit);
     if (!r.allowed) {
       releaseHeavyAction(user.uid);
+      overviewReleaseUid(user.uid);
       sseWrite(res, 'error', {
         error: "You've used all your daily Coach tokens. They reset at midnight UTC — or upgrade for more.",
         code: 'quota_exceeded',
@@ -310,6 +354,7 @@ exports.streamHandler = async (req, res) => {
     reservedTotal = r.total;
   } catch (err) {
     releaseHeavyAction(user.uid);
+    overviewReleaseUid(user.uid);
     sseWrite(res, 'error', { error: 'Could not verify token quota. Please try again.', code: 'quota_check_failed' });
     res.end();
     return;
@@ -412,6 +457,7 @@ exports.streamHandler = async (req, res) => {
     }
     sseWrite(res, 'error', { error: err.message || 'Overview failed.', code: err.code || 'server_error' });
   } finally {
+    overviewReleaseUid(user && user.uid);
     releaseHeavyAction(user && user.uid);
     stopHeartbeat();
     if (!res.writableEnded) res.end();

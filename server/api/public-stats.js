@@ -3,6 +3,7 @@ const {
   incrementPublicStats,
   claimUniqueBrilliantMoves,
 } = require('./_lib/firebase-stats');
+const { requireUser } = require('./_lib/user-service');
 
 const json = (statusCode, body) => ({
   statusCode,
@@ -31,6 +32,18 @@ exports.handler = async (event) => {
     }
 
     if (event.httpMethod === 'POST') {
+      // Auth required: the increment endpoints mutate global counters, and an
+      // open POST let anyone inflate puzzlesSolved / brilliantMoves /
+      // coachGamesPlayed (per-IP write limiting alone was too weak). The app's
+      // own stat events fire only for signed-in users, and server-side review
+      // stats (movesAnalyzed) are written internally — nothing legitimate
+      // depends on anonymous increments.
+      try {
+        await requireUser(event);
+      } catch (err) {
+        return json(err.statusCode || 401, { error: err.message || 'Sign in to record stats.', code: err.code || 'unauthorized' });
+      }
+
       let payload = {};
       try {
         payload = JSON.parse(event.body || '{}');

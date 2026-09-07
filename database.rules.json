@@ -19,22 +19,22 @@
     "profiles": {
       ".read": true,
       "$username": {
-        ".write": "auth != null"
+        ".write": false
       }
     },
     "support": {
       ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
-      ".write": "auth != null",
+      ".write": false,
       ".indexOn": ["createdAt"]
     },
     "contact": {
       ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
-      ".write": "auth != null"
+      ".write": false
     },
     "abuse": {
       "reports": {
         ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
-        ".write": "auth != null",
+        ".write": false,
         ".indexOn": ["reportedAt", "reporterUid", "flaggedUid"]
       },
       "flagged": {
@@ -51,11 +51,11 @@
       },
       "ipIndex": {
         ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
-        ".write": "auth != null"
+        ".write": false
       },
       "cookieIndex": {
         ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
-        ".write": "auth != null"
+        ".write": false
       },
       "multiAccount": {
         ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
@@ -91,11 +91,11 @@
     },
     "publicStats": {
       ".read": true,
-      ".write": "auth != null"
+      ".write": false
     },
     "siteVisits": {
       ".read": "auth != null && root.child('users/' + auth.uid + '/isAdmin').val() === true",
-      ".write": true
+      ".write": false
     }
   }
 }

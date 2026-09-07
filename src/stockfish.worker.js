@@ -98,11 +98,23 @@ function dispatchToEngine(cmd) {
 // are instant. On a cache miss we stream the response body and report
 // byte-accurate progress to the main thread for the Loading Engine overlay.
 const ENGINE_CACHE_NAME = 'stockfish-engine-v3';
-const blobUrls = [];
+// Blob URLs created for the engine script (see initStockfish). On crash
+// restarts (REINIT) this array used to grow without bound — each entry kept a
+// ~2MB engine script alive in memory. We now keep only the most recent URL and
+// revoke the previous one (safe: a REINIT only happens after the old engine
+// instance is dead).
+let currentBlobUrl = null;
 
 function reportDownloadProgress(kind, received, total, cached) {
+  // initStockfish installs this hook so download progress pushes the
+  // "WASM failed to load" watchdog deadline forward (slow connections must
+  // not be misreported as a failed boot).
+  if (typeof onDownloadProgress === 'function') onDownloadProgress();
   sendToMain('PROGRESS', { kind, received, total, cached });
 }
+
+// Assigned inside initStockfish (arms the output watchdog).
+let onDownloadProgress = null;
 
 // Fetch `url`, caching the response. Returns an ArrayBuffer of the body.
 // Streams + reports progress on a cache miss; serves instantly on a hit.
@@ -268,7 +280,10 @@ async function initStockfish(config) {
   let jsText = patchStockfishJs(new TextDecoder().decode(jsBuf));
   const jsBlob = new Blob([new TextEncoder().encode(jsText)], { type: 'text/javascript' });
   jsBlobUrl = URL.createObjectURL(jsBlob);
-  blobUrls.push(jsBlobUrl);
+  if (currentBlobUrl && currentBlobUrl !== jsBlobUrl) {
+    try { URL.revokeObjectURL(currentBlobUrl); } catch (_err) { /* ignore */ }
+  }
+  currentBlobUrl = jsBlobUrl;
 
   // Pre-seed Module with locateFile and the cached WASM bytes (if any).
   // If we have the binary already, override Emscripten's instantiateWasm so it
@@ -299,15 +314,29 @@ async function initStockfish(config) {
 
   // Track if we've received any engine output — if not, the WASM likely failed.
   // _hasReceivedOutput is set by the wrapped self.postMessage (line ~64) when
-  // the engine prints anything. Previously a local `anyOutput` flag was
-  // declared here but never set true, so this monitor could never distinguish
-  // a silent hang from a healthy boot.
-  const outputMonitor = setTimeout(() => {
-    if (!_hasReceivedOutput && !engineReady) {
-      dbg('No engine output received — WASM may have failed to load');
-      sendToMain('ERROR', 'Stockfish WASM failed to load. Check browser console for details.');
-    }
-  }, 15000);
+  // the engine prints anything.
+  //
+  // The deadline SLIDES forward whenever engine downloads make progress. The
+  // fixed 15s timer used to start before the multi-MB WASM fetch and stay put,
+  // so on a slow connection the monitor fired mid-download and reported a
+  // false "WASM failed to load" while the engine was actually still loading
+  // fine. Each download-progress event pushes the check 15s into the future.
+  let outputMonitor = null;
+  const OUTPUT_MONITOR_MS = 15000;
+  const armOutputMonitor = () => {
+    if (outputMonitor) clearTimeout(outputMonitor);
+    outputMonitor = setTimeout(() => {
+      if (!_hasReceivedOutput && !engineReady) {
+        dbg('No engine output received — WASM may have failed to load');
+        sendToMain('ERROR', 'Stockfish WASM failed to load. Check browser console for details.');
+      }
+    }, OUTPUT_MONITOR_MS);
+  };
+  // Hook download progress → watchdog deadline extension.
+  onDownloadProgress = armOutputMonitor;
+  // Start the watchdog now: if the very first fetch stalls with no bytes,
+  // we still want a failure signal (15s of zero progress = genuinely stuck).
+  armOutputMonitor();
 
   try {
     // Temporarily clear self.onmessage so the stockfish IIFE installs its own

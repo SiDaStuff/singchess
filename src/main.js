@@ -4,6 +4,7 @@ import './ui/styles.css';
 // wins the cascade without touching app.js logic or DOM bindings.
 import '../redesign/styles/redesign-overlay.css';
 import './api-base.js';
+import './firebase-config.js';
 import './pieces.js';
 import './board.js';
 import './ui/board.js';
@@ -20,7 +21,10 @@ import './app.js';
 // .sc-sidebar drawer (the production app only drives the old .apple-nav).
 // Imported last so it can capture the toggle click before app.js's handler.
 import initSidebar from '../redesign/components/sidebar-controller.js';
+// Mobile review bottom tab bar (Feedback / Moves / Graph) on ≤1024px.
+import initMobileChrome from '../redesign/components/mobile-chrome.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   initSidebar();
+  initMobileChrome();
 });

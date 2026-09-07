@@ -1,3 +1,16 @@
 {
-  "type": "commonjs"
+  "name": "chess-review-server",
+  "version": "2.0.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "API server for the chess review app. Declares its own runtime dependencies so a standalone server/ deploy doesn't rely on root node_modules hoisting (express's transitive 'cookie' broke require at startup).",
+  "main": "index.cjs",
+  "dependencies": {
+    "chess.js": "^0.10.3",
+    "cookie": "^0.7.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "firebase-admin": "^13.10.0",
+    "morgan": "^1.10.0"
+  }
 }

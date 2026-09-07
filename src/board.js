@@ -213,6 +213,16 @@ class ChessBoard {
     // keyboard users alike (WCAG 2.1.1 / 2.1.2 / 4.1.2).
     this.container.setAttribute('role', 'grid');
     this.container.setAttribute('aria-label', 'Chess board');
+    // Single tab stop for the whole board (roving tabindex on the cells below).
+    this.container.setAttribute('tabindex', '0');
+    // First arrival via Tab lands on a1 (or the current focused square).
+    this.container.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (e.target !== this.container) return; // cell keydowns handle their own
+      e.preventDefault();
+      const first = this.container.querySelector('[data-square="a1"]') || this.container.querySelector('[data-square]');
+      if (first) first.focus();
+    });
     this.container.innerHTML = '';
     for (let row = 0; row < 8; row++) {
       for (let col = 0; col < 8; col++) {
@@ -227,7 +237,11 @@ class ChessBoard {
         div.className = `square ${isLight ? 'light' : 'dark'}`;
         div.dataset.square = sq;
         div.setAttribute('role', 'gridcell');
-        div.setAttribute('tabindex', '0');
+        // Roving tabindex (WCAG-friendly): instead of 64 tab stops, the board
+        // container is ONE tab stop; arrow keys move focus between squares via
+        // _onSquareKeyDown. The first square (a1) is focusable programmatically
+        // so arrow navigation always has an entry point.
+        div.setAttribute('tabindex', sq === 'a1' ? '0' : '-1');
         div.setAttribute('aria-label', `Square ${file}${rank}`);
         div.addEventListener('keydown', (e) => this._onSquareKeyDown(sq, e));
 
@@ -368,7 +382,7 @@ class ChessBoard {
     this.bestMoveArrow = {
       from: uciMove.substring(0, 2),
       to: uciMove.substring(2, 4),
-      color: options.color || '#96BC4B',
+      color: options.color || '#77c75d',
     };
     this._updateArrows();
   }
@@ -628,7 +642,7 @@ class ChessBoard {
 	    this.arrowLayer.innerHTML = `
 	      <defs>
 	        <marker id="best-move-arrowhead" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto" markerUnits="strokeWidth">
-	          <path d="M 0 0 L 7 3.5 L 0 7 z" fill="${this.bestMoveArrow?.color || '#96BC4B'}"></path>
+	          <path d="M 0 0 L 7 3.5 L 0 7 z" fill="${this.bestMoveArrow?.color || '#77c75d'}"></path>
 	        </marker>
 	        <marker id="user-arrowhead" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto" markerUnits="strokeWidth">
 	          <path d="M 0 0 L 7 3.5 L 0 7 z" fill="${this._annotationArrowColor()}"></path>

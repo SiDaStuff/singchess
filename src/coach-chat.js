@@ -529,14 +529,14 @@
     if (!isValidFen(fen)) {
       // The LLM sent an invalid FEN. Return a clear error — NEVER a silent
       // score:0 result the model could cite as "+0.00, position is equal".
-      appendToolCard('stockfish', 'Invalid FEN — could not analyze.');
+      // The server's tool_result_visible event renders the error card, so we
+      // don't append one here (avoids a duplicate "Invalid FEN" card per call).
       await postToolResult(id, { error: 'Invalid FEN. The position could not be parsed (check the piece placement, side to move, and ranks).' });
       return;
     }
     const app = state.app;
     if (!app.engine?.ready && app._initEngine) await app._initEngine();
     if (!app.engine?.ready) {
-      appendToolCard('stockfish', 'Engine not ready — could not analyze.');
       await postToolResult(id, { error: 'Stockfish engine is not ready yet. Wait for it to load and try again.' });
       return;
     }
@@ -558,7 +558,6 @@
     // a real eval. Instead, flag it as a timeout so the system prompt's ERROR
     // HANDLING rule kicks in (honest "I couldn't verify that").
     if (result && result.timedOut && !result.bestMove) {
-      appendToolCard('stockfish', 'Analysis timed out — no verified result.');
       await postToolResult(id, { error: 'Stockfish analysis timed out before producing a result. No verified evaluation is available.' });
       return;
     }
@@ -851,6 +850,29 @@
     });
     el['btn-coach-sidebar-toggle']?.addEventListener('click', () => {
       el['coach-chat-card']?.classList.toggle('sidebar-collapsed');
+    });
+    // On mobile the history sidebar is an overlay drawer. Clicking the dimmed
+    // area behind it (or pressing Escape) closes the drawer. Listen on the
+    // shell so clicks that land on the dim overlay (which sits over the main
+    // pane) are caught even though the main pane itself is pointer-events:none.
+    // Ignore clicks on the toggle button itself (its own handler opens/closes).
+    el['coach-chat-card']?.addEventListener('click', (e) => {
+      const card = el['coach-chat-card'];
+      if (!card) return;
+      const isMobile = window.innerWidth <= 720;
+      const open = !card.classList.contains('sidebar-collapsed');
+      // Only close when the drawer is open AND the click is outside the sidebar
+      // AND not on the toggle button (which manages its own state).
+      if (isMobile && open && !e.target.closest('.coach-sidebar') && !e.target.closest('#btn-coach-sidebar-toggle')) {
+        card.classList.add('sidebar-collapsed');
+      }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      const card = el['coach-chat-card'];
+      if (card && window.innerWidth <= 720 && !card.classList.contains('sidebar-collapsed')) {
+        card.classList.add('sidebar-collapsed');
+      }
     });
   }
 

@@ -46,7 +46,14 @@
   --card-padding: 18px;
   /* Board size: give the board more room on wide screens. The square
      aspect-ratio on .board-wrapper ensures it's always square. */
-  --board-size: min(680px, calc(100vw - 540px), calc(100vh - 220px));
+  --board-size: min(760px, calc(100vw - 480px), calc(100vh - 200px));
+  /* Mobile board size. public/css/style.css swaps --board-size to
+     --board-size-mobile at ≤640px; WITHOUT this token the overlay's desktop
+     calc would win on phones and the board could exceed the viewport width.
+     Budget accounts for: 48px fixed header + player strips + controls +
+     bottom tab bar + safe margins — so the board stays square and fully
+     visible without scrolling. */
+  --board-size-mobile: min(calc(100vw - 24px), calc(100vh - 300px), 480px);
 }
 
 /* Pages + app scaffold → warm cream page, cream-white panels */
@@ -237,6 +244,75 @@ body {
   .sc-scrim { z-index: 85; }
   .sc-sidebar.is-open { transform: translateX(0); }
   body.sc-sidebar-open { overflow: hidden; }
+}
+
+/* =============================================================================
+ * MOBILE REVIEW TAB BAR  — thumb-friendly Feedback / Moves / Graph switcher.
+ * Markup lives in index.html (#sc-mobile-tabs); state is driven by
+ * body.sc-mobile-tabs-shown + body.mobile-tab-<key> from mobile-chrome.js.
+ * ========================================================================== */
+.sc-mobile-tabs { display: none; }
+.sc-mobile-tabs[hidden] { display: none; }
+
+@media (max-width: 1024px) {
+  /* Fixed bottom bar, above content, below any modal overlay. */
+  .sc-mobile-tabs:not([hidden]) {
+    display: flex;
+    justify-content: space-around;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 45;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(12px);
+    border-top: 1px solid var(--border-soft);
+    box-shadow: 0 -6px 20px rgba(26, 32, 48, 0.06);
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  }
+  .sc-mobile-tabs .sc-tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 6px 4px;
+    border: none;
+    background: transparent;
+    border-radius: 12px;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.16s ease, color 0.16s ease;
+    min-height: 44px; /* touch target */
+    -webkit-tap-highlight-color: transparent;
+  }
+  .sc-mobile-tabs .sc-tab .material-symbols-outlined { font-size: 1.4rem; }
+  .sc-mobile-tabs .sc-tab:hover { background: var(--bg-muted); color: var(--text-primary); }
+  .sc-mobile-tabs .sc-tab.is-active { color: var(--text-primary); }
+  .sc-mobile-tabs .sc-tab.is-active .material-symbols-outlined {
+    font-variation-settings: 'FILL' 1;
+  }
+
+  /* Give the last analysis card room so the fixed bar never covers it. */
+  body.sc-mobile-tabs-shown.in-app-route .main-content,
+  body.sc-mobile-tabs-shown.menu-active .main-content {
+    padding-bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+
+  /* Reveal one core section at a time while the bar is onscreen. Everything
+     else in the analysis column (openings, game status, summary, engine info,
+     review button) stays in flow and is never hidden. */
+  body.sc-mobile-tabs-shown.mobile-tab-feedback .analysis-shell > .move-list-container,
+  body.sc-mobile-tabs-shown.mobile-tab-feedback .analysis-shell > .eval-graph-card,
+  body.sc-mobile-tabs-shown.mobile-tab-moves .analysis-shell > .live-eval,
+  body.sc-mobile-tabs-shown.mobile-tab-moves .analysis-shell > .eval-graph-card,
+  body.sc-mobile-tabs-shown.mobile-tab-graph .analysis-shell > .live-eval,
+  body.sc-mobile-tabs-shown.mobile-tab-graph .analysis-shell > .move-list-container {
+    display: none;
+  }
 }
 
 /* =============================================================================
@@ -896,15 +972,17 @@ textarea:focus-visible,
   display: grid;
   grid-template-columns: 1fr auto;
   grid-template-areas:
+    "top side"
     "board side"
+    "bottom side"
     "nav nav";
   gap: 12px;
   align-items: start;
 }
 /* Board stack: player-top, board-wrapper, player-bottom flow in the board col. */
 .board-wrapper { grid-area: board; }
-.player-info.player-top { grid-area: board; align-self: start; }
-.player-info.player-bottom { grid-area: board; align-self: end; }
+.player-info.player-top { grid-area: top; align-self: start; }
+.player-info.player-bottom { grid-area: bottom; align-self: end; }
 /* Side controls (flip/export) sit beside the board. */
 .board-controls-side { grid-area: side; align-self: center; }
 /* Nav controls span full width under the board. */
@@ -923,19 +1001,28 @@ textarea:focus-visible,
   gap: 8px;
   width: 100%;
 }
-/* Icon-only controls (flip / export / reset) beside the board: square, no label. */
+/* Side controls (flip / export / reset) beside the board: icon + label. */
 .board-controls-side .btn-icon-only {
-  width: 44px;
+  width: 100%;
+  min-width: 64px;
   height: 44px;
-  padding: 0;
+  padding: 0 10px;
+  flex-direction: column;
+  gap: 2px;
 }
+.board-controls-side .btn-icon-only .btn-symbol { font-size: 1.1rem; }
+.board-controls-side .btn-icon-only .btn-label { font-size: 0.68rem; font-weight: 600; }
 
-/* Mobile: stack everything — side controls become a row above the nav. */
-@media (max-width: 640px) {
+/* Mobile: stack everything — side controls become a row above the nav.
+   Uses the same 760px breakpoint as the production mobile layout so the
+   nameplates stay full-width (not squeezed by the side-controls column). */
+@media (max-width: 760px) {
   .board-section {
     grid-template-columns: 1fr;
     grid-template-areas:
+      "top"
       "board"
+      "bottom"
       "side"
       "nav";
   }
@@ -1121,5 +1208,137 @@ textarea:focus-visible,
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* =============================================================================
+ * COACH CHAT — MOBILE  (≤720px)
+ * Make the coach feel like a native chat app on phones: the conversation fills
+ * the viewport, the input is pinned to the bottom, and the history sidebar
+ * becomes an overlay drawer instead of a tall block stacked above the chat.
+ * ========================================================================== */
+@media (max-width: 720px) {
+  /* The coach page is a centered page-panel; let the chat fill the width and
+     use the full viewport height so it reads as a chat screen, not a card. */
+  #page-coach.page-panel {
+    padding: 0;
+    align-items: stretch;
+    justify-items: stretch;
+  }
+
+  .coach-chat-shell {
+    width: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    /* Fill the viewport minus the sticky app header (48px) so the input can
+       pin to the bottom like a native chat app. The footer sits below the
+       fold and is reachable by scrolling. */
+    height: calc(100dvh - 48px);
+    max-height: calc(100dvh - 48px);
+  }
+
+  /* The conversation pane is the flex column that fills the shell. */
+  .coach-chat-main {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+  }
+
+  /* Header: single row, no wrapping, compact. */
+  .coach-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: nowrap;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .coach-identity { gap: 10px; min-width: 0; }
+  .coach-avatar { width: 40px; height: 40px; border-radius: 10px; flex: 0 0 auto; }
+  .coach-identity h3 { font-size: 1rem; margin: 0; white-space: nowrap; }
+  .coach-coming-soon { max-width: 140px; }
+  .coach-chat-header-actions { gap: 6px; flex-wrap: nowrap; justify-content: flex-end; }
+  .coach-play-btn { min-height: 34px; padding: 0 10px; }
+
+  /* Messages: flex-1 so it scrolls between header and input. */
+  .coach-chat-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .coach-chat-messages {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+    padding: 8px 2px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Input: pinned at the bottom of the flex column. */
+  .coach-chat-input {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-soft);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .coach-chat-textarea {
+    font-size: 1rem; /* ≥16px prevents iOS zoom-on-focus */
+    max-height: 96px;
+    padding: 10px 12px;
+  }
+  .coach-send-btn,
+  .coach-stop-btn {
+    min-height: 44px;
+    min-width: 44px;
+    flex: 0 0 auto;
+  }
+
+  /* History sidebar: overlay drawer, hidden by default (JS adds
+     sidebar-collapsed on mount). When shown, it slides over the chat. */
+  .coach-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 60;
+    width: min(300px, 82vw);
+    max-height: none;
+    border-radius: 0 16px 16px 0;
+    box-shadow: var(--shadow-xl);
+    margin: 0;
+    padding: 14px 12px;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+  }
+  .coach-chat-shell:not(.sidebar-collapsed) .coach-sidebar {
+    transform: translateX(0);
+  }
+  /* When the drawer is open, dim the chat behind it. */
+  .coach-chat-shell:not(.sidebar-collapsed) .coach-chat-main {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  .coach-chat-shell:not(.sidebar-collapsed) .coach-chat-main::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 59;
+  }
+  .coach-chat-shell:not(.sidebar-collapsed) .coach-sidebar {
+    z-index: 61;
   }
 }

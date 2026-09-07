@@ -4,8 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sing CHESS</title>
+  <!-- SEO / social (index.html is the only crawlable page — public/*.html are
+       noindex redirect stubs). -->
+  <meta name="description" content="Sing CHESS — analyse your chess games with a server-grade Stockfish engine, get AI coach feedback, train with puzzles, and track your rating.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Sing CHESS — AI chess review, coach & puzzles">
+  <meta property="og:description" content="Server-grade engine analysis, an AI coach that answers your questions, puzzle training, and anticheat tools.">
+  <meta property="og:url" content="https://chess.singdevelopments.com/">
+  <meta property="og:image" content="https://chess.singdevelopments.com/assets/icon.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="theme-color" content="#0f1115">
   <link rel="icon" type="image/png" href="/assets/favicon.png">
-  <link rel="apple-touch-icon" href="/assets/favicon.png">
+  <link rel="apple-touch-icon" href="/assets/icons/icon-180.png">
+  <link rel="manifest" href="/site.webmanifest">
   <!-- Board + app CSS is bundled via src/main.js -> src/ui/styles.css (which
        imports public/css/style.css). Removed the old <link> to avoid double-load. -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -18,7 +29,9 @@
     window.dataLayer = window.dataLayer || [];
     function gtag(){dataLayer.push(arguments);}
     gtag('js', new Date());
-    gtag('config', 'G-TFW7HFWKYP', { send_page_view: true });
+    // SPA (src/app.js _trackPageView) fires page_view events on every route —
+    // disable the automatic one to avoid double-counting the initial load.
+    gtag('config', 'G-TFW7HFWKYP', { send_page_view: false });
   </script>
 </head>
 <body class="menu-active">
@@ -114,9 +127,11 @@
               <span>Paste PGN</span>
             </button>
             <button type="button" class="import-tab" data-import-tab="lichess" role="tab" aria-selected="false">
+              <span class="import-tab-logo lichess-logo" aria-hidden="true"></span>
               <span>Lichess</span>
             </button>
             <button type="button" class="import-tab" data-import-tab="chesscom" role="tab" aria-selected="false">
+              <span class="import-tab-logo chesscom-logo" aria-hidden="true"></span>
               <span>Chess.com</span>
             </button>
           </div>
@@ -124,6 +139,7 @@
           <div class="import-panels">
             <!-- PGN panel -->
             <div class="import-panel active" data-import-panel="pgn">
+              <p class="import-panel-hint">Paste a game in PGN format to review it instantly.</p>
               <label class="field" for="home-pgn-input">Your game (PGN)</label>
               <textarea id="home-pgn-input" class="import-pgn-input input-select" placeholder="Paste your PGN here...&#10;&#10;Example:&#10;1. e4 e5 2. Nf3 Nc6 3. Bb5 a6..." rows="8"></textarea>
               <div class="import-actions">
@@ -144,6 +160,7 @@
 
             <!-- Lichess panel -->
             <div class="import-panel" data-import-panel="lichess">
+              <p class="import-panel-hint">Enter a Lichess username to load their recent games.</p>
               <label class="field">
                 <span class="field-label">Lichess username</span>
                 <input id="home-import-username-lichess" class="input-select import-username" type="text" placeholder="hikaru" data-source="lichess">
@@ -168,6 +185,7 @@
 
             <!-- Chess.com panel -->
             <div class="import-panel" data-import-panel="chesscom">
+              <p class="import-panel-hint">Enter a Chess.com username to load their recent games.</p>
               <label class="field">
                 <span class="field-label">Chess.com username</span>
                 <input id="home-import-username-chesscom" class="input-select import-username" type="text" placeholder="MagnusCarlsen" data-source="chesscom">
@@ -219,20 +237,6 @@
       <div class="home-about">
         <h2 class="home-about-title">What is Sing Chess?</h2>
         <p class="home-about-text">Upload any game, play through your moves, and see what Stockfish thinks. Practice with puzzles matched to your level, or ask the AI coach about a position.</p>
-        <div class="home-about-stats" id="home-about-stats" aria-label="Site activity">
-          <div class="home-about-stat">
-            <strong id="home-about-reviews">—</strong>
-            <span>moves reviewed</span>
-          </div>
-          <div class="home-about-stat">
-            <strong id="home-about-puzzles">—</strong>
-            <span>puzzles solved</span>
-          </div>
-          <div class="home-about-stat">
-            <strong id="home-about-coaches">—</strong>
-            <span>coach games played</span>
-          </div>
-        </div>
       </div>
 
       <!-- Compact feature links -->
@@ -624,15 +628,16 @@
     <section id="page-settings" class="page-panel" hidden>
       <div class="card panel-wide page-card">
         <h1>Settings</h1>
-        <h2 style="font-size:1rem;margin-top:4px">Review Strength</h2>
-        <p>How deeply the engine analyses each move. Quick is fastest; Thorough is most accurate.</p>
-        <div class="field">
-          <div class="chip-row" id="settings-review-strength-chips" role="radiogroup" aria-label="Review strength"
-               data-target="settings-review-strength">
-            <label class="chip-label">
-              <input type="radio" name="settings-review-strength-chip" value="quick">
-              <span class="chip">Quick</span>
-            </label>
+        <div class="settings-section">
+          <h2 class="settings-section-title">Review Strength</h2>
+          <p class="settings-section-sub">How deeply the engine analyses each move. Quick is fastest; Thorough is most accurate.</p>
+          <div class="field">
+            <div class="chip-row" id="settings-review-strength-chips" role="radiogroup" aria-label="Review strength"
+                 data-target="settings-review-strength">
+              <label class="chip-label">
+                <input type="radio" name="settings-review-strength-chip" value="quick">
+                <span class="chip">Quick</span>
+              </label>
             <label class="chip-label">
               <input type="radio" name="settings-review-strength-chip" value="standard" checked>
               <span class="chip">Standard</span>
@@ -647,51 +652,52 @@
         <!-- Hidden value-carrier so the existing _saveEngineSettings parser keeps
              resolving a strength. It is REPLACED by the chip row above; never shown. -->
         <input type="hidden" id="settings-review-strength" value="standard">
-        <!-- Advanced: custom depth + per-move time, folded into the browser engine
-             section below rather than a separate hidden block. -->
-        <h2 style="font-size:1rem;margin-top:18px">Review Source</h2>
-        <p>Choose where game reviews run. Server reviews are faster and stronger but require an account.</p>
-        <label class="field">
-          <span class="field-label">Default Review Source</span>
-          <select id="analysis-location" class="input-select">
-            <option value="browser">Browser (local)</option>
-            <option value="server">Server (requires account)</option>
-          </select>
-        </label>
+        </div>
 
-        <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
+        <div class="settings-section">
+          <h2 class="settings-section-title">Review Source</h2>
+          <p class="settings-section-sub">Choose where game reviews run. Server reviews are faster and stronger but require an account.</p>
+          <label class="field">
+            <span class="field-label">Default Review Source</span>
+            <select id="analysis-location" class="input-select">
+              <option value="browser">Browser (local)</option>
+              <option value="server">Server (requires account)</option>
+            </select>
+          </label>
+        </div>
 
-        <h2 style="font-size:1rem">Browser Engine</h2>
-        <p>These settings apply when using browser review, coach, live eval, and local analysis.</p>
-        <label class="field">
-          <span class="field-label">Engine Type</span>
-          <select id="settings-engine-module" class="input-select">
-            <option value="lite-single">Stockfish 18 Lite WASM (7 MB, recommended)</option>
-            <option value="full-single">Stockfish 18 Full WASM (108 MB)</option>
-          </select>
-        </label>
-        <label class="switch-row app-switch-row">
-          <span>
-            <strong>Climb depth while on a move</strong>
-            <small>Keep deepening the analysis higher and higher the longer you sit on a move. Turn off to use a single fixed depth.</small>
-          </span>
-          <span class="app-switch">
-            <input id="settings-live-deepening" type="checkbox" checked>
-            <span class="app-switch-track"></span>
-          </span>
-        </label>
-        <label class="field" id="settings-forced-depth-field">
-          <span class="field-label">Forced Depth (when climbing is off)</span>
-          <select id="settings-forced-depth" class="input-select">
-            <option value="10">Depth 10 (fast)</option>
-            <option value="14">Depth 14</option>
-            <option value="16" selected>Depth 16 (default)</option>
-            <option value="18">Depth 18</option>
-            <option value="20">Depth 20</option>
-            <option value="22">Depth 22</option>
-            <option value="24">Depth 24</option>
-          </select>
-        </label>
+        <div class="settings-section">
+          <h2 class="settings-section-title">Browser Engine</h2>
+          <p class="settings-section-sub">These settings apply when using browser review, coach, live eval, and local analysis.</p>
+          <label class="field">
+            <span class="field-label">Engine Type</span>
+            <select id="settings-engine-module" class="input-select">
+              <option value="lite-single">Stockfish 18 Lite WASM (7 MB, recommended)</option>
+              <option value="full-single">Stockfish 18 Full WASM (108 MB)</option>
+            </select>
+          </label>
+          <label class="switch-row app-switch-row">
+            <span>
+              <strong>Climb depth while on a move</strong>
+              <small>Keep deepening the analysis higher and higher the longer you sit on a move. Turn off to use a single fixed depth.</small>
+            </span>
+            <span class="app-switch">
+              <input id="settings-live-deepening" type="checkbox" checked>
+              <span class="app-switch-track"></span>
+            </span>
+          </label>
+          <label class="field" id="settings-forced-depth-field">
+            <span class="field-label">Forced Depth (when climbing is off)</span>
+            <select id="settings-forced-depth" class="input-select">
+              <option value="10">Depth 10 (fast)</option>
+              <option value="14">Depth 14</option>
+              <option value="16" selected>Depth 16 (default)</option>
+              <option value="18">Depth 18</option>
+              <option value="20">Depth 20</option>
+              <option value="22">Depth 22</option>
+              <option value="24">Depth 24</option>
+            </select>
+          </label>
         <label class="switch-row app-switch-row">
           <span>
             <strong>Advanced engine settings</strong>
@@ -733,43 +739,45 @@
         </div>
         <button id="btn-save-engine-settings" class="btn btn-primary" type="button">Save Engine Settings</button>
         <p class="account-status" id="engine-settings-status"></p>
-        <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
-        <h2 style="font-size:1rem">Board Appearance</h2>
-        <div class="field">
-          <span class="field-label">Board Colors</span>
-          <div class="select-row" data-cols="3" role="radiogroup" aria-label="Board colors">
-            <label class="select-row-item board-color-chip">
-              <input type="radio" name="settings-board-theme" value="classic">
-              <span class="board-color-split" style="background:linear-gradient(135deg,#f7f1e4 50%,#b88d58 50%)"></span>
-              <span class="board-color-chip-label">Classic</span>
-            </label>
-            <label class="select-row-item board-color-chip">
-              <input type="radio" name="settings-board-theme" value="green">
-              <span class="board-color-split" style="background:linear-gradient(135deg,#eeeed2 50%,#769656 50%)"></span>
-              <span class="board-color-chip-label">Tournament Green</span>
-            </label>
-            <label class="select-row-item board-color-chip">
-              <input type="radio" name="settings-board-theme" value="blue">
-              <span class="board-color-split" style="background:linear-gradient(135deg,#d8e2e7 50%,#799db3 50%)"></span>
-              <span class="board-color-chip-label">Coastal Blue</span>
-            </label>
-            <label class="select-row-item board-color-chip">
-              <input type="radio" name="settings-board-theme" value="slate">
-              <span class="board-color-split" style="background:linear-gradient(135deg,#dfe5ea 50%,#6d7883 50%)"></span>
-              <span class="board-color-chip-label">Slate</span>
-            </label>
-            <label class="select-row-item board-color-chip">
-              <input type="radio" name="settings-board-theme" value="walnut">
-              <span class="board-color-split" style="background:linear-gradient(135deg,#f1d8ae 50%,#8a5a32 50%)"></span>
-              <span class="board-color-chip-label">Walnut</span>
-            </label>
-            <label class="select-row-item board-color-chip">
-              <input type="radio" name="settings-board-theme" value="rose">
-              <span class="board-color-split" style="background:linear-gradient(135deg,#f7e2df 50%,#b56a72 50%)"></span>
-              <span class="board-color-chip-label">Rosewood</span>
-            </label>
-          </div>
         </div>
+
+        <div class="settings-section">
+          <h2 class="settings-section-title">Board Appearance</h2>
+          <div class="field">
+            <span class="field-label">Board Colors</span>
+            <div class="select-row" data-cols="3" role="radiogroup" aria-label="Board colors">
+              <label class="select-row-item board-color-chip">
+                <input type="radio" name="settings-board-theme" value="classic">
+                <span class="board-color-split" style="background:linear-gradient(135deg,#f7f1e4 50%,#b88d58 50%)"></span>
+                <span class="board-color-chip-label">Classic</span>
+              </label>
+              <label class="select-row-item board-color-chip">
+                <input type="radio" name="settings-board-theme" value="green">
+                <span class="board-color-split" style="background:linear-gradient(135deg,#eeeed2 50%,#769656 50%)"></span>
+                <span class="board-color-chip-label">Tournament Green</span>
+              </label>
+              <label class="select-row-item board-color-chip">
+                <input type="radio" name="settings-board-theme" value="blue">
+                <span class="board-color-split" style="background:linear-gradient(135deg,#d8e2e7 50%,#799db3 50%)"></span>
+                <span class="board-color-chip-label">Coastal Blue</span>
+              </label>
+              <label class="select-row-item board-color-chip">
+                <input type="radio" name="settings-board-theme" value="slate">
+                <span class="board-color-split" style="background:linear-gradient(135deg,#dfe5ea 50%,#6d7883 50%)"></span>
+                <span class="board-color-chip-label">Slate</span>
+              </label>
+              <label class="select-row-item board-color-chip">
+                <input type="radio" name="settings-board-theme" value="walnut">
+                <span class="board-color-split" style="background:linear-gradient(135deg,#f1d8ae 50%,#8a5a32 50%)"></span>
+                <span class="board-color-chip-label">Walnut</span>
+              </label>
+              <label class="select-row-item board-color-chip">
+                <input type="radio" name="settings-board-theme" value="rose">
+                <span class="board-color-split" style="background:linear-gradient(135deg,#f7e2df 50%,#b56a72 50%)"></span>
+                <span class="board-color-chip-label">Rosewood</span>
+              </label>
+            </div>
+          </div>
         <div class="field">
           <span class="field-label">Piece Icons</span>
           <div class="select-row" data-cols="3" role="radiogroup" aria-label="Piece icons">
@@ -862,42 +870,49 @@
         </div>
         <button id="btn-save-appearance-settings" class="btn btn-primary" type="button">Save Appearance</button>
         <p class="account-status" id="appearance-settings-status"></p>
-        <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
-        <h2 style="font-size:1rem">Notifications</h2>
-        <p>Pick when you want to be notified. We never send marketing email.</p>
-        <label class="switch-row app-switch-row">
-          <span>
-            <strong>Anticheat completion</strong>
-            <small>Show a notification when a background anticheat review finishes.</small>
-          </span>
-          <span class="app-switch">
-            <input id="settings-notify-anticheat" type="checkbox" checked>
-            <span class="app-switch-track"></span>
-          </span>
-        </label>
-        <label class="switch-row app-switch-row">
-          <span>
-            <strong>Browser notifications</strong>
-            <small>Show a system popup when this tab is in the background. Your browser will ask for permission.</small>
-          </span>
-          <span class="app-switch">
-            <input id="settings-notify-push" type="checkbox">
-            <span class="app-switch-track"></span>
-          </span>
-        </label>
-        <button id="btn-save-notify-settings" class="btn btn-primary" type="button">Save Notification Settings</button>
-        <p class="account-status" id="notify-settings-status"></p>
-        <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
-        <h2 style="font-size:1rem">Cache</h2>
-        <p>Clear local settings and puzzle progress stored in this browser.</p>
-        <button id="btn-clear-cache" class="btn btn-secondary" type="button">Clear Local Cache</button>
-        <hr style="border:none;border-top:1px solid var(--border-soft);margin:8px 0">
-        <h2 style="font-size:1rem">Saved Games & Chats</h2>
-        <p>Remove saved review and coach games stored in this browser.</p>
-        <button id="btn-clear-saved-games" class="btn btn-secondary" type="button">Clear Saved Games</button>
-        <p>Remove all saved AI Coach chat conversations from this browser.</p>
-        <button id="btn-clear-coach-chats" class="btn btn-secondary" type="button">Clear Saved Coach Chats</button>
-        <p class="account-status" id="page-status"></p>
+        </div>
+
+        <div class="settings-section">
+          <h2 class="settings-section-title">Notifications</h2>
+          <p class="settings-section-sub">Pick when you want to be notified. We never send marketing email.</p>
+          <label class="switch-row app-switch-row">
+            <span>
+              <strong>Anticheat completion</strong>
+              <small>Show a notification when a background anticheat review finishes.</small>
+            </span>
+            <span class="app-switch">
+              <input id="settings-notify-anticheat" type="checkbox" checked>
+              <span class="app-switch-track"></span>
+            </span>
+          </label>
+          <label class="switch-row app-switch-row">
+            <span>
+              <strong>Browser notifications</strong>
+              <small>Show a system popup when this tab is in the background. Your browser will ask for permission.</small>
+            </span>
+            <span class="app-switch">
+              <input id="settings-notify-push" type="checkbox">
+              <span class="app-switch-track"></span>
+            </span>
+          </label>
+          <button id="btn-save-notify-settings" class="btn btn-primary" type="button">Save Notification Settings</button>
+          <p class="account-status" id="notify-settings-status"></p>
+        </div>
+
+        <div class="settings-section">
+          <h2 class="settings-section-title">Cache</h2>
+          <p class="settings-section-sub">Clear local settings and puzzle progress stored in this browser.</p>
+          <button id="btn-clear-cache" class="btn btn-secondary" type="button">Clear Local Cache</button>
+        </div>
+
+        <div class="settings-section">
+          <h2 class="settings-section-title">Saved Games &amp; Chats</h2>
+          <p class="settings-section-sub">Remove saved review and coach games stored in this browser.</p>
+          <button id="btn-clear-saved-games" class="btn btn-secondary" type="button">Clear Saved Games</button>
+          <p class="settings-section-sub">Remove all saved AI Coach chat conversations from this browser.</p>
+          <button id="btn-clear-coach-chats" class="btn btn-secondary" type="button">Clear Saved Coach Chats</button>
+          <p class="account-status" id="page-status"></p>
+        </div>
       </div>
     </section>
 
@@ -1282,7 +1297,11 @@
 
       <div class="board-section">
         <div class="player-info player-top" id="player-top">
-          <span class="player-name">Black</span>
+          <span class="player-identity">
+            <span class="player-dot" data-color="black"></span>
+            <span class="player-name">Black</span>
+            <span class="player-rating" id="player-top-rating"></span>
+          </span>
           <span class="player-clock" id="player-top-clock"></span>
           <span class="player-captured" id="captured-top"></span>
         </div>
@@ -1300,21 +1319,32 @@
           </div>
         </div>
         <div class="player-info player-bottom" id="player-bottom">
-          <span class="player-name">White</span>
+          <span class="player-identity">
+            <span class="player-dot" data-color="white"></span>
+            <span class="player-name">White</span>
+            <span class="player-rating" id="player-bottom-rating"></span>
+          </span>
           <span class="player-clock" id="player-bottom-clock"></span>
           <span class="player-captured" id="captured-bottom"></span>
         </div>
 
         <div class="board-controls">
           <div class="board-controls-side">
+            <button id="btn-import-game" class="btn-control btn-icon-only" title="Import a game" aria-label="Import a game">
+              <span class="material-symbols-outlined btn-symbol">upload</span>
+              <span class="btn-label">Import</span>
+            </button>
             <button id="btn-flip" class="btn-control btn-icon-only" title="Flip Board" aria-label="Flip Board">
               <span class="material-symbols-outlined btn-symbol">swap_horiz</span>
+              <span class="btn-label">Flip</span>
             </button>
             <button id="btn-export" class="btn-control btn-icon-only" title="Export FEN / PGN" aria-label="Export FEN or PGN">
               <span class="material-symbols-outlined btn-symbol">download</span>
+              <span class="btn-label">Export</span>
             </button>
             <button id="btn-reset" class="btn-control btn-icon-only" title="Reset Board" aria-label="Reset Board">
               <span class="material-symbols-outlined btn-symbol">restart_alt</span>
+              <span class="btn-label">Reset</span>
             </button>
           </div>
           <div class="board-controls-nav">
@@ -1447,7 +1477,7 @@
                 <span class="chip">Strong</span>
               </label>
             </div>
-            <p class="server-strength-note" id="server-strength-note">Normal review uses two-pass analysis (quick-scan + deep on critical moments).</p>
+            <p class="server-strength-note" id="server-strength-note">Normal review analyzes every move, deepening the search as the game progresses.</p>
           </div>
         </div>
 
@@ -1827,6 +1857,14 @@
               <span class="metric-label">Black ACPL</span>
               <span class="metric-value" id="acpl-black-val">--</span>
             </div>
+            <div class="summary-metric-card summary-metric-rating">
+              <span class="metric-label">White Game Rating</span>
+              <span class="metric-value" id="rating-white-val">--</span>
+            </div>
+            <div class="summary-metric-card summary-metric-rating">
+              <span class="metric-label">Black Game Rating</span>
+              <span class="metric-value" id="rating-black-val">--</span>
+            </div>
           </div>
           <div class="phase-breakdown" id="phase-breakdown"></div>
           <div class="summary-coach">
@@ -1938,9 +1976,11 @@
                 <span>Paste PGN</span>
               </button>
               <button type="button" class="import-tab" data-import-tab="lichess" role="tab" aria-selected="false">
+                <span class="import-tab-logo lichess-logo" aria-hidden="true"></span>
                 <span>Lichess</span>
               </button>
               <button type="button" class="import-tab" data-import-tab="chesscom" role="tab" aria-selected="false">
+                <span class="import-tab-logo chesscom-logo" aria-hidden="true"></span>
                 <span>Chess.com</span>
               </button>
             </div>
@@ -1948,6 +1988,7 @@
             <div class="import-panels">
               <!-- PGN panel -->
               <div class="import-panel active" data-import-panel="pgn">
+                <p class="import-panel-hint">Paste a game in PGN format to review it instantly.</p>
                 <label class="field" for="pgn-input">Your game (PGN)</label>
                 <textarea id="pgn-input" class="import-pgn-input input-select" placeholder="Paste your PGN here...&#10;&#10;Example:&#10;1. e4 e5 2. Nf3 Nc6 3. Bb5 a6..." rows="10"></textarea>
                 <div class="import-actions">
@@ -1968,6 +2009,7 @@
 
               <!-- Lichess panel -->
               <div class="import-panel" data-import-panel="lichess">
+                <p class="import-panel-hint">Enter a Lichess username to load their recent games.</p>
                 <label class="field">
                   <span class="field-label">Lichess username</span>
                   <input id="import-username-lichess" class="input-select import-username" type="text" placeholder="hikaru" data-source="lichess">
@@ -1992,6 +2034,7 @@
 
               <!-- Chess.com panel -->
               <div class="import-panel" data-import-panel="chesscom">
+                <p class="import-panel-hint">Enter a Chess.com username to load their recent games.</p>
                 <label class="field">
                   <span class="field-label">Chess.com username</span>
                   <input id="import-username-chesscom" class="input-select import-username" type="text" placeholder="MagnusCarlsen" data-source="chesscom">

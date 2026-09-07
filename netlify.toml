@@ -8,9 +8,14 @@
 # every build (manual, CI, or auto-deploy from a git push) uses the same value
 # without needing dashboard config. Override in the Netlify UI if you need a
 # different backend (e.g. a staging URL) without touching the repo.
+#
+# VITE_RECAPTCHA_SITE_KEY is REQUIRED for signup/contact captcha (src/recaptcha.js).
+# It is a public site key — safe to commit. Without it, Netlify builds ship
+# with the captcha silently disabled.
 [build.environment]
   NODE_VERSION = "20"
   VITE_API_URL = "https://chess.sidastuff.com"
+  VITE_RECAPTCHA_SITE_KEY = "6LfWZF0tAAAAAHxNeJq9wAMakhfalxlsEKm7g9u1"
 
 [build]
   command = "npm run build"

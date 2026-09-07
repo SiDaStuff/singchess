@@ -70,8 +70,14 @@ async function verify(token, expectedAction) {
 
   const secret = readSecret();
   if (!secret) {
-    // No secret configured = treat as disabled. Returning false would lock
-    // everyone out the moment a deploy forgets the env var.
+    // A missing secret used to silently disable the captcha (fail-open), so a
+    // prod misconfig went unnoticed. Now: fail CLOSED in production, fail open
+    // only when the operator has explicitly opted out with RECAPTCHA_DISABLED=1
+    // (the documented dev escape hatch) or NODE_ENV isn't production.
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[recaptcha] RECAPTCHA_SECRET is not set in production — failing closed. Set the secret or RECAPTCHA_DISABLED=1 to allow traffic.');
+      return { ok: false, score: 0, action: '', errorCodes: ['missing-secret'] };
+    }
     return { ok: true, score: 1, action: expectedAction || '', errorCodes: [], disabled: true };
   }
 

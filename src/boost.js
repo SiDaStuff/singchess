@@ -1,5 +1,7 @@
 (function () {
-  const firebaseConfig = {
+  // Single shared Firebase config (src/firebase-config.js, imported via
+  // main.js before this file). Kept as a module-level fallback too.
+  const firebaseConfig = (typeof window !== 'undefined' && window.FIREBASE_CONFIG) || {
     apiKey: 'AIzaSyAVG8Awwd2FmVIvhzHTrZ19nhoUowZ1H3M',
     authDomain: 'singchess-sd.firebaseapp.com',
     databaseURL: 'https://singchess-sd-default-rtdb.firebaseio.com',

@@ -83,6 +83,22 @@ class UciEngine {
     this.messageQueue = [];
     this.activeSearch = null;
     this.operationChain = Promise.resolve();
+    // Mirror of the engine's _isSearching() state, maintained from the UCI
+    // protocol itself: set when we send `go`, cleared when ANY `bestmove`
+    // line is observed. `activeSearch` alone is NOT a reliable busy signal —
+    // interrupt()/_cancelActiveSearch() null it while the WASM engine is
+    // still searching, which is exactly how a following isready/position
+    // used to land inside a suspended/unwinding search and crash the worker.
+    this._searchRunning = false;
+    // Permanent sentinel: watches every UCI message for `bestmove` so the
+    // busy flag clears even for searches whose caller already gave up
+    // (timed out and resolved early) — their bestmove still arrives later.
+    this._bestmoveSentinel = (msg) => {
+      if (typeof msg === 'string' && msg.startsWith('bestmove')) {
+        this._searchRunning = false;
+      }
+    };
+    this.messageQueue.push(this._bestmoveSentinel);
   }
 
   async evaluate(fen, depth = 18, timeoutMs = 20000) {
@@ -101,7 +117,10 @@ class UciEngine {
     }
 
     this._cancelActiveSearch();
-    this._safeStop();
+    // Wait for the WASM to finish unwinding from any in-flight search before
+    // sending new commands — otherwise a quick navigation can crash the worker
+    // ("RuntimeError: unreachable" from ASYNCIFY).
+    await this._stopAndWaitForReady(timeoutMs);
     // Defensive: ensure MultiPV=1 for a single-PV search. A prior
     // evaluateMultiPV resets MultiPV on finish, but if that reset threw
     // (crashed worker) we'd otherwise run this search at MultiPV=N and get
@@ -156,6 +175,7 @@ class UciEngine {
       this._addMessageHandler(handler);
       this.activeSearch = { handler, timer, hardTimer, reject };
       this._send(`position fen ${fen}`);
+      this._searchRunning = true;
       this._send(`go depth ${depth}`);
     });
   }
@@ -181,7 +201,10 @@ class UciEngine {
     }
 
     this._cancelActiveSearch();
-    this._safeStop();
+    // Wait for the WASM to finish unwinding from any in-flight search before
+    // sending new commands (avoids the ASYNCIFY "RuntimeError: unreachable"
+    // crash when navigating quickly).
+    await this._stopAndWaitForReady(timeoutMs);
     try { this._send('setoption name MultiPV value 1'); } catch (_) {}
     await this._waitForReady(timeoutMs);
 
@@ -247,6 +270,7 @@ class UciEngine {
       this._addMessageHandler(handler);
       this.activeSearch = { handler, timer, hardTimer, reject };
       this._send(`position fen ${fen}`);
+      this._searchRunning = true;
       this._send('go infinite');
     });
   }
@@ -267,7 +291,10 @@ class UciEngine {
     }
 
     this._cancelActiveSearch();
-    this._safeStop();
+    // Wait for the WASM to finish unwinding from any in-flight search before
+    // sending new commands (avoids the ASYNCIFY "RuntimeError: unreachable"
+    // crash when navigating quickly).
+    await this._stopAndWaitForReady(timeoutMs);
     this._send(`setoption name MultiPV value ${numPV}`);
     await this._waitForReady(timeoutMs);
 
@@ -332,6 +359,7 @@ class UciEngine {
       this._addMessageHandler(handler);
       this.activeSearch = { handler, timer, hardTimer, reject };
       this._send(`position fen ${fen}`);
+      this._searchRunning = true;
       this._send(`go depth ${depth}`);
     });
   }
@@ -350,15 +378,89 @@ class UciEngine {
     }
   }
 
+  // Bring the engine to a confirmed-idle state and wait for the definitive
+  // `bestmove` line before resolving. This is the ONLY safe way to hand off
+  // from one search to the next:
+  //
+  // The stockfish.js glue queues only `go`/`setoption` behind `_isSearching()`
+  // — every other command (`stop`, `isready`, `position`, `ucinewgame`) is
+  // executed immediately via a synchronous ccall into the WASM. Calling into
+  // the WASM while a search is suspended mid-ASYNCIFY-unwind throws
+  // "RuntimeError: unreachable" and kills the worker. So before sending ANY
+  // immediate-class command we (a) send `stop` (the sanctioned interrupt —
+  // safe while searching), (b) wait for `bestmove` on the UCI stream, and
+  // (c) pause briefly to let the unwind finish settling.
+  _waitEngineIdle(timeoutMs = 10000) {
+    if (!this._searchRunning) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const deadline = Date.now() + timeoutMs;
+      let sliceTimer = null;
+      let settled = false;
+      const handler = (msg) => {
+        if (typeof msg !== 'string' || !msg.startsWith('bestmove') || settled) return;
+        settled = true;
+        this._searchRunning = false;
+        clearTimeout(sliceTimer);
+        this._removeMessageHandler(handler);
+        // Small settle delay: commands sent in the same tick as bestmove can
+        // still race the ASYNCIFY rewind (observed with setoption-trained
+        // crashes). One macrotask is what the glue itself uses after
+        // onDoneSearching; we give it a little more headroom.
+        setTimeout(() => resolve(true), 25);
+      };
+      this._addMessageHandler(handler);
+      try {
+        this._send('stop');
+      } catch (error) {
+        this._removeMessageHandler(handler);
+        this._searchRunning = false;
+        resolve(false);
+        return;
+      }
+      const slice = () => {
+        if (settled || !this._searchRunning) return;
+        if (Date.now() >= deadline) {
+          this._removeMessageHandler(handler);
+          resolve(false);
+          return;
+        }
+        sliceTimer = setTimeout(slice, 150);
+      };
+      slice();
+    });
+  }
+
+  // Stop any in-flight search and WAIT for the WASM to fully unwind before
+  // returning. Uses the protocol-level _searchRunning flag (not activeSearch,
+  // which interrupt() clears while the engine is still busy) so a `stop` is
+  // always issued when needed, then confirms idleness with isready/readyok.
+  async _stopAndWaitForReady(timeoutMs = 8000) {
+    const barrier = await this._waitEngineIdle(Math.min(Math.max(timeoutMs * 2, 8000), 30000));
+    if (!barrier) {
+      // Engine is still searching past the barrier deadline. Do NOT send
+      // isready/position into a busy engine (that is the crash). Surface a
+      // transient error — the app retries, and a genuinely wedged worker is
+      // handled by the crash/restart path instead of poisoning the module.
+      const err = new Error('Engine still finishing previous search');
+      err.transient = true;
+      throw err;
+    }
+    // isready/readyok on an idle engine answers in milliseconds and confirms
+    // the WASM is fully unwound before the caller proceeds.
+    await this._waitForReady(timeoutMs);
+  }
+
   interrupt() {
-    // Only send `stop` if there was actually an active search to interrupt.
-    // Sending `stop` while the engine is idle (e.g. during a setoption/isready
-    // handshake, or between searches) can land while the lite-single WASM is
-    // parked mid-ASYNCIFY-unwind and throw "RuntimeError: unreachable",
-    // crashing the worker. Guarding on activeSearch avoids that spurious stop.
-    const hadActive = !!this.activeSearch;
+    // Interrupt a running search WITHOUT touching engine health. Stop is only
+    // sent when the protocol-level busy flag says a search is live — sending
+    // `stop` to an idle engine can land mid-ASYNCIFY-unwind and throws
+    // "RuntimeError: unreachable", crashing the worker. Callers that need a
+    // confirmed-idle engine before sending more commands must go through
+    // _stopAndWaitForReady() (the barrier waits for the bestmove our stop
+    // produces); this method stays fire-and-forget for UI-side cancellation.
+    const busy = !!(this.activeSearch || this._searchRunning);
     this._cancelActiveSearch();
-    if (hadActive) this._safeStop();
+    if (busy) this._safeStop();
   }
 
   _cancelActiveSearch() {
@@ -410,7 +512,13 @@ class UciEngine {
   }
 
   stop() {
-    this._safeStop();
+    // Same guard as interrupt(): only send `stop` when the protocol-level
+    // busy flag says a search is actually running. An unconditional stop to
+    // an idle (or mid-unwind) engine is what used to trigger the
+    // "RuntimeError: unreachable" worker crash during fast navigation.
+    if (this.activeSearch || this._searchRunning) {
+      this._safeStop();
+    }
   }
 
   _waitFor(keyword, timeoutMs = 30000) {
@@ -489,7 +597,10 @@ class UciEngine {
     // reaches the WASM while it is parked. (Same fix applied server-side.)
     return this._runExclusive(async () => {
       this._cancelActiveSearch();
-      this._safeStop();
+      // Wait for the WASM to finish unwinding from any in-flight search before
+      // sending ucinewgame (avoids the ASYNCIFY "RuntimeError: unreachable"
+      // crash when a review/new-game lands mid-search).
+      await this._stopAndWaitForReady(8000);
       // ucinewgame resets engine hash/state; readyok confirms it has been applied.
       this._send('ucinewgame');
       await this._waitForReady(8000);
@@ -563,7 +674,9 @@ class BrowserStockfishEngine extends UciEngine {
           // Worker reported an error — mark as crashed so the next search
           // triggers auto-restart. Also fail any in-flight search.
           this.crashedError = new Error(payload || 'Engine error');
+          this.crashedError.engineFatal = true;
           this.ready = false;
+          this._searchRunning = false;
           this._failActiveSearch(this.crashedError);
           fail(this.crashedError);
         } else if (type === 'PROGRESS') {
@@ -576,16 +689,20 @@ class BrowserStockfishEngine extends UciEngine {
 
       this.worker.onerror = (event) => {
         const error = new Error(event?.message || 'Browser Stockfish crashed');
+        error.engineFatal = true;
         this.crashedError = error;
         this.ready = false;
+        this._searchRunning = false;
         this._failActiveSearch(error);
         fail(error);
       };
 
       this.worker.onmessageerror = () => {
         const error = new Error('Browser Stockfish sent an unreadable message');
+        error.engineFatal = true;
         this.crashedError = error;
         this.ready = false;
+        this._searchRunning = false;
         this._failActiveSearch(error);
         fail(error);
       };
@@ -620,6 +737,7 @@ class BrowserStockfishEngine extends UciEngine {
     console.warn('Engine crashed, attempting auto-restart:', this.crashedError.message);
     this.crashedError = null;
     this.ready = false;
+    this._searchRunning = false;
     try {
       if (this.worker) {
         this.worker.terminate();
@@ -630,6 +748,7 @@ class BrowserStockfishEngine extends UciEngine {
       return true;
     } catch (err) {
       console.error('Engine auto-restart failed:', err.message);
+      err.engineFatal = true;
       this.crashedError = err;
       return false;
     }

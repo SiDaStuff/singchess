@@ -1,22 +1,15 @@
-const { getServerEngine, resetServerEngine } = require('./_lib/stockfish-engine');
+const { getServerEngine, resetServerEngine, detectThreadCount, ServerStockfishEngine } = require('./_lib/stockfish-engine');
 const { loadAnalyzer, loadChess } = require('./_lib/analysis-loader');
 const {
   incrementPublicStats,
 } = require('./_lib/firebase-stats');
 const { requireQuota, isPaidOrAbove } = require('./_lib/user-service');
 const { acquireHeavyAction, releaseHeavyAction, getBusyAction } = require('./_lib/action-lock');
+const { beginInteractiveReview, endInteractiveReview } = require('./_lib/review-coordination');
 const crypto = require('crypto');
 
 const SERVER_POSITION_BATCH_LIMIT = 12;
 const SERVER_ACTIVE_ANALYSIS_LIMIT = 5;
-
-// Auto-detect CPU cores and set thread count for the engine.
-// Limits to 4 threads max to avoid overloading serverless instances.
-function _detectThreadCount() {
-  const os = require('os');
-  const cores = Math.max(1, os.cpus?.length || 1);
-  return Math.min(cores, 4);
-}
 
 // Server review profiles — two-pass analysis.
 //
@@ -26,23 +19,27 @@ function _detectThreadCount() {
 //   re-evaluated at a higher depth with a generous movetime ceiling. One gnarly
 //   tactical position can't stall the whole queue.
 //
-// Normal review: quick-scan depth 12 / movetime 300ms, mid depth 14 / movetime 2000ms,
-//   deep depth 16 / movetime 4000ms. Critical moments get a mid-depth pass; the most
+// Normal review: quick-scan depth 12 / movetime 250ms, mid depth 13 / movetime 700ms,
+//   deep depth 14 / movetime 1500ms. Critical moments get a mid-depth pass; the most
 //   severe ("really big") moments get an extra deepest pass.
-// Strong review:  quick-scan depth 16 / movetime 500ms, deep depth 22 / movetime 8000ms
-const _threads = _detectThreadCount();
+// Strong review:  quick-scan depth 16 / movetime 500ms, deep depth 20 / movetime 5000ms
+// Thread count for review profile metadata. The engine's own configure() sets
+// `setoption Threads` from the same detectThreadCount() (exported from
+// stockfish-engine.js), so this must always match — see the "server review uses
+// movetime" + threading notes.
+const _threads = detectThreadCount();
 const SERVER_FAST_PROFILE = {
   mode: 'depth+movetime', depth: 10, movetimeMs: 200, multiPv: 2, timeoutMs: 3000,
 };
 const SERVER_REVIEW_PROFILE = {
-  quickScan: { mode: 'depth+movetime', depth: 12, movetimeMs: 300, multiPv: 3, timeoutMs: 5000 },
-  mid:       { mode: 'depth+movetime', depth: 14, movetimeMs: 2000, multiPv: 3, timeoutMs: 6000 },
-  deep:      { mode: 'depth+movetime', depth: 16, movetimeMs: 4000, multiPv: 3, timeoutMs: 10000 },
+  quickScan: { mode: 'depth+movetime', depth: 12, movetimeMs: 250, multiPv: 3, timeoutMs: 4000 },
+  mid:       { mode: 'depth+movetime', depth: 13, movetimeMs: 600, multiPv: 2, timeoutMs: 4000 },
+  deep:      { mode: 'depth+movetime', depth: 14, movetimeMs: 1200, multiPv: 2, timeoutMs: 6000 },
   threads: _threads,
 };
 const SERVER_STRONG_REVIEW_PROFILE = {
   quickScan: { mode: 'depth+movetime', depth: 16, movetimeMs: 500, multiPv: 3, timeoutMs: 6000 },
-  deep:      { mode: 'depth+movetime', depth: 22, movetimeMs: 8000, multiPv: 3, timeoutMs: 15000 },
+  deep:      { mode: 'depth+movetime', depth: 20, movetimeMs: 5000, multiPv: 2, timeoutMs: 10000 },
   threads: _threads,
 };
 
@@ -251,15 +248,44 @@ function withTimeout(promise, timeoutMs, message) {
   });
 }
 
-// The engine is a single shared, process-wide instance owned by
-// stockfish-engine.js (the `stockfish` npm package is a hard singleton: a
-// second initEngine() call throws "INIT_ENGINE(...) is not a function" and
-// crashes the process via an uncaught WASM LinkError). Adapters expose the
-// ready/newGame/evaluate/evaluateMultiPV surface MoveAnalyzer expects;
-// evaluatePositionsPooled fans out across the single-element list.
+// The engine is a process-wide singleton owned by stockfish-engine.js. By
+// default a single engine is used, so positions are analyzed sequentially.
+// On a beefier box you can set SERVER_ENGINE_POOL=N to spawn N additional
+// native Stockfish children and analyze up to N positions in parallel
+// (evaluatePositionsPooled fans out across the pool). Each extra child uses
+// its own thread budget (see detectThreadCount), so only enable this where
+// there are spare cores — the shared 4-vCPU VM should stay at 1.
+const _enginePoolSize = Math.max(1, Math.min(parseInt(String(process.env.SERVER_ENGINE_POOL || '1').trim(), 10) || 1, 4));
+let _poolEngines = [];
+let _poolInit = null;
+
+async function _getPoolEngine(index) {
+  if (_poolEngines[index] && _poolEngines[index].ready) return _poolEngines[index];
+  const engine = _poolEngines[index] || new ServerStockfishEngine({});
+  _poolEngines[index] = engine;
+  await engine.init();
+  return engine;
+}
+
 async function getEngineAdapters(_preferFull = false) {
   const single = await withTimeout(getServerEngine(), 8000, 'Server engine is still warming up.');
-  return [cachedEngineAdapter(single)];
+  const adapters = [cachedEngineAdapter(single)];
+  if (_enginePoolSize > 1) {
+    // Warm up the extra pool engines once, then reuse them.
+    if (!_poolInit) {
+      _poolInit = Promise.all(
+        Array.from({ length: _enginePoolSize - 1 }, (_, i) => _getPoolEngine(i).catch((err) => {
+          console.warn('Server engine pool child failed to init:', err?.message);
+          return null;
+        })),
+      ).finally(() => { _poolInit = null; });
+    }
+    await _poolInit;
+    for (let i = 0; i < _enginePoolSize - 1; i++) {
+      if (_poolEngines[i] && _poolEngines[i].ready) adapters.push(cachedEngineAdapter(_poolEngines[i]));
+    }
+  }
+  return adapters;
 }
 
 function withEngineQueue(work) {
@@ -296,8 +322,15 @@ function withAnalysisSlot(work, onQueued = null) {
       });
 
   return enter
-    .then(() => work(analysisQueueStatus()))
+    .then(() => {
+      // Signal that an interactive review is using the shared engine so any
+      // background job (e.g. background anticheat) can yield to it until it
+      // finishes. This keeps foreground reviews snappy instead of starved.
+      beginInteractiveReview();
+      return work(analysisQueueStatus());
+    })
     .finally(() => {
+      endInteractiveReview();
       activeAnalysisJobs = Math.max(0, activeAnalysisJobs - 1);
       drainAnalysisQueue();
     });
@@ -309,6 +342,24 @@ function analyzedMoveCountForPositions(start, count) {
   if (!length) return 0;
   const last = first + length - 1;
   return Math.max(0, last - Math.max(first, 1) + 1);
+}
+
+// Wall-clock cap for a whole review. Without this a pathological payload
+// (e.g. a 500-ply game at the deep tier) could hold a review slot + the
+// shared engine for 10–15 minutes, starving every other user. The engine
+// work underneath isn't cancellable — the client gets an error promptly and
+// the user's heavy-action lock is released, but the underlying run still
+// drains through the serialized engine queue (which remains the bottleneck).
+const ANALYSIS_WALL_CLOCK_MS = Math.max(60_000, Number(process.env.ANALYSIS_WALL_CLOCK_MS) || 10 * 60 * 1000);
+
+function withWallClockTimeout(promise, ms = ANALYSIS_WALL_CLOCK_MS) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    // Wording matters: the catch paths regex-match /timed out waiting/ to
+    // decide whether to resetServerEngine(), which is what we want on timeout.
+    timer = setTimeout(() => reject(new Error('Review timed out waiting for the analysis engine.')), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 const json = (statusCode, body) => ({
@@ -398,7 +449,7 @@ exports.handler = async (event, context = {}) => {
   }
 
     try {
-      return await withAnalysisSlot(async () => {
+      return await withWallClockTimeout(withAnalysisSlot(async () => {
         const engines = await getEngineAdapters(preferFullServer);
         const reviewEngine = engines[0];
       if (positions.length > 0) {
@@ -485,6 +536,8 @@ exports.handler = async (event, context = {}) => {
       blackAcpl: results.blackAcpl,
       whiteCaps: results.whiteCaps,
       blackCaps: results.blackCaps,
+      whiteGameRating: results.whiteGameRating,
+      blackGameRating: results.blackGameRating,
       phaseSummary: results.phaseSummary,
       depth: analyzer.analysisDepth,
       multiPv: analyzer.multiPvCount,
@@ -493,7 +546,7 @@ exports.handler = async (event, context = {}) => {
       plan: quotaState.plan,
       publicStats,
     });
-      });
+      }));
   } catch (err) {
     console.error('Server analysis failed:', err);
     if (/cancelled|not ready|timed out waiting|out of memory|abort/i.test(String(err?.message || err))) {
@@ -502,10 +555,13 @@ exports.handler = async (event, context = {}) => {
       // and crash the process.
       resetServerEngine();
     }
-    releaseHeavyAction(uid);
     return retryable(err.message || 'Server analysis failed.');
+  } finally {
+    // ALWAYS release — previously this line was unreachable dead code (both the
+    // success and catch paths returned first), so the heavy-action lock leaked
+    // after every successful review and permanently 429'd the user until PM2 restart.
+    releaseHeavyAction(uid);
   }
-  releaseHeavyAction(uid);
 };
 
 function sseWrite(res, event, data) {
@@ -575,7 +631,17 @@ exports.streamHandler = async (req, res) => {
   }
 
   try {
-    await withAnalysisSlot(async (slotStatus) => {
+    // Abort the analysis when the client disconnects (previously a closed
+    // connection only surfaced at the next progress callback — the full engine
+    // run still burned to completion wasting engine time).
+    let clientGone = false;
+    let abortReview = null;
+    const abortPromise = new Promise((_, reject) => { abortReview = () => reject(new Error('review aborted: client disconnected')); });
+    abortPromise.catch(() => {}); // avoid unhandled rejection if never used
+    const onClose = () => { clientGone = true; if (abortReview) abortReview(); };
+    req.on('close', onClose);
+
+    await withWallClockTimeout(withAnalysisSlot(async (slotStatus) => {
       sseWrite(res, 'status', { message: 'started', queue: slotStatus });
       const Chess = loadChess();
       const { MoveAnalyzer } = loadAnalyzer();
@@ -609,31 +675,37 @@ exports.streamHandler = async (req, res) => {
           multiPv: Math.max(1, Math.min(Number(profile.multiPv) || baseSseProfile.multiPv, baseSseProfile.multiPv)),
           timeoutMs: baseSseProfile.timeoutMs,
         });
-        const evals = await withEngineQueue(() => analyzer.evaluatePositionsPooled(
-          positions, engines,
-          (completed, total) => {
-            if (res.destroyed) return;
-            const moveIndex = Math.min(Math.max(0, completed), moves.length - 1);
-            sseWrite(res, 'progress', { completed, total, pass: 'quick', moveIndex, totalMoves: moves.length, mode: baseSseProfile.mode });
-          },
-        ));
+        const evals = await Promise.race([
+          abortPromise,
+          withEngineQueue(() => analyzer.evaluatePositionsPooled(
+            positions, engines,
+            (completed, total) => {
+              if (res.destroyed || clientGone) return;
+              const moveIndex = Math.min(Math.max(0, completed), moves.length - 1);
+              sseWrite(res, 'progress', { completed, total, pass: 'quick', moveIndex, totalMoves: moves.length, mode: baseSseProfile.mode });
+            },
+          )),
+        ]);
         results = await analyzer.resultsFromEvals(moves, positions, evals, analyzer.detectOpening(moves), { initialFen, headers: payload.headers || {}, skipMateThreat: true });
       } else {
         // Progressive-depth single pass: every move analyzed once at a depth
         // that grows with game progress (0–50% depth 12, 50–75% depth 14,
         // 75–100% depth 16). Clean linear 0–100% progress.
-        const progressiveEvals = await _evaluateProgressiveReview({
-          analyzer,
-          engines,
-          moves,
-          initialFen,
-          baseProfile: baseSseProfile,
-          profile,
-          onProgress: (completed, total, pass, moveIndex, totalMoves) => {
-            if (res.destroyed) return;
-            sseWrite(res, 'progress', { completed, total, pass, moveIndex, totalMoves, mode: baseSseProfile.mode });
-          },
-        });
+        const progressiveEvals = await Promise.race([
+          abortPromise,
+          _evaluateProgressiveReview({
+            analyzer,
+            engines,
+            moves,
+            initialFen,
+            baseProfile: baseSseProfile,
+            profile,
+            onProgress: (completed, total, pass, moveIndex, totalMoves) => {
+              if (res.destroyed || clientGone) return;
+              sseWrite(res, 'progress', { completed, total, pass, moveIndex, totalMoves, mode: baseSseProfile.mode });
+            },
+          }),
+        ]);
         results = await analyzer.resultsFromEvals(moves, positions, progressiveEvals, analyzer.detectOpening(moves), { initialFen, headers: payload.headers || {}, skipMateThreat: true });
       }
 
@@ -667,6 +739,8 @@ exports.streamHandler = async (req, res) => {
         blackAcpl: results.blackAcpl,
         whiteCaps: results.whiteCaps,
         blackCaps: results.blackCaps,
+        whiteGameRating: results.whiteGameRating,
+        blackGameRating: results.blackGameRating,
 	        phaseSummary: results.phaseSummary,
 	        depth: analyzer.analysisDepth,
 	        multiPv: analyzer.multiPvCount,
@@ -677,10 +751,10 @@ exports.streamHandler = async (req, res) => {
 	      });
     }, (queue) => {
       sseWrite(res, 'queued', queue);
-    });
-	  } catch (err) {
-	    console.error('Server stream analysis failed:', err);
-    if (/cancelled|not ready|timed out waiting|out of memory|abort/i.test(String(err?.message || err))) {
+    }));
+  } catch (err) {
+    console.error('Server stream analysis failed:', err);
+    if (/cancelled|not ready|timed out waiting|out of memory|abort|disconnected/i.test(String(err?.message || err))) {
       // Non-destructive: clears the hash (UCI newGame) on the shared engine.
       // We never destroy/recreate it — that would initEngine() a second time
       // and crash the process.
@@ -688,8 +762,9 @@ exports.streamHandler = async (req, res) => {
     }
 	    sseWrite(res, 'error', { error: err.message || 'Server analysis failed.' });
   } finally {
+    req.removeListener('close', onClose);
     releaseHeavyAction(uid);
-    res.end();
+    if (!res.writableEnded) res.end();
   }
 };
 

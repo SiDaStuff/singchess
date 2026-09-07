@@ -323,6 +323,7 @@ class ChessReviewApp {
     this.elBtnLast = document.getElementById('btn-last');
     this.elBtnExport = document.getElementById('btn-export');
     this.elBtnReset = document.getElementById('btn-reset');
+    this.elBtnImportGame = document.getElementById('btn-import-game');
     this.elMoveList = document.getElementById('move-list');
     this.elEvalBarWhite = document.getElementById('eval-bar-white');
     this.elEvalBarBlack = document.getElementById('eval-bar-black');
@@ -382,9 +383,6 @@ class ChessReviewApp {
     this.elHomeStatCoaches = document.getElementById('home-stat-coaches');
     // Home: direct import controls (new simplified home page)
     // Home import-tool elements are selected dynamically via _getImportTool().
-    this.elHomeAboutReviews = document.getElementById('home-about-reviews');
-    this.elHomeAboutPuzzles = document.getElementById('home-about-puzzles');
-    this.elHomeAboutCoaches = document.getElementById('home-about-coaches');
     this.elMoveBadge = document.getElementById('move-badge');
     this.elBadgeIcon = document.getElementById('badge-icon');
     this.elBadgeText = document.getElementById('badge-text');
@@ -392,6 +390,8 @@ class ChessReviewApp {
     this.elPlayerBottom = document.getElementById('player-bottom');
 	this.elPlayerTopClock = document.getElementById('player-top-clock');
 	this.elPlayerBottomClock = document.getElementById('player-bottom-clock');
+	this.elPlayerTopRating = document.getElementById('player-top-rating');
+	this.elPlayerBottomRating = document.getElementById('player-bottom-rating');
     this.elOpeningInfo = document.getElementById('opening-info');
     this.elOpeningName = document.getElementById('opening-name');
     this.elOpeningStats = document.getElementById('opening-stats');
@@ -418,6 +418,8 @@ class ChessReviewApp {
 	    this.elCapsBlack = document.getElementById('caps-black-val');
 	    this.elAcplWhite = document.getElementById('acpl-white-val');
 	    this.elAcplBlack = document.getElementById('acpl-black-val');
+	    this.elRatingWhite = document.getElementById('rating-white-val');
+	    this.elRatingBlack = document.getElementById('rating-black-val');
 	    this.elPhaseBreakdown = document.getElementById('phase-breakdown');
 
 	    this.elMoveInsights = document.getElementById('move-insights');
@@ -1567,7 +1569,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    // Stop the chess game, hide main menu, hide main content. Show only the routed panel.
 		    if (this.elMainMenu) this.elMainMenu.hidden = true;
 		    if (this.elMainContent) this.elMainContent.hidden = false;
-		    if (this.elBoostPage) this.elBoostPage.hidden = true;
+		    if (this.elBoostPagePanel) this.elBoostPagePanel.hidden = true;
 		    this.coachMode.active = false;
 		    this.coachMode.thinking = false;
 		    this.puzzleMode.active = false;
@@ -2573,7 +2575,9 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	  }
 
 	  _firebaseConfig() {
-	    return {
+	    // Single shared config — see src/firebase-config.js (installed on window
+	    // before app.js runs; the inline literal is a fallback only).
+	    return window.FIREBASE_CONFIG || {
 	      apiKey: 'AIzaSyAVG8Awwd2FmVIvhzHTrZ19nhoUowZ1H3M',
 	      authDomain: 'singchess-sd.firebaseapp.com',
 	      databaseURL: 'https://singchess-sd-default-rtdb.firebaseio.com',
@@ -2704,6 +2708,11 @@ return window.firebase;
 			      this._refreshPuzzleForCurrentUser();
 			      this._loadSavedUsernames();
 			      this._renderSavedUsernameBar();
+			      // The home screen may have rendered before auth resolved (direct
+			      // load), so savedUsernames was still empty and the quick-load
+			      // section stayed hidden. Re-render it now that we have the real
+			      // saved usernames.
+			      this._renderHomeQuickLoad();
 		      this._hideLoadingOverlay();
 		    });
 		  }
@@ -3174,17 +3183,22 @@ return window.firebase;
       row.innerHTML = `
         <span class="link-username-text">
           <span class="material-symbols-outlined link-username-icon" style="color:var(--clr-best)">check_circle</span>
-          ${this._escapeHtml(label)} username <strong>${this._escapeHtml(username)}</strong> is already linked.
+          <span>
+            <strong>${this._escapeHtml(username)}</strong> is saved. One-click load from the bar above.
+          </span>
         </span>`;
       row.hidden = false;
     } else {
       row.innerHTML = `
         <span class="link-username-text">
-          Link this <strong>${this._escapeHtml(label)}</strong> username for faster imports next time?
+          <span class="material-symbols-outlined link-username-icon">bookmark_add</span>
+          <span>
+            Save <strong>${this._escapeHtml(username)}</strong> for one-click imports next time?
+          </span>
         </span>
         <button type="button" class="btn btn-sm btn-link-username" data-link-source="${this._escapeHtml(source)}" data-link-username="${this._escapeHtml(username)}">
-          <span class="material-symbols-outlined btn-symbol">link</span>
-          <span class="btn-label">Link</span>
+          <span class="material-symbols-outlined btn-symbol">bookmark_add</span>
+          <span class="btn-label">Save</span>
         </button>`;
       row.hidden = false;
     }
@@ -3205,12 +3219,12 @@ return window.firebase;
         this._renderLinkUsernameRow();
         this._showPopup({
           icon: 'success',
-          title: 'Username linked!',
-          text: `${source === 'chesscom' ? 'Chess.com' : 'Lichess'} username saved for faster imports.`,
+          title: 'Username saved!',
+          text: `${source === 'chesscom' ? 'Chess.com' : 'Lichess'} username saved for one-click imports.`,
         });
       }).catch(() => {
         btn.disabled = false;
-        btn.querySelector('.btn-label').textContent = 'Link';
+        btn.querySelector('.btn-label').textContent = 'Save';
       });
     });
   }
@@ -3454,7 +3468,7 @@ _syncAccountUi() {
 	    if (now - (this._notifState.lastPollAt || 0) < 5000) return; // 5s soft throttle
 	    this._notifState.lastPollAt = now;
 	    try {
-	      const response = await fetch('/api/users/me', {
+	      const response = await apiFetch('/api/users/me', {
         headers: await this._authHeaders(),
         cache: 'no-store',
       });
@@ -3673,7 +3687,7 @@ _syncAccountUi() {
 	      this.elNotifySettingsStatus.className = 'account-status';
 	    }
 	    try {
-	      const res = await fetch('/api/settings/notification-settings', {
+	      const res = await apiFetch('/api/settings/notification-settings', {
 	        method: 'POST',
 	        headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
 	        body: JSON.stringify({ anticheatComplete, browserPush }),
@@ -3840,7 +3854,7 @@ if (this.elAnticheatReportStatus) {
     }
     this._setAnticheatChecking(true);
     try {
-      const response = await fetch('/api/anticheat/submit', {
+      const response = await apiFetch('/api/anticheat/submit', {
         method: 'POST',
         headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ source: source || 'pgn', ...payload }),
@@ -4285,7 +4299,9 @@ if (this.elAnticheatReportStatus) {
 		  }
 
 		  _syncBoostPageVisibility() {
-		    if (this.elBoostPage) this.elBoostPage.hidden = document.body.dataset.mode !== 'boost';
+		    // elBoostPagePanel IS the boost page (page-boost panel) — the old
+		    // elBoostPage ref was never assigned, so this toggle silently never ran.
+		    if (this.elBoostPagePanel) this.elBoostPagePanel.hidden = document.body.dataset.mode !== 'boost';
 		  }
 
 		  _syncServerStrongToggle() {
@@ -4309,7 +4325,7 @@ if (this.elAnticheatReportStatus) {
   _updateStrengthSlider(strength, hasBoost) {
     const notes = {
       fast: 'Fast review skips deep re-analysis and uses a lower depth. Some results may be inaccurate.',
-      normal: 'Normal review uses two-pass analysis (quick-scan + deep on critical moments).',
+      normal: 'Normal review analyzes every move, deepening the search as the game progresses.',
       strong: 'Strong review uses higher depth for more accurate results. Requires Boost or above.',
     };
     // Update chip radio
@@ -4370,7 +4386,7 @@ this._syncAnticheatForm();
 	    this.elAnticheatSaved.hidden = false;
 	    this._setAnticheatReviewsLoading(true);
 	    try {
-	      const response = await fetch('/api/anticheat/list', {
+	      const response = await apiFetch('/api/anticheat/list', {
 	        headers: await this._authHeaders(),
 	        cache: 'no-store',
 	      });
@@ -4791,6 +4807,9 @@ if (this.elBtnAnticheatRefresh) {
 	    }
 
     this.elBtnFlip.addEventListener('click', () => this.board.flip());
+    if (this.elBtnImportGame) {
+      this.elBtnImportGame.addEventListener('click', () => this._showPgnModal());
+    }
     this.elBtnFirst.addEventListener('click', () => this._goToMove(-1));
     this.elBtnPrev.addEventListener('click', () => this._goToMove(this.currentMoveIndex - 1));
     this.elBtnNext.addEventListener('click', () => this._goToMove(this.currentMoveIndex + 1));
@@ -4844,7 +4863,7 @@ if (this.elBtnAnticheatRefresh) {
 	    document.body.classList.remove('in-app-route');
 	    if (this.elMainMenu) this.elMainMenu.hidden = true;
 	    if (this.elMainContent) this.elMainContent.hidden = false;
-	    if (this.elBoostPage) this.elBoostPage.hidden = true;
+	    if (this.elBoostPagePanel) this.elBoostPagePanel.hidden = true;
 	  }
 
 	  async _enterCoachMode(options = null) {
@@ -5055,10 +5074,6 @@ if (this.elBtnAnticheatRefresh) {
       setText(this.elHomeStatReviews, reviews);
       setText(this.elHomeStatPuzzles, puzzles);
       setText(this.elHomeStatCoaches, coaches);
-      // Mirror the same numbers into the About section below.
-      setText(this.elHomeAboutReviews, reviews);
-      setText(this.elHomeAboutPuzzles, puzzles);
-      setText(this.elHomeAboutCoaches, coaches);
     } catch (_) {
       // Leave the em-dash placeholders visible (cards already read "—").
     }
@@ -5352,6 +5367,23 @@ if (this.elBtnAnticheatRefresh) {
 
   async _recoverLiveEngineFailure(err, { silent = false } = {}) {
     if (this.engineSettings.source !== 'browser') return false;
+    // Only a fatal engine failure justifies switching modules. Transient
+    // errors (a search that outlived its barrier deadline, a cancelled
+    // search racing navigation) recover on the next evaluation — swapping to
+    // the 108MB full build here is what caused the "restart for the bigger
+    // model" behavior whenever the user navigated moves quickly.
+    const isFatal = !!(err?.engineFatal || this.engine?.crashedError);
+    if (!isFatal) {
+      if (!silent) {
+        this._updateLiveEvalPanel({
+          busy: false,
+          score: null,
+          line: 'Engine busy — retrying on next move.',
+          meta: err?.message || '',
+        });
+      }
+      return false;
+    }
     const nextModule = this._nextBrowserModuleAfterFailure(this.engineSettings.module);
     if (!nextModule) return false;
 	    this.engineSettings.module = nextModule;
@@ -6468,11 +6500,18 @@ _showPuzzleSuccessOverlay() {
 
 		  async _handlePuzzleMove(from, to) {
 		    if (this.puzzleMode.loading || this.puzzleMode.solved || this.puzzleMode.failed || !this.puzzleMode.current) return;
+		    // Guard against re-entrancy while the promotion dialog is open: the board
+		    // stays interactive during the await, so a second click used to fire
+		    // onMove again from the same pre-move position → double move.
+		    if (this._puzzleMovePending) return;
+		    this._puzzleMovePending = true;
+		    try {
 		    const fenBefore = this.chess.fen();
 		    const promotion = this._isPromotionMove(from, to) ? await this._requestPromotionPiece() : undefined;
 		    const move = this.chess.move({ from, to, promotion }, { sloppy: true });
 		    if (!move) {
 		      this.board.setPositionFromFen(this.chess.fen());
+		      this._setPuzzleStatus('Illegal move — try again.');
 		      return;
 		    }
 	
@@ -6551,11 +6590,20 @@ _showPuzzleSuccessOverlay() {
 	
 		    this._syncActionButtons();
 		    this._setPuzzleStatus('Correct. Let the opponent reply...');
+		    this._puzzleTokenAtReplySchedule = this.puzzleMode.requestToken;
 		    window.setTimeout(() => this._playPuzzleReply(), 420);
+		    } finally {
+		      this._puzzleMovePending = false;
+		    }
 		  }
 
 				  async _playPuzzleReply() {
-		    if (!this.puzzleMode.active || this.puzzleMode.solved) return;
+		    if (!this.puzzleMode.active || this.puzzleMode.solved || this.puzzleMode.loading) return;
+		    // Drop stale scheduled replies: puzzleMode.requestToken is bumped by
+		    // _loadPuzzleFromSource on every puzzle load, so if a new puzzle was
+		    // requested between scheduling and firing, the old solution move must
+		    // not be applied to the new position.
+		    if (this._puzzleTokenAtReplySchedule !== this.puzzleMode.requestToken) return;
 	    const expected = this.puzzleMode.solution[this.puzzleMode.step];
 	    if (!expected) return;
 	    const fenBefore = this.chess.fen();
@@ -6617,7 +6665,7 @@ _showPuzzleSuccessOverlay() {
 	      return;
 	    }
 
-	    this.board.setBestMoveArrow(expected, { color: '#96BC4B' });
+	    this.board.setBestMoveArrow(expected, { color: '#77c75d' });
 	    this.board.setHighlights([
 	      { square: from, type: 'best-from' },
 	      { square: to, type: 'best-to' },
@@ -6823,9 +6871,13 @@ _showPuzzleSuccessOverlay() {
 
 	  _playerLabel(color) {
 	    const headers = this.gameHeaders || {};
-	    const name = color === 'w' ? (headers.White || 'White') : (headers.Black || 'Black');
+	    return color === 'w' ? (headers.White || 'White') : (headers.Black || 'Black');
+	  }
+
+	  _playerRating(color) {
+	    const headers = this.gameHeaders || {};
 	    const elo = color === 'w' ? headers.WhiteElo : headers.BlackElo;
-	    return name + (elo ? ` (${elo})` : '');
+	    return elo ? String(elo) : '';
 	  }
 
 	  _playerColorFromHeaders(headers = this.gameHeaders || {}) {
@@ -6851,6 +6903,12 @@ _showPuzzleSuccessOverlay() {
     this.elPlayerBottom.dataset.color = bottomColor;
 	    this.elPlayerTop.querySelector('.player-name').textContent = this._playerLabel(topColor);
 	    this.elPlayerBottom.querySelector('.player-name').textContent = this._playerLabel(bottomColor);
+	    if (this.elPlayerTopRating) this.elPlayerTopRating.textContent = this._playerRating(topColor);
+	    if (this.elPlayerBottomRating) this.elPlayerBottomRating.textContent = this._playerRating(bottomColor);
+	    const topDot = this.elPlayerTop.querySelector('.player-dot');
+	    const bottomDot = this.elPlayerBottom.querySelector('.player-dot');
+	    if (topDot) topDot.dataset.color = topColor === 'w' ? 'white' : 'black';
+	    if (bottomDot) bottomDot.dataset.color = bottomColor === 'w' ? 'white' : 'black';
 	  }
 
 	  _currentMoveLabel(index = this.currentMoveIndex) {
@@ -7105,8 +7163,8 @@ _showPuzzleSuccessOverlay() {
 	      Event: 'Coach',
 	      White: humanColor === 'w' ? 'You' : 'Coach',
 	      Black: humanColor === 'b' ? 'You' : 'Coach',
-	      WhiteElo: humanColor === 'b' ? String(elo) : '',
-	      BlackElo: humanColor === 'w' ? String(elo) : '',
+	      WhiteElo: humanColor === 'b' ? String(elo) : String(adjustedElo),
+	      BlackElo: humanColor === 'w' ? String(elo) : String(adjustedElo),
 	    });
 	    this._setBoardOrientationForColor(humanColor);
 	    this.coachMode.active = true;
@@ -8332,14 +8390,23 @@ _showPuzzleSuccessOverlay() {
     const date = game.Date || game.date || (game.EndTime ? new Date(Number(game.EndTime) * 1000).toISOString().slice(0, 10).replace(/-/g, '.') : '');
     const timeClass = game.TimeClass ? game.TimeClass[0].toUpperCase() + game.TimeClass.slice(1) : '';
     const timeControl = game.TimeControl || '';
+    const whiteElo = game.WhiteElo || game.whiteElo || '';
+    const blackElo = game.BlackElo || game.blackElo || '';
     const siteLabel = source === 'chesscom' ? 'Chess.com' : 'Lichess';
     const title = `${white} vs ${black}`;
-    const metaBits = [date, timeClass || timeControl, result, opening].filter(Boolean);
+    const metaBits = [date, timeClass || timeControl, opening].filter(Boolean);
 
     return {
       title,
       subtitle: metaBits.join(' • ') || `${siteLabel} game ${index + 1}`,
       siteLabel,
+      white,
+      black,
+      result,
+      whiteElo,
+      blackElo,
+      opening,
+      date,
     };
   }
 
@@ -8365,9 +8432,22 @@ _showPuzzleSuccessOverlay() {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'import-result';
+      const resultLabel = this._resultLabel(item.result);
+      const whiteName = this._escapeHtml(item.white || 'White');
+      const blackName = this._escapeHtml(item.black || 'Black');
+      const whiteElo = item.whiteElo ? ` <span class="import-result-elo">${this._escapeHtml(item.whiteElo)}</span>` : '';
+      const blackElo = item.blackElo ? ` <span class="import-result-elo">${this._escapeHtml(item.blackElo)}</span>` : '';
       button.innerHTML = `
-        <span class="import-result-title">${item.title}</span>
-        <span class="import-result-subtitle">${item.subtitle}</span>
+        <span class="import-result-badge import-result-badge--${resultLabel.className}">${resultLabel.text}</span>
+        <span class="import-result-main">
+          <span class="import-result-title">
+            <span class="import-result-player">${whiteName}${whiteElo}</span>
+            <span class="import-result-vs">vs</span>
+            <span class="import-result-player">${blackName}${blackElo}</span>
+          </span>
+          <span class="import-result-subtitle">${this._escapeHtml(item.subtitle || '')}</span>
+        </span>
+        <span class="material-symbols-outlined import-result-chevron">chevron_right</span>
       `;
       button.addEventListener('click', () => {
         try {
@@ -8383,6 +8463,14 @@ _showPuzzleSuccessOverlay() {
       });
       results.appendChild(button);
     }
+  }
+
+  _resultLabel(result) {
+    const r = String(result || '').trim();
+    if (r === '1-0') return { text: '1-0', className: 'white' };
+    if (r === '0-1') return { text: '0-1', className: 'black' };
+    if (r === '1/2-1/2') return { text: '½-½', className: 'draw' };
+    return { text: '*', className: 'unknown' };
   }
 
   async _loadGamesByUsername(source, username, limit) {
@@ -8435,7 +8523,9 @@ _showPuzzleSuccessOverlay() {
     if (proxied) return proxied;
 
     const url = `https://lichess.org/api/games/user/${encodeURIComponent(username)}?max=${limit}&moves=true&clocks=true&opening=true&finished=true&sort=dateDesc`;
-    const response = await fetch(url, { mode: 'cors' });
+    // Bounded like the Chess.com fallback below — without a timeout a stalled
+    // lichess.org response hung the import popup indefinitely.
+    const response = await this._fetchWithTimeout(url, { mode: 'cors' }, 12000);
     if (!response.ok) {
       throw new Error(`Lichess responded with ${response.status}`);
     }
@@ -9029,6 +9119,40 @@ _showPuzzleSuccessOverlay() {
    * effects). Extracted from _requestLiveEvaluation so deepening can reuse it
    * at higher depths without re-running the whole live-eval flow.
    */
+  /**
+   * Horizon-effect guard for live eval. The base-depth search can miss a
+   * tactical refutation (e.g. a hanging queen), so a move like Qxa6 can be
+   * reported as the best move with a wildly optimistic after-eval (+1.0) that
+   * only corrects once the opponent recaptures (bxa8 → -5.6). Re-search the
+   * position at a deeper depth; if the deeper eval swings hard from the shallow
+   * value, the shallow result was unreliable and we adopt the deeper one.
+   *
+   * Returns null when the deeper search agrees (or fails), so callers can keep
+   * the base-depth result unchanged.
+   */
+  async _verifyPositionEval(fen, baseCp, baseDepth, isWhiteToMove, timeoutMs) {
+    const verifyDepth = Math.min(baseDepth + 4, 20);
+    if (verifyDepth <= baseDepth) return null;
+    try {
+      const multi = await this.engine.evaluateMultiPV(fen, verifyDepth, 1, Math.max(6000, timeoutMs));
+      const line = (multi.lines || [])[0];
+      if (!line) return null;
+      const cp = this.analyzer.whiteAbsCp(
+        this.analyzer.normalizeScore(line.score || 0, line.scoreType || 'cp', isWhiteToMove),
+        fen
+      );
+      if (!Number.isFinite(cp)) return null;
+      const pvTokens = (line.pv || '').split(/\s+/).filter(Boolean);
+      const bestMove = pvTokens.length > 0 ? pvTokens[0] : '';
+      // Only override when the deeper search meaningfully disagrees — a small
+      // wobble is normal depth noise; a big swing means a missed tactic.
+      if (Math.abs(cp - baseCp) < 150) return null;
+      return { cp, bestMove, depth: line.depth || verifyDepth };
+    } catch (_) {
+      return null; // verification is best-effort
+    }
+  }
+
   async _analyzeMoveAtDepth(context, depth, multiPv, timeoutMs) {
     const prevFen = context.fenBefore;
     const nextFen = context.fenAfter || this.chess.fen();
@@ -9055,10 +9179,37 @@ _showPuzzleSuccessOverlay() {
 
     const orderedLines = this.analyzer._orderLinesForSide(lines, isWhiteToMoveBefore);
     const best = orderedLines[0] || { cp: 0, move: '' };
-    const bestMove = best.move || '';
-    const bestMoveSan = bestMove ? this.analyzer.uciToSan(prevFen, bestMove) : '--';
-    const bestScore = typeof best.cp === 'number' && Number.isFinite(best.cp) ? best.cp : 0;
+    let bestMove = best.move || '';
+    let bestMoveSan = bestMove ? this.analyzer.uciToSan(prevFen, bestMove) : '--';
+    let bestScore = typeof best.cp === 'number' && Number.isFinite(best.cp) ? best.cp : 0;
     const playedUci = `${context.moveObj.from}${context.moveObj.to}${context.moveObj.promotion || ''}`;
+
+    // Verify the best move at a deeper depth — but only when the played move is
+    // currently ranked as the best move. That is exactly the "huge blunder
+    // marked as best" case: the base-depth search missed a tactic (e.g. it
+    // ranks Qxa6 best because it doesn't see the queen is hanging), so the
+    // deeper search reveals the true best move and the played move stops being
+    // marked BEST. Skipping this when the played move isn't best avoids an
+    // extra search on every quiet move. Keep lines[0] in sync so cpLoss and the
+    // alternatives stay consistent with the corrected best move.
+    const verifiedBefore = playedUci === bestMove
+      ? await this._verifyPositionEval(prevFen, bestScore, depth, isWhiteToMoveBefore, timeoutMs)
+      : null;
+    if (verifiedBefore && verifiedBefore.bestMove && verifiedBefore.bestMove !== bestMove) {
+      bestMove = verifiedBefore.bestMove;
+      bestMoveSan = this.analyzer.uciToSan(prevFen, bestMove);
+      bestScore = verifiedBefore.cp;
+      if (orderedLines.length > 0) {
+        orderedLines[0] = {
+          ...orderedLines[0],
+          cp: verifiedBefore.cp,
+          move: bestMove,
+          pvUci: verifiedBefore.bestMove,
+          pvSan: this.analyzer._lineToSan(prevFen, verifiedBefore.bestMove, 8),
+          depth: verifiedBefore.depth || depth,
+        };
+      }
+    }
 
     // scoreAfter is the eval of the position AFTER the played move. Evaluate
     // nextFen for both the best-move and non-best cases so the swing reflects
@@ -9090,6 +9241,19 @@ _showPuzzleSuccessOverlay() {
       : bestScore;
     opponentBestMove = nextBest?.move || '';
     afterDepth = nextBest?.depth || depth;
+
+    // Verify the after-position eval at a deeper depth. This is where the
+    // tactical refutation lives: the base-depth search may report +1.0 after
+    // Qxa6 because it doesn't see the queen is hanging, but a deeper search
+    // sees the refutation and returns the true (much worse) eval. Adopt the
+    // deeper value so the eval bar and classification reflect reality instead
+    // of flipping only after the opponent recaptures.
+    const verifiedAfter = await this._verifyPositionEval(nextFen, scoreAfter, depth, isWhiteToMoveAfter, timeoutMs);
+    if (verifiedAfter) {
+      scoreAfter = verifiedAfter.cp;
+      afterDepth = verifiedAfter.depth || afterDepth;
+      if (verifiedAfter.bestMove) opponentBestMove = verifiedAfter.bestMove;
+    }
 
     return this._buildLiveMoveResult({
       fenBefore: prevFen,
@@ -10726,6 +10890,8 @@ _showMoveBadge(classification, targetSquare, options = {}) {
     results.blackAcpl = data.blackAcpl;
     results.whiteCaps = data.whiteCaps;
 	    results.blackCaps = data.blackCaps;
+	    results.whiteGameRating = data.whiteGameRating;
+	    results.blackGameRating = data.blackGameRating;
 			    results.phaseSummary = data.phaseSummary;
 				    if (data.publicStats) this._renderPublicStats(data.publicStats);
 				    results.statsRecorded = Boolean(data.publicStats);
@@ -11102,6 +11268,8 @@ _showMoveBadge(classification, targetSquare, options = {}) {
     this.elCapsBlack.textContent = '--';
     this.elAcplWhite.textContent = '--';
     this.elAcplBlack.textContent = '--';
+    if (this.elRatingWhite) this.elRatingWhite.textContent = '--';
+    if (this.elRatingBlack) this.elRatingBlack.textContent = '--';
 
     if (this.elPhaseBreakdown) this.elPhaseBreakdown.innerHTML = this._renderSkeletonLines(4);
   }
@@ -11149,6 +11317,11 @@ _showMoveBadge(classification, targetSquare, options = {}) {
     this.elCapsBlack.textContent = Math.round(this.analysisResults.blackCaps ?? this.analyzer.calculateCapsScore(this.analysisResults, 'black'));
     this.elAcplWhite.textContent = Math.round(this.analysisResults.whiteAcpl ?? this.analyzer.calculateAcpl(this.analysisResults, 'white'));
 	    this.elAcplBlack.textContent = Math.round(this.analysisResults.blackAcpl ?? this.analyzer.calculateAcpl(this.analysisResults, 'black'));
+
+	    const whiteRating = this.analysisResults.whiteGameRating ?? this.analyzer.calculateGameRating(this.analysisResults, 'white');
+	    const blackRating = this.analysisResults.blackGameRating ?? this.analyzer.calculateGameRating(this.analysisResults, 'black');
+	    if (this.elRatingWhite) this.elRatingWhite.textContent = whiteRating != null ? whiteRating : '--';
+	    if (this.elRatingBlack) this.elRatingBlack.textContent = blackRating != null ? blackRating : '--';
 	
 	    this._renderPhaseBreakdown();
 	  }
@@ -11175,7 +11348,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
   }
 
   _accuracyColor(accuracy) {
-    if (accuracy >= 90) return '#96BC4B';
+    if (accuracy >= 90) return '#77c75d';
     if (accuracy >= 70) return '#F7C631';
     if (accuracy >= 50) return '#E68A2E';
     return '#CA3431';

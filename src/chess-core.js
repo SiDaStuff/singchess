@@ -6,8 +6,8 @@
 const MoveClassification = Object.freeze({
   BRILLIANT: { key: 'BRILLIANT', name: 'Brilliant', symbol: '!!', color: '#27c2a2', icon: 'brillant', iconType: 'image', description: 'The best move — and a hard one to find!' },
   GREAT: { key: 'GREAT', name: 'Great', symbol: '!', color: '#749ac0', icon: 'great', iconType: 'image', description: 'A move that altered the course of the game!' },
-  BEST: { key: 'BEST', name: 'Best', symbol: '★', color: '#3eb08a', icon: 'best', iconType: 'image', description: "The chess engine's top choice" },
-  EXCELLENT: { key: 'EXCELLENT', name: 'Excellent', symbol: '👍', color: '#82b64c', icon: 'excellent', iconType: 'image', description: 'Almost as good as the Best move' },
+  BEST: { key: 'BEST', name: 'Best', symbol: '★', color: '#77c75d', icon: 'best', iconType: 'image', description: "The chess engine's top choice" },
+  EXCELLENT: { key: 'EXCELLENT', name: 'Excellent', symbol: '👍', color: '#77c75d', icon: 'excellent', iconType: 'image', description: 'Almost as good as the Best move' },
   GOOD: { key: 'GOOD', name: 'Good', symbol: '✓', color: '#a8cf83', icon: 'good', iconType: 'image', description: 'A decent move, but not the best' },
   BOOK: { key: 'BOOK', name: 'Book', symbol: '📖', color: '#d5a47d', icon: 'book', iconType: 'image', description: 'A conventional opening move' },
   INACCURACY: { key: 'INACCURACY', name: 'Inaccuracy', symbol: '?!', color: '#f7c631', icon: 'inaccuracy', iconType: 'image', description: 'A weak move' },
@@ -2818,6 +2818,8 @@ class MoveAnalyzer {
     results.blackAcpl = this.calculateAcpl(results, 'black');
     results.whiteCaps = this.calculateCapsScore(results, 'white');
     results.blackCaps = this.calculateCapsScore(results, 'black');
+    results.whiteGameRating = this.calculateGameRating(results, 'white');
+    results.blackGameRating = this.calculateGameRating(results, 'black');
     results.phaseSummary = {
       white: this.summarizeByPhase(results, 'white'),
       black: this.summarizeByPhase(results, 'black'),
@@ -2968,6 +2970,47 @@ class MoveAnalyzer {
     }
 
     return clamp((sum / colorMoves.length) * 100, 0, 100);
+  }
+
+  // Estimate a chess ELO rating for a side based on how strongly they played
+  // in this single game. Accuracy (win-probability based) is the primary
+  // driver, with ACPL, best-move rate, and mistake/blunder rate as secondary
+  // adjustments. Returns a 400–2800 "performance rating" for the game, not a
+  // persistent rating.
+  calculateGameRating(moveResults, color) {
+    const colorMoves = moveResults.filter((m) =>
+      (color === 'white' && m.isWhite) || (color === 'black' && !m.isWhite)
+    );
+    if (colorMoves.length === 0) return null;
+
+    const accuracy = this.calculateAccuracy(moveResults, color);
+    const acpl = this.calculateAcpl(moveResults, color);
+
+    const strongKeys = new Set(['BRILLIANT', 'GREAT', 'BEST', 'EXCELLENT']);
+    const mistakeKeys = new Set(['INACCURACY', 'MISTAKE', 'BLUNDER', 'MISS']);
+    const played = colorMoves.filter((m) => m.classification !== MoveClassification.BOOK);
+    const playedCount = played.length || 1;
+    const bestRate = (played.filter((m) => strongKeys.has(m.classificationKey)).length / playedCount) * 100;
+    const mistakeRate = (played.filter((m) => mistakeKeys.has(m.classificationKey)).length / playedCount) * 100;
+
+    // Primary signal: map accuracy to a base rating.
+    //   50% → 400, 60% → 930, 70% → 1460, 80% → 1990,
+    //   90% → 2520, 94% → 2732, 100% → 3050 (clamped to 2800)
+    let rating = 400 + (accuracy - 50) * 53;
+
+    // ACPL: lower is better. ~20 is strong, ~60 is weak, ~120+ is very weak.
+    rating += (35 - acpl) * 2;
+
+    // Best-move rate: ~60%+ is strong, ~35% is weak.
+    rating += (bestRate - 45) * 3;
+
+    // Mistake/blunder rate: ~5% is clean, ~25%+ is rough.
+    rating += (12 - mistakeRate) * 4;
+
+    // Very short games (few non-book moves) are noisy — pull toward the mean.
+    if (playedCount < 8) rating += (1200 - rating) * 0.35;
+
+    return Math.round(clamp(rating, 400, 2800));
   }
 
   summarizeByPhase(moveResults, color) {

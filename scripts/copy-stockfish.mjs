@@ -13,6 +13,10 @@ const targetDirFn = path.join(rootDir, 'server', 'vendor', 'stockfish');
 // Stockfish 18 single-threaded WASM builds used by both the browser worker
 // (src/stockfish.worker.js) and the server engine (server/api/_lib/stockfish-engine.js).
 // Downloaded from the stockfish npm package tarball (maintained by niklasf).
+// NOTE: keep the version in the URL in lockstep with the "stockfish" range in
+// root package.json — a drift between the two gives the browser and server
+// different WASM builds (behavior/kv-size mismatches). ^18.0.8 currently
+// resolves to 18.0.8, which this URL pins.
 const TARBALL_URL = 'https://registry.npmjs.org/stockfish/-/stockfish-18.0.8.tgz';
 const STOCKFISH_FILES = [
   'stockfish-18-lite-single.js',

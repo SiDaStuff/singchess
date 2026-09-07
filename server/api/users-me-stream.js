@@ -29,6 +29,13 @@ async function pushWarningIfNeeded(res, uid) {
   await markWarningDelivered(uid);
 }
 
+// Per-user concurrent watch-stream cap. Without this a client could reopen
+// the SSE endpoint hundreds of times per minute, exhausting file descriptors
+// and Firebase on('child_added') listeners (each stream registers one for 15
+// minutes). In-process counter, consistent with the other uid limiters.
+const MAX_STREAMS_PER_UID = 3;
+const activeStreamsByUid = new Map(); // uid -> count
+
 exports.streamHandler = async (req, res) => {
   const watchMode = String(req.query.watch || '').trim() === '1';
 
@@ -71,6 +78,20 @@ exports.streamHandler = async (req, res) => {
     return;
   }
 
+  // Enforce the per-user concurrent stream cap BEFORE registering anything.
+  if (watchMode) {
+    const cur = activeStreamsByUid.get(user.uid) || 0;
+    if (cur >= MAX_STREAMS_PER_UID) {
+      sseWrite(res, 'error', {
+        error: 'Too many live connections for this account. Close other tabs and retry.',
+        code: 'too_many_streams',
+      });
+      res.end();
+      return;
+    }
+    activeStreamsByUid.set(user.uid, cur + 1);
+  }
+
   let closed = false;
   let interval = null;
   let maxAge = null;
@@ -79,6 +100,13 @@ exports.streamHandler = async (req, res) => {
   const stopStream = () => {
     if (closed) return;
     closed = true;
+    // Release the per-user concurrent-stream slot (see MAX_STREAMS_PER_UID).
+    if (watchMode) {
+      const cur = activeStreamsByUid.get(user.uid) || 0;
+      const next = Math.max(0, cur - 1);
+      if (next === 0) activeStreamsByUid.delete(user.uid);
+      else activeStreamsByUid.set(user.uid, next);
+    }
     if (interval) clearInterval(interval);
     if (maxAge) clearTimeout(maxAge);
     if (notifRef && notifListener) {

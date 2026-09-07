@@ -1,6 +1,7 @@
 // Express wrapper that invokes existing server API handlers
 const express = require('express');
-const rateLimit = require('express-rate-limit');
+// NOTE: express-rate-limit is intentionally NOT used — a hand-rolled limiter
+// (makeRateLimiter below) covers every route. Don't re-add the import.
 const morgan = require('morgan');
 const path = require('path');
 const fs = require('fs');
@@ -101,18 +102,25 @@ function applyCors(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
-// Trust the left-most X-Forwarded-For entry only when explicitly behind a
-// trusted proxy (TRUST_PROXY=1). Otherwise use the raw socket address —
-// blindly trusting XFF lets an attacker rotate the header to bypass every
-// rate limit and bloat the buckets Map (one entry per spoofed value).
+// Trust the client IP only when explicitly behind a trusted proxy
+// (TRUST_PROXY=1). Otherwise use the raw socket address — blindly trusting
+// XFF lets an attacker rotate the header to bypass every rate limit and
+// bloat the buckets Map (one entry per spoofed value).
 const TRUST_PROXY = process.env.TRUST_PROXY === '1' || isDev;
 
 function clientKey(req) {
   if (TRUST_PROXY) {
+    // nginx ($proxy_add_x_forwarded_for) APPENDS the real client IP to any
+    // client-supplied XFF entries, so the FIRST entry is attacker-controlled
+    // (rotating it handed out a fresh rate-limit bucket per request). Prefer
+    // the proxy-set x-real-ip, else the LAST XFF entry (the one our own proxy
+    // appended), else fall back to the socket address.
+    const realIp = req.headers['x-real-ip'];
+    if (typeof realIp === 'string' && realIp.trim()) return realIp.trim();
     const xff = req.headers['x-forwarded-for'];
     if (typeof xff === 'string') {
-      const first = xff.split(',')[0].trim();
-      if (first) return first;
+      const parts = xff.split(',').map((s) => s.trim()).filter(Boolean);
+      if (parts.length) return parts[parts.length - 1];
     }
   }
   return req.socket?.remoteAddress || 'unknown';

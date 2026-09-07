@@ -139,6 +139,8 @@ exports.streamHandler = async (req, res) => {
   const payload = parseBody(req);
   const text = String(payload.message || '').slice(0, 4000).trim();
   if (!text) {
+    // coachAllowUid already incremented the in-flight counter — release it.
+    coachReleaseUid(user.uid);
     sseWrite(res, 'error', { error: 'Empty message.', code: 'bad_request' });
     res.end();
     return;
@@ -148,6 +150,7 @@ exports.streamHandler = async (req, res) => {
   // same user (and vice versa). This is backend defense in depth on top of the
   // frontend mutual-exclusion popup.
   if (!acquireHeavyAction(user.uid, 'coach')) {
+    coachReleaseUid(user.uid);
     const busy = getBusyAction(user.uid);
     sseWrite(res, 'error', {
       error: busy === 'review'
@@ -169,6 +172,7 @@ exports.streamHandler = async (req, res) => {
     const r = await reserveCoachTokens(user.uid, reserveAmount, tokenLimit);
     if (!r.allowed) {
       releaseHeavyAction(user.uid);
+      coachReleaseUid(user.uid);
       sseWrite(res, 'error', {
         error: 'You\'ve used all your daily Coach tokens. They reset at midnight UTC — or upgrade for more.',
         code: 'quota_exceeded',
@@ -181,6 +185,7 @@ exports.streamHandler = async (req, res) => {
     reservedTotal = r.total;
   } catch (err) {
     releaseHeavyAction(user.uid);
+    coachReleaseUid(user.uid);
     sseWrite(res, 'error', { error: 'Could not verify token quota. Please try again.', code: 'quota_check_failed' });
     res.end();
     return;
@@ -189,7 +194,17 @@ exports.streamHandler = async (req, res) => {
   // Chat history is client-owned (localStorage). The browser sends the prior
   // turns in `payload.history`; we do NOT load/persist anything server-side
   // (keeps multi-chat state in the user's browser where the sidebar lives).
-  const clientHistory = Array.isArray(payload.history) ? payload.history : [];
+  // Hard-cap what we accept: 50 turns × 4000 chars each (matching the per-message
+  // cap). buildLlmMessages further trims to the last LLM_HISTORY_LIMIT turns.
+  // Previously the raw client array flowed through unchecked — the 2MB body
+  // limit allowed ~500k tokens in one request, blowing the daily cap in a
+  // single message.
+  const clientHistory = Array.isArray(payload.history)
+    ? payload.history.slice(-50).map((m) => ({
+        role: m && m.role === 'assistant' ? 'assistant' : 'user',
+        content: String((m && m.content) || '').slice(0, 4000),
+      }))
+    : [];
 
   let closed = false;
   req.on('close', () => { closed = true; });
@@ -328,6 +343,18 @@ async function runConversation({ res, llmMessages, user, closedRef, onToken, onT
   let lastSearchQuery = null;
   let searchRepeatCount = 0;
 
+  // Dedupe runaway stockfish loops: if the model keeps re-issuing the SAME
+  // invalid FEN round after round (instead of answering), short-circuit it and
+  // force the final-answer path. The browser tool returns an error for a bad
+  // FEN, but some models stubbornly retry the identical malformed position
+  // instead of giving up — which burns the whole tool budget on a loop the user
+  // sees as repeated "Invalid FEN" cards. We also cap the total number of
+  // consecutive stockfish calls so a model that keeps trying DIFFERENT (still
+  // failing) positions can't spin forever either.
+  let lastStockfishFen = null;
+  let stockfishRepeatCount = 0;
+  let stockfishConsecutive = 0;
+
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (closedRef()) throw new Error('Client disconnected.');
 
@@ -378,6 +405,35 @@ async function runConversation({ res, llmMessages, user, closedRef, onToken, onT
       }
     } else {
       lastSearchQuery = null; searchRepeatCount = 0;
+    }
+
+    // Detect a stuck single-tool stockfish loop and break out early. Two
+    // triggers: (a) the SAME FEN re-issued repeatedly, or (b) too many
+    // consecutive stockfish calls in a row (the model is stuck trying to
+    // analyze instead of answering). Feed back a "stop analyzing" result so
+    // the model sees the position is unusable and moves on to a real answer.
+    const onlyStockfish = result.toolCalls.length === 1 && result.toolCalls[0].name === 'stockfish';
+    if (onlyStockfish) {
+      stockfishConsecutive += 1;
+      const fen = String(result.toolCalls[0].args && result.toolCalls[0].args.fen || '').trim();
+      let stuck = false;
+      if (fen && fen === lastStockfishFen) {
+        stockfishRepeatCount += 1;
+        if (stockfishRepeatCount >= 2) stuck = true;
+      } else {
+        lastStockfishFen = fen; stockfishRepeatCount = fen ? 1 : 0;
+      }
+      // Cap consecutive stockfish calls (even with different FENs) so a model
+      // that keeps trying to analyze instead of answering can't spin forever.
+      if (stockfishConsecutive >= 3) stuck = true;
+      if (stuck) {
+        const c = result.toolCalls[0];
+        const callId = c.id || `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        llmMessages.push({ role: 'tool', tool_call_id: c.id || callId, name: 'stockfish', content: JSON.stringify({ error: 'This position could not be analyzed (invalid FEN). Do not retry this position — answer the user directly without the stockfish tool.' }) });
+        break;
+      }
+    } else {
+      lastStockfishFen = null; stockfishRepeatCount = 0; stockfishConsecutive = 0;
     }
 
     // Execute each tool call.

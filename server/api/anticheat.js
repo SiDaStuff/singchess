@@ -20,6 +20,15 @@ try {
 // background job can write its results to Firebase without duplicating the
 // analysis pipeline.
 const { requireUser, requireQuota, activePlan, isPaidOrAbove, _pruneStaleDataGlobal, _pushNotification, initAdmin } = require('./_lib/user-service');
+
+// Per-user background-job concurrency: jobId -> uid. Each job can hold the
+// shared engine queue for up to ~1h, so without a cap one Max account could
+// stack many jobs and starve every other user's reviews.
+const MAX_ANTICHEAT_JOBS_PER_UID = 2;
+const _runningAnticheatJobs = new Map();
+// Lets long background jobs yield to a foreground game review running on the
+// same shared engine, and resume once that review finishes.
+const { waitForInteractiveReviewIdle, isInteractiveReviewRunning } = require('./_lib/review-coordination');
 const cryptoNode = require('crypto');
 
 const MAX_GAMES = 15;
@@ -797,6 +806,14 @@ async function _runLegacyAnalysisForJob(pgns, payload, onProgress) {
   return await withTimeout(withEngineQueue(async () => {
     await reviewEngine.newGame();
     for (let gameIndex = 0; gameIndex < pgns.length; gameIndex += 1) {
+      // Pause between games while a foreground game review is on the shared
+      // engine, then continue once it finishes. The one-hour job timeout below
+      // still bounds the whole run, but we give reviews priority by yielding.
+      // A review never runs anywhere near 10 minutes (it has its own timeouts),
+      // so this cap just guarantees the job can't stall forever on a hung one.
+      if (isInteractiveReviewRunning()) {
+        await waitForInteractiveReviewIdle({ timeoutMs: 10 * 60 * 1000 });
+      }
       const pgn = pgns[gameIndex];
       try {
         const parsed = parseGame(pgn);
@@ -838,7 +855,7 @@ async function _runLegacyAnalysisForJob(pgns, payload, onProgress) {
       subjectsAnalyzed: allMetrics.length,
       profile: ANTICHEAT_PROFILE,
     };
-  }), 900000, 'Anticheat overall processing timed out.');
+  }), 3600000, 'Anticheat overall processing timed out.'); // 1 hour
 }
 
 // Engine-only mode (depth-18 multi-PV per position). Same as above but
@@ -853,6 +870,11 @@ async function _runEngineAnalysisForJob(pgns, onProgress) {
     let processedPositions = 0;
 
     for (let gameIndex = 0; gameIndex < pgns.length; gameIndex += 1) {
+      // Pause between games while a foreground game review is on the shared
+      // engine, then continue once it finishes.
+      if (isInteractiveReviewRunning()) {
+        await waitForInteractiveReviewIdle({ timeoutMs: 10 * 60 * 1000 });
+      }
       const pgn = pgns[gameIndex];
       try {
         const parsed = parseGame(pgn);
@@ -896,7 +918,7 @@ async function _runEngineAnalysisForJob(pgns, onProgress) {
       }
     }
     return { results: responses, profile: ANTICHEAT_PROFILE };
-  }), 900000, 'Anticheat overall processing timed out.');
+  }), 3600000, 'Anticheat overall processing timed out.'); // 1 hour
 }
 
 // Background-job runner. Runs the analysis async, writes the result to
@@ -904,13 +926,15 @@ async function _runEngineAnalysisForJob(pgns, onProgress) {
 // (success OR failure). Used by `exports.submit` (below). The `setImmediate`
 // schedule means the HTTP response has already returned by the time the
 // engine queue picks the job up.
-async function _runAnticheatJob(jobId, payload, uid, quota, plan) {
+// `preloadedPgns` (optional): PGNs already loaded by exports.submit — passing
+// them skips a redundant second fetch from lichess/chess.com inside the job.
+async function _runAnticheatJob(jobId, payload, uid, quota, plan, preloadedPgns) {
   const { db } = initAdmin();
   const reportRef = db.ref(`anticheatReports/${uid}/${jobId}`);
 
   let pgns = [];
   try {
-    pgns = await loadPgns(payload);
+    pgns = Array.isArray(preloadedPgns) && preloadedPgns.length ? preloadedPgns : await loadPgns(payload);
     if (!pgns.length) throw new Error('No games found.');
   } catch (err) {
     await reportRef.update({
@@ -1083,12 +1107,28 @@ exports.submit = async (event) => {
     return json(500, { error: 'Could not start the background review.', code: 'storage_error', detail: (err && err.message) ? String(err.message).slice(0, 300) : undefined });
   }
 
-  // Hand off to the engine pool. setImmediate keeps the call off the current
-  // event loop tick so the HTTP response can flush first.
-  setImmediate(() => {
-    _runAnticheatJob(jobId, payload, user.uid, quotaState.quota, quotaState.plan).catch((err) => {
-      console.error('Background anticheat job crashed:', err);
+  // Per-user background-job concurrency cap: each job fetches external PGNs
+  // and holds the shared engine queue for up to ~1h. Without a cap, one Max
+  // account could stack many jobs and starve everyone else.
+  const runningForUid = [..._runningAnticheatJobs.values()].filter((u) => u === user.uid).length;
+  if (runningForUid >= MAX_ANTICHEAT_JOBS_PER_UID) {
+    return json(429, {
+      error: `You already have ${runningForUid} background review${runningForUid === 1 ? '' : 's'} running. Wait for one to finish first.`,
+      code: 'too_many_jobs',
     });
+  }
+
+  // Pass the already-loaded PGNs into the job — previously the job re-fetched
+  // them from lichess/chess.com a second time (double external fetch).
+  _runningAnticheatJobs.set(jobId, user.uid);
+  setImmediate(() => {
+    _runAnticheatJob(jobId, payload, user.uid, quotaState.quota, quotaState.plan, preloadedPgns)
+      .catch((err) => {
+        console.error('Background anticheat job crashed:', err);
+      })
+      .finally(() => {
+        _runningAnticheatJobs.delete(jobId);
+      });
   });
 
   return json(200, {

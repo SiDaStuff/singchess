@@ -1,4 +1,4 @@
-const { getProfile, patchProfile, requireUser, json } = require('./_lib/user-service');
+const { getProfile, patchProfile, requireUser, json, initAdmin } = require('./_lib/user-service');
 
 function calculateRatingDelta(puzzleRating, userRating, won) {
   const expected = 1 / (1 + Math.pow(10, (puzzleRating - userRating) / 400));
@@ -39,12 +39,33 @@ exports.handler = async (event) => {
     if (typeof body.won !== 'boolean') return json(400, { error: 'won must be a boolean.' });
 
     const profile = await getProfile(authUser.uid, authUser);
+
+    // Server-side per-puzzle dedupe: a replayed submission for the same
+    // puzzleId is a no-op (client already handles `duplicate`). Without this,
+    // replaying the same request farmed rating deltas repeatedly.
+    let alreadyAttempted = false;
+    try {
+      const { db } = initAdmin();
+      const flagSnap = await db.ref(`users/${authUser.uid}/attemptedPuzzles/${puzzleId}`).get();
+      alreadyAttempted = flagSnap.exists();
+    } catch (_err) { /* dedupe flag is best-effort; don't block the solve */ }
+
     const currentRating = Math.max(MIN_RATING, Number(profile.puzzleRating) || 1500);
     const stats = {
       solved: Math.max(0, Number(profile.puzzleStats?.solved) || 0),
       attempted: Math.max(0, Number(profile.puzzleStats?.attempted) || 0),
       streak: Math.max(0, Number(profile.puzzleStats?.streak) || 0),
     };
+
+    if (alreadyAttempted) {
+      return json(200, {
+        success: true,
+        duplicate: true,
+        delta: 0,
+        ratingAfter: currentRating,
+        stats,
+      });
+    }
 
     const delta = calculateRatingDelta(puzzleRating, currentRating, won);
     // Clamp delta to prevent extreme swings
@@ -57,6 +78,15 @@ exports.handler = async (event) => {
     };
 
     await patchProfile(authUser.uid, { puzzleRating: ratingAfter, puzzleStats: nextStats });
+    // Record the dedupe flag AFTER the rating update succeeds (best-effort —
+    // a flag-write failure just means the puzzle could theoretically be
+    // double-counted, same as before this fix).
+    try {
+      const { db } = initAdmin();
+      const firebaseAdmin = require('firebase-admin');
+      await db.ref(`users/${authUser.uid}/attemptedPuzzles/${puzzleId}`)
+        .set(firebaseAdmin.database.ServerValue.TIMESTAMP);
+    } catch (_err) { /* ignore */ }
 
     return json(200, { success: true, delta: clampedDelta, ratingAfter, stats: nextStats });
   } catch (err) {

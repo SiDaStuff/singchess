@@ -19,6 +19,12 @@ exports.handler = async (event) => {
     if (!isOwner) return json(200, { banned: !!result.banned });
     return json(200, result);
   } catch (_err) {
-    return json(200, { banned: false });
+    // Fail CLOSED on backend errors. Previously any error (e.g. a Firebase
+    // outage) returned banned:false, which transiently "unbanned" every banned
+    // account client-side. Return 5xx so the client can distinguish "not
+    // banned" from "couldn't check" (unknown emails still return banned:false
+    // via getBanStatus above — this branch is only for unexpected failures).
+    console.error('ban-status failed:', err && err.message ? err.message : err);
+    return json(503, { error: 'Ban check temporarily unavailable. Try again.' });
   }
 };
