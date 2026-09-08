@@ -10,6 +10,8 @@ function allowedOrigin(origin) {
   if (origin === 'https://chess.sidastuff.com') return origin;
   // Netlify frontend (production SPA).
   if (origin === 'https://chess.singdevelopments.com') return origin;
+  // Backend VM (mastermind) — same-origin API calls.
+  if (origin === 'https://mastermind.singdevelopments.com') return origin;
   if (isDev && origin === 'http://localhost:3000') return origin;
   return '';
 }

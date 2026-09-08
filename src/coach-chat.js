@@ -272,9 +272,9 @@
     if (state.streaming) return;
     if (isLocked()) return;
     const app = state.app;
-    if (app && typeof app._canStartHeavyAction === 'function' && !app._canStartHeavyAction('coach', 'Coach Chat')) {
-      return;
-    }
+    // NOTE: no heavy-action gate here. Starting a coach chat no longer blocks
+    // on (or gets blocked by) a running review — every chat message is charged
+    // against the daily token quota server-side, which is the real limiter.
     const ta = el['coach-chat-textarea'];
     const text = String(ta?.value || '').trim();
     if (!text) return;
@@ -307,10 +307,47 @@
 
     const controller = new AbortController();
     state.abortController = controller;
-    const timeout = setTimeout(() => controller.abort(), 180000);
+    // NO fixed 180s abort timer. The old timer aborted the stream mid-tool-run
+    // (a long Stockfish verification or web search can legitimately take a
+    // couple of minutes), surfacing as "Coach timed out — please try again."
+    // Real stalls are bounded server-side (LLM stream-stall watchdog, 60s
+    // browser-tool timeout, heartbeat-driven connection keepalive), and the
+    // user always has the Stop button for genuine runaway replies.
 
     let assistantEl = null;
     let assistantText = '';
+    // Live "thinking" view: reasoning models stream their chain of thought in
+    // a separate channel. Show it in the typing indicator (so the coach ALWAYS
+    // looks active — never a dead spinner) and as a dimmed collapsible note
+    // above the reply bubble.
+    let reasoningEl = null;
+    let reasoningText = '';
+    let reasoningRenderPending = false;
+    const showReasoning = (t) => {
+      reasoningText += t;
+      skeleton?.remove();
+      hideTyping();
+      if (!reasoningEl) {
+        reasoningEl = document.createElement('div');
+        reasoningEl.className = 'coach-reasoning';
+        reasoningEl.innerHTML = '<div class="coach-reasoning-head"><span class="material-symbols-outlined">psychology</span><span>Coach is reasoning…</span></div><div class="coach-reasoning-body"></div>';
+        el['coach-chat-messages']?.appendChild(reasoningEl);
+      }
+      // The typing indicator comes back on top of the reasoning block so the
+      // stream never looks idle while reasoning tokens arrive.
+      showTyping('Thinking…');
+      if (!reasoningRenderPending) {
+        reasoningRenderPending = true;
+        setTimeout(() => {
+          reasoningRenderPending = false;
+          const body = reasoningEl && reasoningEl.querySelector('.coach-reasoning-body');
+          if (body) {
+            body.textContent = reasoningText.slice(-600); // tail — keeps DOM cheap
+            scrollMessages();
+          }
+        }, 120);
+      }
+    };
 
     try {
       // Send the conversation history (client-owned).
@@ -347,14 +384,31 @@
       };
       await readStream(response, {
         onInit: (data) => { if (data && data.pid) state.chatPid = data.pid; },
+        onReasoning: showReasoning,
         onToken: (t) => {
+          // First answer token: collapse the reasoning view and start the reply.
+          if (reasoningEl) {
+            reasoningEl.classList.add('done');
+            const body = reasoningEl.querySelector('.coach-reasoning-body');
+            if (body) body.textContent = ''; // hide chain-of-thought once the real answer starts
+            reasoningEl = null; // don't touch it again this stream
+            skeleton?.remove();
+            hideTyping();
+          }
           if (!assistantEl) { skeleton?.remove(); hideTyping(); assistantEl = buildBubble('assistant', ''); assistantEl.classList.add('streaming'); el['coach-chat-messages'].appendChild(assistantEl); }
           assistantText += t;
           scheduleRender();
         },
-        onToolCall: (call) => handleBrowserTool(call),
+        onToolCall: (call) => { reasoningEl && reasoningEl.classList.add('done'); handleBrowserTool(call); },
         onToolStatus: ({ label }) => showTyping(label),
-        onToolResultVisible: ({ name, summary }) => { hideTyping(); appendToolCard(name, summary); },
+        onToolResultVisible: ({ name, summary, games }) => {
+          hideTyping();
+          if (name === 'fetch_games' && Array.isArray(games) && games.length) {
+            appendGameCards(name, summary, games);
+          } else {
+            appendToolCard(name, summary);
+          }
+        },
         onDone: (data) => {
           if (pendingRender) { clearTimeout(pendingRender); pendingRender = null; }
           skeleton?.remove();
@@ -378,15 +432,14 @@
       if (el['coach-chat-messages']) el['coach-chat-messages'].setAttribute('aria-busy', 'false');
       hideTyping();
       if (err && err.name === 'AbortError') {
-        // User clicked Stop (save partial) vs 180s timeout (show error).
-        // We distinguish by checking whether the timeout already fired.
+        // Abort only comes from the user clicking Stop now (the fixed timer is
+        // gone). Save whatever streamed so far as a partial reply.
         if (assistantText) {
-          // Save what we got so far as a partial reply.
           chat.messages.push({ role: 'assistant', content: assistantText + '\n\n_(stopped)_', ts: Date.now() });
           saveChats();
           if (assistantEl) { assistantEl.classList.remove('streaming'); assistantEl.innerHTML = renderMarkdown(assistantText + '\n\n_(stopped)_'); }
         } else {
-          appendBubble('error', 'Coach timed out — please try again.');
+          appendBubble('error', 'Coach stopped before replying.');
           assistantEl?.remove();
         }
       } else {
@@ -405,7 +458,6 @@
         }
       }
     } finally {
-      clearTimeout(timeout);
       state.streaming = false;
       state.abortController = null;
       applyLockedState(); // re-enable the textarea/send now that streaming ended
@@ -440,6 +492,7 @@
         let data = {};
         try { data = JSON.parse(dataLines.join('\n')); } catch (_) { continue; }
         if (event === 'token' && h.onToken) h.onToken(data.text || '');
+        else if (event === 'reasoning' && h.onReasoning) h.onReasoning(data.text || '');
         else if (event === 'init' && h.onInit) h.onInit(data);
         else if (event === 'tool_call' && h.onToolCall) h.onToolCall(data);
         else if (event === 'tool_status' && h.onToolStatus) h.onToolStatus(data);
@@ -480,7 +533,10 @@
     const parts = f.split(/\s+/);
     if (parts.length < 1 || parts.length > 6) return false;
     const placement = parts[0];
-    if (!/^[pnbrqkPNBRQK1-8]+$/.test(placement)) return false;
+    // NOTE: the class MUST include "/" — FEN ranks are slash-separated. The
+    // original regex omitted it, so this validator rejected EVERY valid FEN
+    // and the stockfish tool failed with "Invalid FEN" on every call.
+    if (!/^[pnbrqkPNBRQK1-8/]+$/.test(placement)) return false;
     const rows = placement.split('/');
     if (rows.length !== 8) return false;
     for (const row of rows) {
@@ -495,6 +551,148 @@
     // Side-to-move (part 1) must be 'w' or 'b' if present.
     if (parts[1] && parts[1] !== 'w' && parts[1] !== 'b') return false;
     return true;
+  }
+
+  // ── Adaptive FEN repair ─────────────────────────────────────────────
+  // LLMs produce slightly-wrong FENs constantly (missing counters, a rank
+  // with 7 or 9 files, swapped castling flags). Instead of bouncing "Invalid
+  // FEN" back at the model (which then often retries the same junk), try a
+  // ladder of cheap repairs first and return the best parse.
+  // Returns the repaired FEN string, or null when nothing sensible parsed.
+  function repairFen(raw) {
+    let fen = String(raw || '').trim();
+    // Strip wrapping quotes/code fences/prose the model sometimes adds.
+    fen = fen.replace(/^["'`\s]*(?:fen:?)?/i, '').replace(/["'`\s]*$/, '');
+    const parts = fen.split(/\s+/);
+    if (!parts[0]) return null;
+    const placement = parts[0];
+
+    const validPlacement = (p) => {
+      if (!/^[pnbrqkPNBRQK1-8/]+$/.test(p)) return false; // "/" required (rank separators)
+      const rows = p.split('/');
+      if (rows.length !== 8) return false;
+      for (const row of rows) {
+        let len = 0, kings = 0;
+        for (const ch of row) {
+          if (ch >= '1' && ch <= '8') len += parseInt(ch, 10);
+          else { len += 1; if (ch === 'k' || ch === 'K') kings++; }
+        }
+        if (len !== 8 || kings > 1) return false;
+      }
+      return true;
+    };
+
+    // Repair 1: trim/pad each rank to exactly 8 files (handles off-by-one
+    // hallucinations: a rank with 7 or 9 files). Left-to-right file order is
+    // preserved; shortage is padded with an empty-square digit on the rank's
+    // empty side (right), overflow trims a trailing digit.
+    let fixedRows = null;
+    if (/^[pnbrqkPNBRQK1-8/]+$/.test(placement)) {
+      const rows = placement.split('/');
+      if (rows.length === 8) {
+        const adjusted = rows.map((row) => {
+          let len = 0; let out = '';
+          const digits = [];
+          for (const ch of row) {
+            if (ch >= '1' && ch <= '8') { len += parseInt(ch, 10); digits.push(ch); }
+            else { out += ch; len += 1; }
+          }
+          if (len === 8) return out || '8';
+          if (len < 8) {
+            // Pad the gap: prefer appending after the LAST digit run (empty
+            // squares usually trail the pieces on a rank). Merge with an
+            // adjacent digit when possible to keep the FEN tidy.
+            const gap = 8 - len;
+            const lastDigit = digits.length ? digits[digits.length - 1] : null;
+            if (lastDigit && Number(lastDigit) + gap <= 8) {
+              const merged = String(Number(lastDigit) + gap);
+              // Replace the last occurrence of that digit in the output.
+              const at = out.lastIndexOf(lastDigit);
+              return out.slice(0, at) + merged + out.slice(at + lastDigit.length);
+            }
+            return (out || '') + String(gap);
+          }
+          // len > 8: shrink the LAST digit by the overflow (drop it if it hits 0).
+          const overflow = len - 8;
+          for (let i = digits.length - 1; i >= 0; i -= 1) {
+            const n = Number(digits[i]);
+            if (n > overflow) {
+              const shrunk = String(n - overflow);
+              const at = out.lastIndexOf(digits[i]);
+              return out.slice(0, at) + shrunk + out.slice(at + digits[i].length);
+            }
+          }
+          // Nothing shrinkable (all pieces + 1s): drop trailing pieces.
+          return out.slice(0, 8);
+        });
+        const candidate = adjusted.join('/');
+        if (validPlacement(candidate)) fixedRows = candidate;
+      }
+    }
+
+    // Repair 2: normalize the trailing fields. Accept 1-, 2-, 3-, 4-field
+    // FENs; default castling '-' (or keep given), en passant '-', counters 0/1.
+    const side = (parts[1] === 'w' || parts[1] === 'b') ? parts[1] : null;
+    const base = fixedRows !== null ? fixedRows : (validPlacement(placement) ? placement : null);
+    if (!base) return null;
+    if (!side && parts.length < 2) {
+      // Placement-only FEN: assume White to move (most common LLM intent when
+      // they omit it; if wrong the eval is still for a legal position).
+      return `${base} w - - 0 1`;
+    }
+    if (!side) return null;
+    const castling = (parts[2] && /^K?Q?k?q?$/.test(parts[2]) && parts[2] !== '-') ? parts[2] : '-';
+    const ep = (parts[3] && /^(-|[a-h][36])$/.test(parts[3])) ? parts[3] : '-';
+    const half = Number.isFinite(Number(parts[4])) ? Math.max(0, Number(parts[4])) : 0;
+    const full = Number.isFinite(Number(parts[5])) ? Math.max(1, Number(parts[5])) : 1;
+    const repaired = `${base} ${side} ${castling} ${ep} ${half} ${full}`;
+    // Only accept if chess.js can actually load it (legal side-to-move,
+    // kings present, etc.). Try both sides if the given side is impossible.
+    const ChessCtor = window.Chess || (window.chess && window.chess.Chess);
+    if (!ChessCtor) return isValidFen(repaired) ? repaired : null;
+    const probe = new ChessCtor();
+    if (probe.load(repaired)) return repaired;
+    const flipped = `${base} ${side === 'w' ? 'b' : 'w'} ${castling} ${ep} ${half} ${full}`;
+    const probe2 = new ChessCtor();
+    if (probe2.load(flipped)) return flipped;
+    return null;
+  }
+
+  // ── PGN → FEN fallback ──────────────────────────────────────────────
+  // When the model sends the POSITION as moves instead of a FEN (or its FEN is
+  // beyond repair but it also gave a moves list), replay the SAN tokens
+  // tolerantly: skip comments, NAGs ($1), stray punctuation, move numbers,
+  // and stop at the first result marker. Returns the final FEN or null.
+  function fenFromMoveText(text) {
+    if (typeof text !== 'string' || !text.trim()) return null;
+    const ChessCtor = window.Chess || (window.chess && window.chess.Chess);
+    if (!ChessCtor) return null;
+    const cleaned = String(text)
+      .replace(/\{[^}]*\}/g, ' ')        // {} comments
+      .replace(/;[^\n]*/g, ' ')          // ; line comments
+      .replace(/\([^()]*\)/g, ' ')       // () variations (one level)
+      .replace(/\$\d+/g, ' ');           // NAGs
+    const tokens = cleaned.split(/\s+/).filter(Boolean);
+    const board = new ChessCtor();
+    for (const tok of tokens) {
+      if (/^(1-0|0-1|1\/2-1\/2|\*)$/.test(tok)) break; // result marker = end
+      if (/^\d+\.+$/.test(tok)) continue;                 // bare move number
+      const san = tok.replace(/^\d+\.+/, '');             // strip "1." prefix
+      if (!san || san === '...') continue;
+      let mv = null;
+      try { mv = board.move(san, { sloppy: true }); } catch (_) {}
+      if (!mv) {
+        // One repair attempt: strip common annotation suffixes (+, #, !, ?).
+        const stripped = san.replace(/[+#!?]+$/, '');
+        if (stripped && stripped !== san) {
+          try { mv = board.move(stripped, { sloppy: true }); } catch (_) {}
+        }
+      }
+      // Unparsable move: skip it rather than fail the whole line — a skipped
+      // move yields an approximate position, which is far more useful to the
+      // user than "Invalid FEN". (The result notes it's approximate.)
+    }
+    return board.fen ? board.fen() : null;
   }
 
   // Post a browser-tool result back to the server so the parked SSE stream
@@ -524,16 +722,48 @@
   }
 
   async function runStockfishTool(id, args) {
-    const fen = String(args?.fen || '').trim();
-    if (!fen) { await postToolResult(id, { error: 'No FEN provided.' }); return; }
-    if (!isValidFen(fen)) {
-      // The LLM sent an invalid FEN. Return a clear error — NEVER a silent
-      // score:0 result the model could cite as "+0.00, position is equal".
-      // The server's tool_result_visible event renders the error card, so we
-      // don't append one here (avoids a duplicate "Invalid FEN" card per call).
-      await postToolResult(id, { error: 'Invalid FEN. The position could not be parsed (check the piece placement, side to move, and ranks).' });
-      return;
+    let fen = String(args?.fen || '').trim();
+    // Optional move-text fallback the model can supply instead of a FEN.
+    const movesText = String(args?.moves || args?.pgn || '').trim();
+    let repairedNote = null;
+
+    if (!fen && !movesText) { await postToolResult(id, { error: 'No FEN provided.' }); return; }
+
+    if (fen) {
+      if (!isValidFen(fen)) {
+        // Adaptive repair instead of a hard failure: the model's FEN is often
+        // *almost* right (missing counters, one bad rank, swapped flags).
+        const repaired = repairFen(fen);
+        if (repaired) {
+          repairedNote = `FEN was repaired before analysis (original: ${fen.slice(0, 80)}).`;
+          fen = repaired;
+        } else if (movesText) {
+          // Last resort: replay the move text.
+          const fromMoves = fenFromMoveText(movesText);
+          if (fromMoves) {
+            fen = fromMoves;
+            repairedNote = 'FEN was unparseable; position rebuilt from the provided move list (approximate).';
+          }
+        }
+        if (!isValidFen(fen)) {
+          // Genuinely unusable. Tell the model WHY and how to recover — never
+          // a silent score:0 the model could cite as "+0.00".
+          await postToolResult(id, {
+            error: `Invalid FEN ("${fen.slice(0, 100)}"). Retry ONCE with a corrected FEN: 8 ranks separated by "/", digits 1-8 for empty squares, side to move "w" or "b". If you have the move list instead, pass it via the "moves" argument.`,
+          });
+          return;
+        }
+      }
+    } else {
+      // No FEN given but a move list was: rebuild the position from moves.
+      const fromMoves = fenFromMoveText(movesText);
+      if (!fromMoves) {
+        await postToolResult(id, { error: 'Could not parse the move list into a position. Pass a valid FEN, or SAN moves like "1. e4 e5 2. Nf3".' });
+        return;
+      }
+      fen = fromMoves;
     }
+
     const app = state.app;
     if (!app.engine?.ready && app._initEngine) await app._initEngine();
     if (!app.engine?.ready) {
@@ -551,6 +781,7 @@
         showTyping(`Depth ${info.depth}${info.score !== undefined ? ` (${info.scoreType === 'mate' ? `#${info.score}` : (info.score / 100).toFixed(2)})` : ''}…`);
       }
     });
+    if (repairedNote) result.repaired = repairedNote;
 
     // Guard against a useless/empty result. A timed-out search returns
     // { score: 0, scoreType: 'cp', bestMove: '', depth: 0, timedOut: true }.
@@ -564,21 +795,11 @@
     await postToolResult(id, result);
   }
 
-  // game_review: ask the user (popup) whether to open the game in the review
-  // system; if yes, load the PGN + navigate to /review.
+  // game_review: open the game in the review system directly (no confirmation
+  // popup — the user asked for it, so just do it). Loads the PGN + navigates.
   async function runGameReviewTool(id, args) {
     const pgn = String(args?.pgn || '').trim();
-    const label = String(args?.summary || args?.label || 'Open this game in the review system?');
     if (!pgn) { await postToolResult(id, { opened: false, error: 'No PGN provided.' }); return; }
-    const confirmed = await confirmPopup({
-      icon: 'info',
-      title: 'Review this game?',
-      text: label,
-      confirmButtonText: 'Open review',
-      cancelButtonText: 'Not now',
-      showCancelButton: true,
-    });
-    if (!confirmed) { await postToolResult(id, { opened: false }); return; }
     try {
       const app = state.app;
       app._navigateTo('/review', { disableRestore: true, skipImport: true });
@@ -676,9 +897,46 @@
       : name === 'end_conversation' ? 'block'
       : name === 'lichess_opening' ? 'menu_book'
       : name === 'lichess_player' ? 'person_search'
+      : name === 'fetch_games' ? 'history'
       : 'build';
     d.innerHTML = `<span class="material-symbols-outlined">${icon}</span><span>${escapeHtml(summary)}</span>`;
     el['coach-chat-messages'].appendChild(d); scrollMessages();
+  }
+
+  // fetch_games result: a tool card plus one clickable card per game, each
+  // opening the game in the review system (same flow as the game_review tool).
+  function appendGameCards(name, summary, games) {
+    appendToolCard(name, summary);
+    const box = el['coach-chat-messages'];
+    if (!box) return;
+    for (const g of games.slice(0, 15)) {
+      const card = document.createElement('div');
+      card.className = 'coach-tool-card coach-game-card';
+      const white = String(g.white || '?');
+      const black = String(g.black || '?');
+      const outcome = String(g.outcome || '');
+      const icon = outcome === 'win' ? 'check_circle' : outcome === 'loss' ? 'cancel' : 'horizontal_rule';
+      const title = `${white} vs ${black}`;
+      const meta = [g.opening, g.date, outcome].filter(Boolean).join(' · ');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-secondary btn-sm';
+      btn.textContent = 'Review';
+      btn.addEventListener('click', () => {
+        try {
+          const app = state.app;
+          if (!g.pgn) return;
+          app._navigateTo('/review', { disableRestore: true, skipImport: true });
+          setTimeout(() => { try { app._loadPgnText(g.pgn); } catch (e) { console.warn('PGN load failed', e); } }, 60);
+        } catch (e) { console.warn('Could not open review', e); }
+      });
+      const text = document.createElement('span');
+      text.innerHTML = `<span class="material-symbols-outlined">${icon}</span><span><strong>${escapeHtml(title)}</strong><br><small>${escapeHtml(meta)}</small></span>`;
+      card.appendChild(text);
+      card.appendChild(btn);
+      box.appendChild(card);
+    }
+    scrollMessages();
   }
   // ── "Thinking" indicator ───────────────────────────────────────────────
 // A visible, reason-aware indicator while the coach is working: a spinner icon

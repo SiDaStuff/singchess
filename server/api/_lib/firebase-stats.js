@@ -1,6 +1,23 @@
 const crypto = require('crypto');
 const https = require('https');
 
+// Keep-alive agent: RTDB REST calls previously opened a FRESH TCP+TLS
+// connection per request (default globalAgent historically had keepAlive off
+// for https). Every first-of-burst request then paid DNS + TCP + TLS from
+// scratch — on a flaky resolver/IPv6 path that's a multi-second stall that
+// showed up as 5s+ latency on /api/public-stats. The agent caps sockets so
+// bursts reuse a small warm pool instead of stacking handshakes.
+const keepAliveAgent = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30_000,
+  maxSockets: 8,
+  // Prefer IPv4 first: Node tries addresses in DNS order (RTDB answers AAAA
+  // first), and a broken/black-holed IPv6 path costs a full SYN timeout per
+  // fresh connection. autoSelectFamily (happy eyeballs) already races
+  // families per connection; this hint further avoids bad paths.
+  family: 0,
+});
+
 let cachedToken = null;
 
 function base64Url(input) {
@@ -38,7 +55,7 @@ function databaseUrl() {
 
 function requestJson(url, options = {}, body = null) {
   return new Promise((resolve, reject) => {
-    const req = https.request(url, options, (res) => {
+    const req = https.request(url, { agent: keepAliveAgent, ...options }, (res) => {
       let data = '';
       res.setEncoding('utf8');
       res.on('data', (chunk) => { data += chunk; });
@@ -60,6 +77,9 @@ function requestJson(url, options = {}, body = null) {
       });
     });
     req.on('error', reject);
+    // Bound every REST call: an unbounded hang here held API responses open
+    // indefinitely (morgan showed multi-second/never-ending requests).
+    req.setTimeout(15000, () => req.destroy(new Error('Firebase REST request timed out')));
     if (body) req.write(body);
     req.end();
   });

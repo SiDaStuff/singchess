@@ -121,6 +121,14 @@ async function streamDeltas(response, onToken, opts = {}) {
       const delta = choice && choice.delta;
       if (choice && choice.finish_reason) finishReason = choice.finish_reason;
       if (!delta) continue;
+      // Reasoning models (e.g. gpt-oss on NVIDIA NIM) stream their chain of
+      // thought in delta.reasoning_content (OpenAI-compat) or delta.reasoning.
+      // These are NOT part of the answer — surface them via onReasoning so the
+      // client can show a live "thinking" view while the model works.
+      const reasoningDelta = (typeof delta.reasoning_content === 'string' && delta.reasoning_content)
+        || (typeof delta.reasoning === 'string' && delta.reasoning)
+        || '';
+      if (reasoningDelta && typeof opts.onReasoning === 'function') opts.onReasoning(reasoningDelta);
       if (typeof delta.content === 'string' && delta.content) { content += delta.content; onToken(delta.content); }
       if (Array.isArray(delta.tool_calls)) {
         for (const tc of delta.tool_calls) {

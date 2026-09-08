@@ -35,11 +35,12 @@ const TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'stockfish',
-      description: 'Evaluate a chess position with the Stockfish engine running in the user\'s browser. Use this tool to verify ANY claim about a specific position: evaluations, best moves, tactical lines, or whether a move is good/bad. ALWAYS call it before answering when the user asks about a position, a specific move, or its quality. Never answer such questions from memory. Returns score (side-to-move perspective — POSITIVE = good for the side to move), best move (UCI), principal variation, and depth reached. If the result has an "error" field, an empty bestMove, or depth 0, the eval FAILED — do NOT report it as a real evaluation; tell the user you could not verify it.',
+      description: 'Evaluate a chess position with the Stockfish engine running in the user\'s browser. Use this tool to verify ANY claim about a specific position: evaluations, best moves, tactical lines, or whether a move is good/bad. ALWAYS call it before answering when the user asks about a position, a specific move, or its quality. Never answer such questions from memory. Returns score (side-to-move perspective — POSITIVE = good for the side to move), best move (UCI), principal variation, and depth reached. If the result has an "error" field, an empty bestMove, or depth 0, the eval FAILED — do NOT report it as a real evaluation; tell the user you could not verify it. Minor FEN defects are repaired automatically. If you only have the move sequence (no FEN), pass the SAN moves via "moves" and the position will be reconstructed.',
       parameters: {
         type: 'object',
         properties: {
           fen: { type: 'string', description: 'FEN of the position to evaluate, including side to move.' },
+          moves: { type: 'string', description: 'Optional fallback: the game moves in SAN (e.g. "1. e4 e5 2. Nf3 Nc6"), used to reconstruct the position when your FEN fails validation.' },
           depth: { type: 'integer', minimum: 8, maximum: 24, description: 'Search depth. 12-14 quick check, 18-22 for claims.', default: 18 },
         },
         required: ['fen'],
@@ -163,6 +164,22 @@ const TOOL_DEFINITIONS = [
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'fetch_games',
+      description: 'Fetch recent games of a Lichess or Chess.com player and open them in the chat as reviewable PGNs. Pass source \'lichess\' or \'chesscom\' and a username (omit username to use the signed-in user\'s saved username for that source). Returns per-game metadata (opponents, results, openings, links) plus the FULL PGN list — summarize the games in prose; the user gets clickable cards to open any game in the review system.',
+      parameters: {
+        type: 'object',
+        properties: {
+          source: { type: 'string', enum: ['lichess', 'chesscom'], description: 'Which site to fetch from.' },
+          username: { type: 'string', description: 'Site username. Omit to use the signed-in user\'s saved username for that source.' },
+          limit: { type: 'integer', minimum: 1, maximum: 15, default: 5, description: 'How many recent games (newest first).' },
+        },
+        required: ['source'],
+      },
+    },
+  },
   // Exa is gated on EXA_API_KEY — the chat handler filters the list before
   // sending, so this entry is only reached when the env var is set.
   {
@@ -204,8 +221,78 @@ async function runServerTool(name, args, user) {
     case 'lichess_opening': return runLichessOpening(args || {});
     case 'lichess_player': return runLichessPlayer(args || {});
     case 'user_plan_stats': return runUserPlanStats(user);
+    case 'fetch_games': return runFetchGames(args || {}, user);
     default: return { error: `Unknown tool: ${name}` };
   }
+}
+
+// fetch_games: pull recent games for a Lichess/Chess.com account — either an
+// explicit username or the signed-in user's saved username for that source.
+// Returns compact per-game metadata the model can discuss, plus the PGN list
+// which the client renders as clickable "open in review" cards.
+async function runFetchGames({ source, username, limit }, user) {
+  const src = String(source || '').trim().toLowerCase() === 'chesscom' ? 'chesscom' : 'lichess';
+  const k = Math.max(1, Math.min(15, Math.trunc(Number(limit) || 5)));
+
+  // Resolve the username: explicit arg wins, else the user's saved one.
+  let name = String(username || '').trim();
+  if (!name) {
+    const saved = (user && user._profile && user._profile.savedUsernames) || {};
+    name = String(saved[src] || '').trim();
+    if (!name) {
+      return {
+        error: `No username given and no saved ${src === 'chesscom' ? 'Chess.com' : 'Lichess'} username on this account. Ask the user which username to fetch, or have them save one in Settings.`,
+        code: 'no_username',
+      };
+    }
+  }
+  if (!/^[a-zA-Z0-9._-]{1,40}$/.test(name)) return { error: 'Invalid username (alphanumeric, dots, underscores, hyphens; 1-40 chars).' };
+
+  // Reuse the same fetchers the /api/recent-games proxy uses (parallel month
+  // walks + timeouts for chess.com, PGN export for lichess).
+  const { lichessGames, chessComGames, sortRecent } = require('../recent-games');
+  let games;
+  try {
+    games = src === 'chesscom'
+      ? await chessComGames(name, k)
+      : await lichessGames(name, k);
+  } catch (e) {
+    const msg = String(e && e.message) || 'fetch failed';
+    return { error: `Could not fetch ${src === 'chesscom' ? 'Chess.com' : 'Lichess'} games for ${name}: ${msg}` };
+  }
+  games = sortRecent(games).slice(0, k);
+  if (!games.length) return { error: `No recent games found for ${name} on ${src === 'chesscom' ? 'Chess.com' : 'Lichess'}.` };
+
+  // Compact metadata for the model + PGN payload for the client cards. PGNs
+  // are capped (the model summarizes from metadata; full PGNs go to the UI).
+  const games_out = games.map(({ pgn, headers }, i) => {
+    const white = headers.White || '?';
+    const black = headers.Black || '?';
+    const result = headers.Result || '*';
+    const date = headers.UTCDate || headers.Date || '';
+    const opening = headers.Opening || headers.ECO || '';
+    const tc = headers.TimeControl || headers.TimeClass || '';
+    return {
+      index: i + 1,
+      white,
+      black,
+      result,
+      date,
+      opening,
+      timeControl: tc,
+      // Result from the Fetched player's perspective for quick talk tracks.
+      outcome: result === '1-0'
+        ? (white.toLowerCase() === name.toLowerCase() ? 'win' : 'loss')
+        : result === '0-1'
+          ? (black.toLowerCase() === name.toLowerCase() ? 'win' : 'loss')
+          : 'draw',
+      pgn: String(pgn || '').slice(0, 8000),
+    };
+  });
+
+  const first = games_out[0] || {};
+  const summary = `Fetched ${games_out.length} recent game${games_out.length === 1 ? '' : 's'} for ${name} (${src === 'chesscom' ? 'Chess.com' : 'Lichess'}). Most recent: ${first.white} vs ${first.black} (${first.outcome}${first.opening ? `, ${first.opening}` : ''}).`;
+  return { source: src, username: name, count: games_out.length, summary, games: games_out, pgnCards: true };
 }
 
 // Lichess Masters opening explorer (shared with /api/opening-explorer). The
@@ -471,4 +558,5 @@ module.exports = {
   runCoachGames,
   runLichessOpening,
   runLichessPlayer,
+  runFetchGames,
 };

@@ -20,8 +20,14 @@ const HEARTBEAT_MS = 20000;
 // Per-uid concurrency + burst limits (in-process; defense-in-depth alongside
 // the per-IP Express limit and the daily token cap). Stops one user spamming
 // parallel streams to burn quota fast or starve the LLM pool.
-const COACH_MAX_CONCURRENT_PER_UID = 2;
-const COACH_MAX_PER_MIN_PER_UID = 12;
+//
+// These are deliberately GENEROUS: a single coach message is one SSE stream,
+// but a message that triggers several tool rounds (stockfish + web_search +
+// fetch_games) can open a few streams back-to-back, and the user may send
+// several messages in a row. The daily token cap is the real abuse limiter;
+// this only guards against pathological parallel spam.
+const COACH_MAX_CONCURRENT_PER_UID = 4;
+const COACH_MAX_PER_MIN_PER_UID = 40;
 const coachInFlight = new Map(); // uid -> count of active streams
 const coachRecent = new Map();   // uid -> [timestamps]
 function coachAllowUid(uid) {
@@ -146,21 +152,11 @@ exports.streamHandler = async (req, res) => {
     return;
   }
 
-  // Heavy-action lock: block coach chat while a game review is running for the
-  // same user (and vice versa). This is backend defense in depth on top of the
-  // frontend mutual-exclusion popup.
-  if (!acquireHeavyAction(user.uid, 'coach')) {
-    coachReleaseUid(user.uid);
-    const busy = getBusyAction(user.uid);
-    sseWrite(res, 'error', {
-      error: busy === 'review'
-        ? 'A game review is running. Please wait for it to finish before using the coach.'
-        : 'You already have a coach chat running. Please wait for it to finish.',
-      code: 'heavy_action_busy',
-    });
-    res.end();
-    return;
-  }
+  // Heavy-action lock REMOVED (2026-09): chatting while a review runs is now
+  // allowed. The old lock produced "You already have a coach chat running."
+  // dead-ends for a feature that is fully metered anyway — every message
+  // reserves + reconciles coach tokens against the daily plan cap below,
+  // which is the real abuse limiter. (Client gate removed to match.)
 
   // Atomic quota gate: reserve a worst-case cost up front (transactional, so N
   // parallel requests can't all pass the gate on the same stale read and run up
@@ -359,12 +355,17 @@ async function runConversation({ res, llmMessages, user, closedRef, onToken, onT
     if (closedRef()) throw new Error('Client disconnected.');
 
     // Stream this turn WITH tools available. We accumulate content (piped live
-    // to emit) and tool_calls (assembled from deltas) in parallel.
+    // to emit) and tool_calls (assembled from deltas) in parallel. Reasoning
+    // deltas (chain of thought from reasoning models) stream as `reasoning`
+    // SSE events — visible to the user as live "thinking" text, never stored
+    // as reply content.
     const streamRes = await llm.chatCompletion({
       messages: llmMessages, tools: getToolDefinitions(), toolChoice: 'auto',
       stream: true, maxTokens, temperature: 0.3,
     });
-    const result = await llm.streamDeltas(streamRes, emit);
+    const result = await llm.streamDeltas(streamRes, emit, {
+      onReasoning: (t) => { if (!closedRef()) sseWrite(res, 'reasoning', { text: t }); },
+    });
     trackUsage(result && result.usage);
     const finalText = (result && result.content) || '';
 
@@ -452,7 +453,12 @@ async function runConversation({ res, llmMessages, user, closedRef, onToken, onT
         let toolResult;
         try { toolResult = await runServerTool(call.name, call.args, user); }
         catch (e) { toolResult = { error: e.message || 'Tool failed.' }; }
-        onToolResultVisible({ id: callId, name: call.name, summary: toolResultSummary(call.name, toolResult) });
+        // fetch_games carries the per-game PGNs so the client can render
+        // clickable "Review" cards — piggyback them on the visible event.
+        const visibleExtra = (call.name === 'fetch_games' && Array.isArray(toolResult && toolResult.games))
+          ? { games: toolResult.games.map(({ pgn, white, black, outcome, date, opening }) => ({ pgn, white, black, outcome, date, opening })) }
+          : {};
+        onToolResultVisible({ id: callId, name: call.name, summary: toolResultSummary(call.name, toolResult), ...visibleExtra });
         llmMessages.push({ role: 'tool', tool_call_id: call.id || callId, name: call.name, content: JSON.stringify(toolResult) });
       }
     }
@@ -466,7 +472,9 @@ async function runConversation({ res, llmMessages, user, closedRef, onToken, onT
   const finalRes = await llm.chatCompletion({
     messages: llmMessages, stream: true, temperature: 0.4, maxTokens,
   });
-  const finalStream = await llm.streamDeltas(finalRes, emit);
+  const finalStream = await llm.streamDeltas(finalRes, emit, {
+    onReasoning: (t) => { if (!closedRef()) sseWrite(res, 'reasoning', { text: t }); },
+  });
   trackUsage(finalStream && finalStream.usage);
 
   // Last-resort guarantee: if nothing was streamed across all rounds AND the
@@ -490,6 +498,7 @@ function toolLabel(name) {
   if (name === 'stockfish') return 'Analyzing the position…';
   if (name === 'lichess_opening') return 'Looking up the opening…';
   if (name === 'lichess_player') return 'Looking up the player…';
+  if (name === 'fetch_games') return 'Fetching recent games…';
   return 'Working…';
 }
 
@@ -524,6 +533,7 @@ function toolResultSummary(name, result) {
   if (name === 'coach_games') return result.summary || 'No chess profile on file.';
   if (name === 'lichess_opening') return result.summary || (result.opening || 'No opening data.');
   if (name === 'lichess_player') return result.summary || (result.username || 'No player data.');
+  if (name === 'fetch_games') return result.summary || (result.error ? result.error : 'No games fetched.');
   if (name === 'web_search') {
     const rs = Array.isArray(result.results) ? result.results : [];
     if (!rs.length) return result.note || 'No results found.';

@@ -1,6 +1,6 @@
 # Netlify deployment for Sing Chess Review (frontend SPA only).
 # The frontend builds here and calls the backend on the Oracle VM at build-time
-# VITE_API_URL. All API/SSE/stream traffic is cross-origin to chess.sidastuff.com.
+# VITE_API_URL. All API/SSE/stream traffic is cross-origin to mastermind.singdevelopments.com.
 #
 # No server-side code runs on Netlify — it is a static file host + CDN for dist/.
 
@@ -10,12 +10,14 @@
 # different backend (e.g. a staging URL) without touching the repo.
 #
 # VITE_RECAPTCHA_SITE_KEY is REQUIRED for signup/contact captcha (src/recaptcha.js).
-# It is a public site key — safe to commit. Without it, Netlify builds ship
-# with the captcha silently disabled.
+# It is a PUBLIC site key (it ships in the browser bundle anyway) — safe to
+# commit. Netlify's secrets scanner flags it as a secret; SECRETS_SCAN_OMIT_KEYS
+# tells the scanner this specific key is expected and not a leak.
 [build.environment]
   NODE_VERSION = "20"
-  VITE_API_URL = "https://chess.sidastuff.com"
+  VITE_API_URL = "https://mastermind.singdevelopments.com"
   VITE_RECAPTCHA_SITE_KEY = "6LfWZF0tAAAAAHxNeJq9wAMakhfalxlsEKm7g9u1"
+  SECRETS_SCAN_OMIT_KEYS = "VITE_RECAPTCHA_SITE_KEY"
 
 [build]
   command = "npm run build"

@@ -73,7 +73,11 @@ const publicDir = path.resolve(__dirname, '../public');
 const distDir = path.resolve(__dirname, '../dist');
 const serveStatic = process.env.SERVE_STATIC !== '0';
 const isDev = process.env.NODE_ENV === 'development' || process.env.CHESS_REVIEW_DEV_SERVER === '1';
-const allowedOrigins = new Set(['https://chess.sidastuff.com', 'https://chess.singdevelopments.com']);
+const allowedOrigins = new Set([
+  'https://chess.sidastuff.com',
+  'https://chess.singdevelopments.com',
+  'https://mastermind.singdevelopments.com',
+]);
 // Localhost origins are always safe to allow: browsers never send Origin:localhost
 // to a real production domain, and they're necessary for direct :3000 access
 // during dev, health checks, or local preview of the production build.
@@ -431,4 +435,24 @@ app.use((err, req, res, _next) => {
 app.listen(PORT, () => {
   const mode = serveStatic ? 'web/API' : 'API';
   console.log(`${mode} server listening at http://localhost:${PORT}`);
+  // ── Warm up Firebase connections BEFORE the first real request ──────
+  // The first Firebase-touching request after boot paid every cold-start
+  // cost at once: OAuth token fetch, Admin SDK cert fetch, and the RTDB
+  // socket handshake (seconds on a flaky resolver). That surfaced as ~5s
+  // latency on /api/public-stats and /api/users/me in a page-load burst.
+  // Fire both paths once now; failures are non-fatal (they retry on demand).
+  setImmediate(() => {
+    try {
+      require('./api/_lib/firebase-stats').getPublicStats()
+        .then(() => console.log('[warmup] Firebase REST ready'))
+        .catch((err) => console.warn('[warmup] Firebase REST skipped:', err.message));
+      const { initAdmin } = require('./api/_lib/user-service');
+      initAdmin();
+      initAdmin().db.ref('.info/serverTimeOffset').once('value')
+        .then(() => console.log('[warmup] Firebase RTDB ready'))
+        .catch((err) => console.warn('[warmup] Firebase RTDB skipped:', err.message));
+    } catch (err) {
+      console.warn('[warmup] Firebase not configured yet:', err.message);
+    }
+  });
 });

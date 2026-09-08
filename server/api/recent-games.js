@@ -152,3 +152,8 @@ exports.handler = async (event) => {
     return json(statusCode, { error: message, code: statusCode === 503 ? 'upstream_blocked' : 'fetch_failed' });
   }
 };
+
+// Shared with the coach fetch_games tool (server/api/_lib/coach-tools.js).
+exports.lichessGames = lichessGames;
+exports.chessComGames = chessComGames;
+exports.sortRecent = sortRecent;

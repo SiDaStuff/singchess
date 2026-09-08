@@ -1888,7 +1888,19 @@ class MoveAnalyzer {
     // after-position eval drifted on a depth mismatch. Before settling on
     // BEST, check whether a best move deserves the GREAT upgrade (it uniquely
     // swung the game outcome).
-    const isBestOrForced = isCheckmate || numLegalMoves === 1 || isBestMove || cpLoss === 0;
+    //
+    // Consistency gate: a search that genuinely ranks the played move first
+    // can't also cost it MISTAKE_CP against its own best line — that
+    // combination only arises when the search was truncated by its time
+    // budget (or hit the horizon) and the after-position eval contradicts the
+    // best-line eval. In that case fall through to the error ladder so a
+    // Qxa6-style trap is labelled BLUNDER instead of hiding behind the BEST
+    // badge. Forced moves and checkmates keep BEST unconditionally (nothing
+    // else was playable, so "loss vs best" is meaningless).
+    const isBestOrForced = isCheckmate
+      || numLegalMoves === 1
+      || (isBestMove && cpLoss < MISTAKE_CP)
+      || cpLoss === 0;
     if (isBestOrForced) {
       const beforeExpected = this.expectedPoints(playerEdgeBefore);
       const afterExpected = this.expectedPoints(playerEdgeAfter);

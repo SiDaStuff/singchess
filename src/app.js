@@ -9130,11 +9130,45 @@ _showPuzzleSuccessOverlay() {
    * Returns null when the deeper search agrees (or fails), so callers can keep
    * the base-depth result unchanged.
    */
+  /**
+   * Run a MultiPV search and make sure it actually REACHED the requested
+   * depth. `go depth N` under a timeout means a sharp tactical position can
+   * be stopped mid-search having only completed depth ~9 while N=14 was
+   * requested. The partial result looks authoritative (same format, same
+   * fields) but is shallow noise — that is exactly how a one-move capture
+   * gets reported as "best" while the refutation sits beyond the horizon.
+   *
+   * Detect truncation via the achieved depth on the returned lines and retry
+   * ONCE with a doubled budget before handing the caller whatever we have.
+   * (Stockfish only emits info lines for completed iterations, so the max
+   * line depth is the true achieved depth.)
+   */
+  async _searchToDepth(fen, depth, multiPv, timeoutMs) {
+    let budget = Math.max(2000, timeoutMs);
+    let multi = await this.engine.evaluateMultiPV(fen, depth, multiPv, budget);
+    const reached = (m) => (m.lines || []).reduce((mx, l) => Math.max(mx, l.depth || 0), 0);
+    let depthReached = reached(multi);
+    if (depthReached < depth - 1) {
+      // Truncated — retry with a doubled budget. Tactical positions are
+      // precisely where correctness matters most, so spend the extra time.
+      budget = Math.max(budget * 2, 20000);
+      multi = await this.engine.evaluateMultiPV(fen, depth, multiPv, budget);
+      depthReached = reached(multi);
+    }
+    return { multi, depthReached, requestedDepth: depth };
+  }
+
   async _verifyPositionEval(fen, baseCp, baseDepth, isWhiteToMove, timeoutMs) {
     const verifyDepth = Math.min(baseDepth + 4, 20);
     if (verifyDepth <= baseDepth) return null;
     try {
-      const multi = await this.engine.evaluateMultiPV(fen, verifyDepth, 1, Math.max(6000, timeoutMs));
+      const { multi, depthReached } = await this._searchToDepth(fen, verifyDepth, 1, Math.max(10000, timeoutMs));
+      // A verify search that didn't reach its target depth is worse than
+      // useless: it re-answers at nearly the base depth and "confirms" the
+      // shallow mistake (|small diff| < threshold → null → wrong result kept).
+      // Only trust the verification when it genuinely searched deeper than
+      // the result it is checking.
+      if (depthReached < verifyDepth - 1 || depthReached <= baseDepth) return null;
       const line = (multi.lines || [])[0];
       if (!line) return null;
       const cp = this.analyzer.whiteAbsCp(
@@ -9158,7 +9192,7 @@ _showPuzzleSuccessOverlay() {
     const nextFen = context.fenAfter || this.chess.fen();
     const isWhiteToMoveBefore = prevFen.split(' ')[1] === 'w';
 
-    const multi = await this.engine.evaluateMultiPV(prevFen, depth, multiPv, timeoutMs);
+    const { multi, depthReached } = await this._searchToDepth(prevFen, depth, multiPv, timeoutMs);
     const lines = (multi.lines || [])
       .map((line) => {
         const pvTokens = (line.pv || '').split(/\s+/).filter(Boolean);
@@ -9217,9 +9251,9 @@ _showPuzzleSuccessOverlay() {
     // before-position eval, making swings read as ~0).
     let scoreAfter = bestScore;
     let opponentBestMove = '';
-    let afterDepth = depth;
+    let afterDepth = Math.max(depthReached, depth);
     const isWhiteToMoveAfter = nextFen.split(' ')[1] === 'w';
-    const nextMulti = await this.engine.evaluateMultiPV(nextFen, depth, multiPv, Math.max(6000, timeoutMs));
+    const { multi: nextMulti, depthReached: nextDepthReached } = await this._searchToDepth(nextFen, depth, multiPv, Math.max(6000, timeoutMs));
     const nextLines = (nextMulti.lines || [])
       .map((line) => {
         const pvTokens = (line.pv || '').split(/\s+/).filter(Boolean);
@@ -9240,7 +9274,7 @@ _showPuzzleSuccessOverlay() {
       ? nextBest.cp
       : bestScore;
     opponentBestMove = nextBest?.move || '';
-    afterDepth = nextBest?.depth || depth;
+    afterDepth = Math.max(nextBest?.depth || 0, nextDepthReached, depth);
 
     // Verify the after-position eval at a deeper depth. This is where the
     // tactical refutation lives: the base-depth search may report +1.0 after

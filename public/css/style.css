@@ -1167,6 +1167,22 @@ body.in-app-route .header { display: flex !important; }
 .coach-bubble-error { align-self: center; background: rgba(177,47,41,0.08); color: var(--clr-blunder); border: 1px solid rgba(177,47,41,0.26); font-size: 0.84rem; text-align: center; }
 .coach-tool-card { align-self: flex-start; max-width: 88%; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--bg-muted); border: 1px solid var(--border-soft); border-radius: 10px; font-size: 0.78rem; color: var(--text-secondary); }
 .coach-tool-card .material-symbols-outlined { font-size: 16px; color: var(--text-muted); }
+/* Live "coach is reasoning" block (chain-of-thought stream from reasoning
+   models). Dims + collapses once the actual answer starts. */
+.coach-reasoning { align-self: flex-start; max-width: 88%; border: 1px dashed var(--border-soft); border-radius: 10px; padding: 8px 12px; background: var(--bg-page); font-size: 0.76rem; color: var(--text-muted); }
+.coach-reasoning-head { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; margin-bottom: 4px; color: var(--text-secondary); }
+.coach-reasoning-head .material-symbols-outlined { font-size: 15px; }
+.coach-reasoning-body { max-height: 130px; overflow: hidden; white-space: pre-wrap; word-break: break-word; line-height: 1.45; opacity: 0.85; }
+.coach-reasoning.done { opacity: 0.55; }
+.coach-reasoning.done .coach-reasoning-body { display: none; }
+.coach-reasoning.done .coach-reasoning-head { margin-bottom: 0; }
+.coach-reasoning.done .coach-reasoning-head span:last-child::after { content: ' — done'; font-weight: 400; }
+/* fetch_games result cards: text + a Review button per game. */
+.coach-game-card { justify-content: space-between; width: 88%; gap: 10px; }
+.coach-game-card > span { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.coach-game-card strong { font-size: 0.8rem; color: var(--text-primary); font-weight: 600; }
+.coach-game-card small { color: var(--text-muted); font-size: 0.72rem; }
+.coach-game-card .btn { flex-shrink: 0; }
 .coach-skeleton-bubble { align-self: flex-start; width: 60%; min-height: 40px; border-radius: 14px; background: var(--bg-muted); position: relative; overflow: hidden; }
 .coach-skeleton-bubble::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent); animation: skeleton-sweep 1.05s linear infinite; }
 .coach-typing { display: none; align-items: center; gap: 8px; padding: 4px 2px; color: var(--text-muted); font-size: 0.78rem; }
