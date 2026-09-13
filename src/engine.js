@@ -668,6 +668,12 @@ class BrowserStockfishEngine extends UciEngine {
           // The worker has already completed the uciok/readyok handshake.
           // Mark the engine ready and apply main-thread-side option defaults
           // (MultiPV, Hash, Threads) so evaluate()/evaluateMultiPV() work.
+          // A READY overrides any earlier ERROR: the worker's no-output
+          // watchdog can fire mid-boot while WASM is still compiling, and the
+          // successful handshake after it is the real verdict. Leaving the
+          // stale crashedError set made every later _send() throw forever even
+          // though the engine finished booting.
+          this.crashedError = null;
           this.ready = true;
           this.configure().then(() => resolve()).catch((err) => reject(err));
         } else if (type === 'ERROR') {
@@ -785,11 +791,21 @@ function createEngineController({ source, module }) {
   // them down and create a fresh one so the fallback module actually loads.
   if (_activeBrowserEngine && !_activeBrowserEngine._released) {
     const alive = _activeBrowserEngine.ready && !_activeBrowserEngine.crashedError;
-    if (alive) {
+    // Only reuse the singleton when it ALSO runs the requested module —
+    // otherwise switching Engine Type in Settings silently kept the old
+    // module until the next full page reload.
+    const sameModule = alive
+      && _activeBrowserEngine.moduleConfig
+      && _activeBrowserEngine.moduleConfig.key === moduleConfig.key;
+    if (alive && sameModule) {
       console.warn('createEngineController: a healthy browser engine is already active. Reusing the existing instance.');
       return _activeBrowserEngine;
     }
-    console.warn('createEngineController: previous engine is not healthy (failed init or crashed). Replacing it.');
+    if (alive) {
+      console.warn(`createEngineController: active engine runs '${_activeBrowserEngine.moduleConfig?.key}' but '${moduleConfig.key}' was requested. Replacing it.`);
+    } else {
+      console.warn('createEngineController: previous engine is not healthy (failed init or crashed). Replacing it.');
+    }
     try { _activeBrowserEngine.destroy(); } catch (_) {}
     _activeBrowserEngine = null;
   }

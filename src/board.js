@@ -37,6 +37,7 @@ class ChessBoard {
     this._destroyableListeners = [];
 
     this._render();
+    this._bindContainerKeyboard();
     this._setupAnnotations();
     this._setupDrag();
 	    window.addEventListener('resize', this._onResize, { passive: true });
@@ -45,6 +46,20 @@ class ChessBoard {
   _addDestroyableListener(target, type, handler, options) {
     target.addEventListener(type, handler, options);
     this._destroyableListeners.push({ target, type, handler, options });
+  }
+
+  // Container-level keydown: first arrival via Tab lands on a1 (or the current
+  // focused square). Registered exactly ONCE — _render() clears the container's
+  // innerHTML (removing the per-square listeners along with the squares) but the
+  // container itself persists, so a listener bound there per-render would stack.
+  _bindContainerKeyboard() {
+    this._addDestroyableListener(this.container, 'keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (e.target !== this.container) return; // cell keydowns handle their own
+      e.preventDefault();
+      const first = this.container.querySelector('[data-square="a1"]') || this.container.querySelector('[data-square]');
+      if (first) first.focus();
+    });
   }
 
   destroy() {
@@ -59,6 +74,14 @@ class ChessBoard {
     // Release the in-flight drag image if a destroy happens mid-gesture.
     const dragImg = document.querySelector('.drag-piece');
     if (dragImg) dragImg.remove();
+    // Drop wrapper-level overlays (arrow SVG layer, loading overlay). They are
+    // appended to the WRAPPER, not the container that _render() clears, so
+    // without this they survive destroy() and stack under the next board that
+    // reuses the same wrapper.
+    try { this.arrowLayer?.remove(); } catch (_err) {}
+    try { this.loadingOverlay?.remove(); } catch (_err) {}
+    this.arrowLayer = null;
+    this.loadingOverlay = null;
   }
 
 		  _applySavedVisualSettings() {
@@ -215,14 +238,10 @@ class ChessBoard {
     this.container.setAttribute('aria-label', 'Chess board');
     // Single tab stop for the whole board (roving tabindex on the cells below).
     this.container.setAttribute('tabindex', '0');
-    // First arrival via Tab lands on a1 (or the current focused square).
-    this.container.addEventListener('keydown', (e) => {
-      if (e.key !== 'Enter' && e.key !== ' ') return;
-      if (e.target !== this.container) return; // cell keydowns handle their own
-      e.preventDefault();
-      const first = this.container.querySelector('[data-square="a1"]') || this.container.querySelector('[data-square]');
-      if (first) first.focus();
-    });
+    // NOTE: the Enter/Space → focus-a1 keydown handler used to live here, but
+    // _render() runs on every flip and it piled up a fresh anonymous listener
+    // each time. It now registers ONCE in the constructor via
+    // _addDestroyableListener (see _bindContainerKeyboard).
     this.container.innerHTML = '';
     for (let row = 0; row < 8; row++) {
       for (let col = 0; col < 8; col++) {

@@ -326,7 +326,12 @@ class ServerStockfishEngine {
       };
 
       timer = setTimeout(() => {
-        this._send('stop');
+        // _send throws if the child died between spawn-time and now (stdin
+        // destroyed or the "not running" stub). A throw inside a setTimeout
+        // callback is UNCAUGHT and kills the whole Node process — swallow it;
+        // the hard timer below still resolves the promise with the best
+        // partial info (finish('')) so the caller gets an answer either way.
+        try { this._send('stop'); } catch (_) {}
         hardTimer = setTimeout(() => finish(bestInfo?.pv?.split(/\s+/).filter(Boolean)[0] || ''), 900);
         if (this.activeSearch?.handler === handler) this.activeSearch.hardTimer = hardTimer;
       }, safety);
@@ -389,7 +394,9 @@ class ServerStockfishEngine {
       };
 
       timer = setTimeout(() => {
-        this._send('stop');
+        // Same guard as evaluate(): a throw inside the timer is uncaught and
+        // kills the process; swallow it and let the hard timer resolve.
+        try { this._send('stop'); } catch (_) {}
         hardTimer = setTimeout(() => finish(), 900);
         if (this.activeSearch?.handler === handler) this.activeSearch.hardTimer = hardTimer;
       }, safety);

@@ -52,7 +52,10 @@ function parseClock(raw) {
 	if (parts.some((part) => !Number.isFinite(part))) return null;
 	if (parts.length === 3) return (parts[0] * 3600) + (parts[1] * 60) + parts[2];
 	if (parts.length === 2) return (parts[0] * 60) + parts[1];
-	return parts[0] || null;
+	// A bare clock of exactly 0 seconds ("[%clk 0:00]"-style last move) is real
+	// data — the old `parts[0] || null` turned it into null, which the caller's
+	// Number.isFinite filter then dropped. Use Number.isFinite, not truthiness.
+	return Number.isFinite(parts[0]) ? parts[0] : null;
 }
 
 function parseIncrement(headers) {
@@ -1897,10 +1900,14 @@ class MoveAnalyzer {
     // Qxa6-style trap is labelled BLUNDER instead of hiding behind the BEST
     // badge. Forced moves and checkmates keep BEST unconditionally (nothing
     // else was playable, so "loss vs best" is meaningless).
+    // NOTE: the old `|| cpLoss === 0` disjunct is gone — _cpLoss already
+    // returns 0 for any move inside the forced-mate band (both signs!), so it
+    // promoted every move played while getting mated to BEST and hid real
+    // errors. A genuine best move still lands here via cpLoss=0 on the
+    // (isBestMove && cpLoss < MISTAKE_CP) arm.
     const isBestOrForced = isCheckmate
       || numLegalMoves === 1
-      || (isBestMove && cpLoss < MISTAKE_CP)
-      || cpLoss === 0;
+      || (isBestMove && cpLoss < MISTAKE_CP);
     if (isBestOrForced) {
       const beforeExpected = this.expectedPoints(playerEdgeBefore);
       const afterExpected = this.expectedPoints(playerEdgeAfter);
@@ -2554,10 +2561,19 @@ class MoveAnalyzer {
   async analyzeGame(moves, engine, onProgress, options = {}) {
     const positions = this._positionsForMoves(moves, options.initialFen);
     let evals;
-    // When the caller supplies an engine pool (server), analyze positions
-    // concurrently. The pooled onProgress fires (completed, total); adapt it
-    // to the (index, total, message) shape the serial path uses.
-    if (Array.isArray(options.engines) && options.engines.length) {
+    // Pre-computed evals (server replay of stored results) short-circuit the
+    // search entirely. Passed as a plain option instead of the old
+    // monkey-patched this.evaluatePositions — that swap lived on the SHARED
+    // analyzer instance, so two overlapping analyzeGame calls (e.g. a stream
+    // review + an anticheat job, or two tabs' requests on the cluster) would
+    // restore each other's originals in finally and one call could end up
+    // running a real engine search with the wrong options.
+    if (Array.isArray(options.evals) && options.evals.length) {
+      evals = options.evals;
+    } else if (Array.isArray(options.engines) && options.engines.length) {
+      // When the caller supplies an engine pool (server), analyze positions
+      // concurrently. The pooled onProgress fires (completed, total); adapt it
+      // to the (index, total, message) shape the serial path uses.
       const pooledProgress = onProgress
         ? (completed, total) => onProgress(Math.min(completed, total) - 1, total, `Analyzing ${completed}/${total}`)
         : null;
@@ -2572,7 +2588,9 @@ class MoveAnalyzer {
       });
     }
     const results = [];
-    const opening = this.detectOpening(moves);
+    // Caller-supplied opening (async Lichess resolution on the server) wins
+    // over the sync no-op detectOpening().
+    const opening = options.opening || this.detectOpening(moves);
     const positionChess = options.initialFen ? new Chess(options.initialFen) : new Chess();
 
     for (let i = 0; i < moves.length; i++) {
@@ -2840,20 +2858,18 @@ class MoveAnalyzer {
 	    return results;
 	  }
 
+	  // Replay analysis from pre-computed evals. Data flows through analyzeGame
+	  // options (options.evals / options.opening) — no method swapping, so two
+	  // concurrent replays on the shared analyzer can't interfere (the old
+	  // monkey-patch swapped this.evaluatePositions on the singleton, which was
+	  // not concurrency-safe under the PM2 cluster / stream handlers).
 	  async resultsFromEvals(moves, positions, evals, opening = null, options = {}) {
-	    const originalEvaluatePositions = this.evaluatePositions;
-	    const originalDetectOpening = this.detectOpening;
-	    this.evaluatePositions = async () => evals;
-	    if (opening) this.detectOpening = () => opening;
-	    try {
-	      return await this.analyzeGame(moves, null, null, {
-	        ...options,
-	        initialFen: options.initialFen,
-	      });
-	    } finally {
-	      this.evaluatePositions = originalEvaluatePositions;
-	      this.detectOpening = originalDetectOpening;
-	    }
+	    return this.analyzeGame(moves, null, null, {
+	      ...options,
+	      evals,
+	      opening: opening || null,
+	      initialFen: options.initialFen,
+	    });
 	  }
 
 	  calculateAccuracy(moveResults, color) {

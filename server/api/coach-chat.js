@@ -12,7 +12,10 @@
 const { requireUser, activePlan, initAdmin, usageDay, reserveCoachTokens, reconcileCoachTokens } = require('./_lib/user-service');
 const llm = require('./_lib/llm-service');
 const { TOOL_DEFINITIONS, getToolDefinitions, BROWSER_TOOLS, runServerTool } = require('./_lib/coach-tools');
-const { acquireHeavyAction, releaseHeavyAction, getBusyAction } = require('./_lib/action-lock');
+// action-lock is intentionally NOT used here: coach chat never acquires the
+// heavy-action lock (chatting during a review is allowed) and must never
+// release it either — a release here would free a lock held by the user's
+// running review and let a second review start on the shared engine.
 
 const LLM_HISTORY_LIMIT = 20;    // prior turns sent to the LLM (client caps this too)
 const MAX_TOOL_ROUNDS = 5;       // cap agentic loops
@@ -167,7 +170,6 @@ exports.streamHandler = async (req, res) => {
   try {
     const r = await reserveCoachTokens(user.uid, reserveAmount, tokenLimit);
     if (!r.allowed) {
-      releaseHeavyAction(user.uid);
       coachReleaseUid(user.uid);
       sseWrite(res, 'error', {
         error: 'You\'ve used all your daily Coach tokens. They reset at midnight UTC — or upgrade for more.',
@@ -180,7 +182,6 @@ exports.streamHandler = async (req, res) => {
     }
     reservedTotal = r.total;
   } catch (err) {
-    releaseHeavyAction(user.uid);
     coachReleaseUid(user.uid);
     sseWrite(res, 'error', { error: 'Could not verify token quota. Please try again.', code: 'quota_check_failed' });
     res.end();
@@ -272,7 +273,9 @@ exports.streamHandler = async (req, res) => {
     }
     sseWrite(res, 'error', { error: err.message || 'Coach chat failed.', code: err.code || 'server_error' });
   } finally {
-    releaseHeavyAction(user && user.uid);
+    // NOTE: no releaseHeavyAction here — chat never acquires the lock (chatting
+    // during a review is allowed), and releasing would delete a lock held by
+    // this user's RUNNING review, defeating the one-review-at-a-time guarantee.
     coachReleaseUid(user && user.uid);
     stopHeartbeat();
     if (!res.writableEnded) res.end();
@@ -443,7 +446,26 @@ async function runConversation({ res, llmMessages, user, closedRef, onToken, onT
       if (BROWSER_TOOLS.has(call.name)) {
         onToolCall({ id: callId, name: call.name, args: call.args });
         let toolResult;
-        try { toolResult = await registerToolCall(callId, user.uid); }
+        try {
+          // Race the parked call against the client disconnect: if the user
+          // closed the tab, don't hold this conversation (and its engine/LLM
+          // loop) for the full 60s tool timeout — fail the tool immediately.
+          // registerToolCall's entry stays parked until its own timer or a
+          // (now impossible) late result resolves it — harmless either way.
+          toolResult = await Promise.race([
+            registerToolCall(callId, user.uid),
+            new Promise((_, reject) => {
+              const check = setInterval(() => {
+                if (closedRef()) {
+                  clearInterval(check);
+                  reject(new Error('Client disconnected while waiting for the browser tool.'));
+                }
+              }, 1000);
+              // Defensive cleanup so the interval can't outlive the race.
+              setTimeout(() => clearInterval(check), 62000).unref?.();
+            }),
+          ]);
+        }
         catch (e) { toolResult = { error: e.message || 'Browser tool failed.' }; }
         const summary = summariseBrowserResult(call.name, toolResult);
         if (summary) onToolResultVisible({ id: callId, name: call.name, summary });

@@ -3,7 +3,7 @@ const { loadAnalyzer, loadChess } = require('./_lib/analysis-loader');
 const {
   incrementPublicStats,
 } = require('./_lib/firebase-stats');
-const { requireQuota, isPaidOrAbove } = require('./_lib/user-service');
+const { requireQuota, refundUsage, isPaidOrAbove } = require('./_lib/user-service');
 const { acquireHeavyAction, releaseHeavyAction, getBusyAction } = require('./_lib/action-lock');
 const { beginInteractiveReview, endInteractiveReview } = require('./_lib/review-coordination');
 const crypto = require('crypto');
@@ -555,6 +555,12 @@ exports.handler = async (event, context = {}) => {
       // and crash the process.
       resetServerEngine();
     }
+    // Refund the daily slot: the review never produced a result, and the
+    // client's retry would otherwise burn a second slot for the same game.
+    // Unlimited plans (Boost/Max) have no counter to refund — skipped.
+    if (uid && quotaState?.quota && !quotaState.quota.unlimited) {
+      await refundUsage(uid, 'serverReviews', { period: quotaState.quota.period || 'day' });
+    }
     return retryable(err.message || 'Server analysis failed.');
   } finally {
     // ALWAYS release — previously this line was unreachable dead code (both the
@@ -630,6 +636,11 @@ exports.streamHandler = async (req, res) => {
     return;
   }
 
+  // onClose is cleaned up in the finally below; it must be declared out here —
+  // a const inside the try block is NOT visible to finally, which threw a
+  // ReferenceError on every stream completion and skipped releaseHeavyAction.
+  let onClose = null;
+
   try {
     // Abort the analysis when the client disconnects (previously a closed
     // connection only surfaced at the next progress callback — the full engine
@@ -638,7 +649,7 @@ exports.streamHandler = async (req, res) => {
     let abortReview = null;
     const abortPromise = new Promise((_, reject) => { abortReview = () => reject(new Error('review aborted: client disconnected')); });
     abortPromise.catch(() => {}); // avoid unhandled rejection if never used
-    const onClose = () => { clientGone = true; if (abortReview) abortReview(); };
+    onClose = () => { clientGone = true; if (abortReview) abortReview(); };
     req.on('close', onClose);
 
     await withWallClockTimeout(withAnalysisSlot(async (slotStatus) => {
@@ -762,7 +773,7 @@ exports.streamHandler = async (req, res) => {
     }
 	    sseWrite(res, 'error', { error: err.message || 'Server analysis failed.' });
   } finally {
-    req.removeListener('close', onClose);
+    if (onClose) req.removeListener('close', onClose);
     releaseHeavyAction(uid);
     if (!res.writableEnded) res.end();
   }

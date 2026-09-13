@@ -178,6 +178,11 @@ async function callNvidia({ opts, model }) {
       Accept: opts.stream ? 'text/event-stream' : 'application/json',
     },
     body: JSON.stringify(buildOpenAIBody({ ...opts, model })),
+    // Headers timeout only — guards against a hung connect/DNS that would
+    // otherwise park the coach SSE forever (the stream stall watchdog only
+    // starts once response headers arrive). Streaming reads are not cut off;
+    // they have their own inactivity watchdog.
+    timeoutMs: 20000,
   });
   if (!res.ok) {
     let detail = '';

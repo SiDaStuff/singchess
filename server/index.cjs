@@ -74,7 +74,6 @@ const distDir = path.resolve(__dirname, '../dist');
 const serveStatic = process.env.SERVE_STATIC !== '0';
 const isDev = process.env.NODE_ENV === 'development' || process.env.CHESS_REVIEW_DEV_SERVER === '1';
 const allowedOrigins = new Set([
-  'https://chess.sidastuff.com',
   'https://chess.singdevelopments.com',
   'https://mastermind.singdevelopments.com',
 ]);
@@ -112,19 +111,34 @@ function applyCors(req, res) {
 // bloat the buckets Map (one entry per spoofed value).
 const TRUST_PROXY = process.env.TRUST_PROXY === '1' || isDev;
 
+// Header values are only worth bucketing if they ARE IPs. nginx overwrites
+// X-Real-IP on every proxied location (proxy_set_header X-Real-IP $remote_addr),
+// so anything non-IP-shaped there means the request did NOT come through the
+// proxy chain — bucket it on the socket address instead of the junk value.
+function isIpLike(value) {
+  if (typeof value !== 'string' || !value) return false;
+  // Strip an IPv6-mapped prefix; Node may report '::ffff:1.2.3.4'.
+  const v = value.replace(/^::ffff:/i, '');
+  return /^(?:\d{1,3}\.){3}\d{1,3}$/.test(v) || v.includes(':');
+}
+
 function clientKey(req) {
   if (TRUST_PROXY) {
     // nginx ($proxy_add_x_forwarded_for) APPENDS the real client IP to any
     // client-supplied XFF entries, so the FIRST entry is attacker-controlled
     // (rotating it handed out a fresh rate-limit bucket per request). Prefer
     // the proxy-set x-real-ip, else the LAST XFF entry (the one our own proxy
-    // appended), else fall back to the socket address.
+    // appended), else fall back to the socket address. Both candidates are
+    // validated as IPs first — a non-IP x-real-ip is either spoofed garbage
+    // (bypassed proxy) or proxy misconfiguration, and falling through keeps
+    // the limiter correct in both cases.
     const realIp = req.headers['x-real-ip'];
-    if (typeof realIp === 'string' && realIp.trim()) return realIp.trim();
+    if (isIpLike(realIp)) return realIp.trim();
     const xff = req.headers['x-forwarded-for'];
     if (typeof xff === 'string') {
       const parts = xff.split(',').map((s) => s.trim()).filter(Boolean);
-      if (parts.length) return parts[parts.length - 1];
+      const last = parts[parts.length - 1];
+      if (isIpLike(last)) return last;
     }
   }
   return req.socket?.remoteAddress || 'unknown';
@@ -160,7 +174,17 @@ function _maybePruneRateBuckets(now) {
   }
 }
 
-app.use(morgan('tiny'));
+// morgan 'tiny' logs the full URL including the query string. No endpoint
+// accepts tokens via query string anymore, but any future credential-ish
+// query param (?token=, ?key=, ?secret=) would be silently logged. Redact
+// those values in the log line only — req.url is untouched.
+morgan.token('url-redacted', (req) => {
+  const url = req.originalUrl || req.url || '';
+  if (!url.includes('?')) return url;
+  return url.replace(/([?&])(token|idToken|key|secret|access_token|refresh_token)=([^&]*)/gi,
+    '$1$2=REDACTED');
+});
+app.use(morgan(':method :url-redacted :status :res[content-length] - :response-time ms'));
 app.use(deviceCookieMiddleware);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -425,8 +449,15 @@ if (serveStatic) {
 // route chain flooding the logs.
 app.use((err, req, res, _next) => {
   const status = err && err.statusCode ? err.statusCode : 500;
-  const msg = (err && err.message) || 'Server error';
-  console.error('[server] request error:', req.method, req.path, '-', msg);
+  const raw = err && err.message ? String(err.message) : '';
+  console.error('[server] request error:', req.method, req.path, '-', raw || '(no message)');
+  // 4xx messages are ours on purpose ("Invalid PGN", "rate limited", …) and
+  // safe to show. 5xx messages are raw Error text (fs paths, provider URLs,
+  // stack internals) — never send those to the client; log them, return a
+  // generic message. err.expose forces exposure for the rare 5xx where the
+  // handler deliberately wrote a user-facing message.
+  const safe = status < 500 || (err && err.expose) || (err && err.safeMessage);
+  const msg = safe && raw ? raw : 'Internal server error';
   if (!res.headersSent) {
     res.status(status).json({ error: msg });
   }

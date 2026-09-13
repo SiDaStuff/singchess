@@ -316,6 +316,7 @@
 
     let assistantEl = null;
     let assistantText = '';
+    let doneReceived = false; // guards against a post-`done` stream error re-saving the reply
     // Live "thinking" view: reasoning models stream their chain of thought in
     // a separate channel. Show it in the typing indicator (so the coach ALWAYS
     // looks active — never a dead spinner) and as a dimmed collapsible note
@@ -421,6 +422,9 @@
             chat.messages.push({ role: 'assistant', content: cleaned, ts: Date.now() });
             saveChats();
           }
+          // The reply is saved — a trailing error/reset after `done` must not
+          // run the catch's partial-save branch below and duplicate the message.
+          doneReceived = true;
           // Refresh the token-usage bar after every message. The server charges
           // BEFORE emitting `done` and returns the fresh total in the event, so
           // apply it directly; fall back to a server re-fetch if it's missing.
@@ -434,7 +438,9 @@
       if (err && err.name === 'AbortError') {
         // Abort only comes from the user clicking Stop now (the fixed timer is
         // gone). Save whatever streamed so far as a partial reply.
-        if (assistantText) {
+        if (doneReceived) {
+          // Stop clicked after the reply finished saving — nothing to rescue.
+        } else if (assistantText) {
           chat.messages.push({ role: 'assistant', content: assistantText + '\n\n_(stopped)_', ts: Date.now() });
           saveChats();
           if (assistantEl) { assistantEl.classList.remove('streaming'); assistantEl.innerHTML = renderMarkdown(assistantText + '\n\n_(stopped)_'); }
@@ -445,7 +451,7 @@
       } else {
         if (assistantEl) assistantEl.classList.remove('streaming');
         const msg = err && err.message && err.message.length < 200 ? err.message : 'Coach is unavailable right now. Please try again.';
-        if (assistantText) {
+        if (assistantText && !doneReceived) {
           // Preserve the partial reply that already streamed, then note the
           // error (mirrors the abort path — don't wipe content the user saw).
           chat.messages.push({ role: 'assistant', content: assistantText + '\n\n_(response cut off)_', ts: Date.now() });
@@ -460,6 +466,9 @@
     } finally {
       state.streaming = false;
       state.abortController = null;
+      // Clear the backend pid too — a stale one would attach the next
+      // conversation's tool-result POSTs to the previous stream's process.
+      state.chatPid = null;
       applyLockedState(); // re-enable the textarea/send now that streaming ended
       if (app && typeof app._setBusyAction === 'function') app._setBusyAction(null);
       el['coach-chat-card']?.querySelector('.coach-chat-main')?.classList.remove('busy');
@@ -474,33 +483,41 @@
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split('\n\n');
-      buffer = events.pop();
-      for (const raw of events) {
-        const lines = raw.split('\n');
-        let event = 'message';
-        const dataLines = [];
-        for (const line of lines) {
-          if (line.startsWith('event:')) event = line.slice(6).trim();
-          else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+    // Always release the stream when the loop exits — an `error` SSE event
+    // throws out of this loop, and without cancel/releaseLock the HTTP
+    // connection and reader lock stay held open.
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop();
+        for (const raw of events) {
+          const lines = raw.split('\n');
+          let event = 'message';
+          const dataLines = [];
+          for (const line of lines) {
+            if (line.startsWith('event:')) event = line.slice(6).trim();
+            else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+          }
+          if (!dataLines.length) continue;
+          let data = {};
+          try { data = JSON.parse(dataLines.join('\n')); } catch (_) { continue; }
+          if (event === 'token' && h.onToken) h.onToken(data.text || '');
+          else if (event === 'reasoning' && h.onReasoning) h.onReasoning(data.text || '');
+          else if (event === 'init' && h.onInit) h.onInit(data);
+          else if (event === 'tool_call' && h.onToolCall) h.onToolCall(data);
+          else if (event === 'tool_status' && h.onToolStatus) h.onToolStatus(data);
+          else if (event === 'tool_result_visible' && h.onToolResultVisible) h.onToolResultVisible(data);
+          else if (event === 'done' && h.onDone) h.onDone(data);
+          else if (event === 'error') throw new Error(data.error || 'Coach stream error.');
+          // init + heartbeat ignored (client owns history now)
         }
-        if (!dataLines.length) continue;
-        let data = {};
-        try { data = JSON.parse(dataLines.join('\n')); } catch (_) { continue; }
-        if (event === 'token' && h.onToken) h.onToken(data.text || '');
-        else if (event === 'reasoning' && h.onReasoning) h.onReasoning(data.text || '');
-        else if (event === 'init' && h.onInit) h.onInit(data);
-        else if (event === 'tool_call' && h.onToolCall) h.onToolCall(data);
-        else if (event === 'tool_status' && h.onToolStatus) h.onToolStatus(data);
-        else if (event === 'tool_result_visible' && h.onToolResultVisible) h.onToolResultVisible(data);
-        else if (event === 'done' && h.onDone) h.onDone(data);
-        else if (event === 'error') throw new Error(data.error || 'Coach stream error.');
-        // init + heartbeat ignored (client owns history now)
       }
+    } finally {
+      try { await reader.cancel(); } catch (_) {}
+      try { reader.releaseLock(); } catch (_) {}
     }
   }
 
@@ -712,6 +729,15 @@
         });
         let data = {};
         try { data = await res.json(); } catch (_) {}
+        // Non-2xx is NOT a network exception (fetch only rejects on those), so
+        // without this check a 404/500 silently returned {} and the Coach sat
+        // on "thinking…" until the server's 60s tool timeout. Retry it like a
+        // transient failure.
+        if (!res.ok) {
+          if (attempt >= 3) return { ok: false, note: `HTTP ${res.status}`, status: res.status };
+          await new Promise((r) => setTimeout(r, 400 * attempt));
+          continue;
+        }
         return data;
       } catch (_) {
         if (attempt >= 3) return { ok: false, note: 'network error' };
@@ -828,15 +854,33 @@
     box.appendChild(card); scrollMessages();
     return new Promise((resolve) => {
       let settled = false;
+      const finish = (answer, clickedBtn) => {
+        if (settled) return; settled = true;
+        clearTimeout(timeoutId);
+        // Stop listening for the stream abort once resolved.
+        state.abortController?.signal.removeEventListener('abort', onAbort);
+        btns.querySelectorAll('button').forEach((x) => (x.disabled = true));
+        if (clickedBtn) clickedBtn.classList.add('selected');
+        resolve({ answer });
+      };
+      // Never leave the server's parked tool call pending forever: if the user
+      // never answers (or clicks Stop / navigates), resolve with an empty
+      // answer after two minutes so the stream can continue or end cleanly.
+      const timeoutId = setTimeout(() => finish('', null), 120000);
+      // If the user hits Stop mid-question, resolve immediately instead of
+      // waiting out the full timeout against an already-aborted stream.
+      const onAbort = () => {
+        finish('', null);
+        btns.querySelectorAll('button').forEach((x) => { x.disabled = true; });
+      };
+      state.abortController?.signal.addEventListener('abort', onAbort, { once: true });
       options.forEach((opt) => {
         const b = document.createElement('button');
         b.type = 'button'; b.className = 'btn btn-secondary coach-question-option'; b.textContent = opt;
         b.addEventListener('click', async () => {
-          if (settled) return; settled = true;
-          btns.querySelectorAll('button').forEach((x) => (x.disabled = true));
-          b.classList.add('selected');
+          if (settled) return;
+          finish(opt, b);
           await postToolResult(id, { answer: opt });
-          resolve();
         });
         btns.appendChild(b);
       });
@@ -946,23 +990,16 @@
   let thinkingTimer = null;
   let dotsTimer = null;
   let dotsCount = 0;
-  const TYPING_BASE_LABELS = {
-    coach: 'Coach is thinking',
-    stockfish: 'Checking with Stockfish',
-    search: 'Searching the web',
-    lichess: 'Checking Lichess',
-    plan: 'Checking your plan',
-  };
 
   function showTyping(label) {
     const textEl = el['coach-typing-text'];
     const dotsEl = el['coach-typing-dots'];
     if (el['coach-typing']) el['coach-typing'].hidden = false;
     // Update the base label text (keep the animated dots span as its child).
+    // Labels are always full display strings (server toolLabel() or literals
+    // below) — there is no short-key lookup anymore; that map was dead code.
     if (textEl) {
-      let base = label
-        || (TYPING_BASE_LABELS[label] ? TYPING_BASE_LABELS[label] : null)
-        || 'Coach is thinking';
+      let base = label || 'Coach is thinking';
       // Strip a trailing ellipsis / dots from the incoming label — the animated
       // dots span owns the ellipsis, so we don't double up ("thinking……").
       base = String(base).replace(/(?:\.\.\.|…|\s+)$/g, '');

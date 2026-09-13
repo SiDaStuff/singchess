@@ -185,7 +185,12 @@
 
     // Don't offer an upgrade-to-itself CTA on the plan the user already owns —
     // a Boost subscriber shouldn't see "Contact us to upgrade" (to Boost) beside
-    // their "Your plan" chip on the same card.
+    // their "Your plan" chip on the same card. Both CTAs are re-shown FIRST so
+    // a plan change (e.g. Boost lapsed back to Free) doesn't leave its upgrade
+    // button hidden from the previous render forever — this function used to
+    // only ever hide.
+    [document.getElementById('btn-boost-subscribe'), document.getElementById('btn-max-subscribe')]
+      .forEach((el) => { if (el) el.hidden = false; });
     if (user && me && (plan.plan === 'boost' || plan.plan === 'max')) {
       const subscribedCta = document.getElementById(plan.plan === 'boost' ? 'btn-boost-subscribe' : 'btn-max-subscribe');
       if (subscribedCta) subscribedCta.hidden = true;
@@ -284,7 +289,21 @@
     // Trigger an immediate render in case the auth state was already known.
     const firebase = ensureFirebase();
     const user = firebase?.auth?.().currentUser || currentAuthUser;
-    if (!user) renderBoostState(null, null);
+    if (!user) {
+      renderBoostState(null, null);
+      return;
+    }
+    // Signed in: re-fetch /api/users/me on every render. The plan state may
+    // have changed since the last onAuthStateChanged fire (plan activated,
+    // expired, or admin-granted elsewhere) and this panel used to only ever
+    // show the snapshot from page load. Failures fall back to a signed-out
+    // render with an error banner rather than stale plan UI.
+    loadMe(user)
+      .then((me) => renderBoostState(user, me))
+      .catch((err) => {
+        renderBoostState(null, null);
+        setStatus(err.message || 'Could not load Boost state.', 'error');
+      });
   }
 
   // Expose for the SPA shell to call when the boost panel becomes visible.

@@ -20,6 +20,7 @@ try {
 // background job can write its results to Firebase without duplicating the
 // analysis pipeline.
 const { requireUser, requireQuota, activePlan, isPaidOrAbove, _pruneStaleDataGlobal, _pushNotification, initAdmin } = require('./_lib/user-service');
+const { acquireHeavyAction, releaseHeavyAction, getBusyAction } = require('./_lib/action-lock');
 
 // Per-user background-job concurrency: jobId -> uid. Each job can hold the
 // shared engine queue for up to ~1h, so without a cap one Max account could
@@ -481,12 +482,50 @@ exports.handler = async (event, context = {}) => {
 
     const pgns = preloadedPgns;
 
-    const engine = await withTimeout(getServerEngine(), 9000, 'Server engine is still warming up.');
-    const reviewEngine = cachedEngineAdapter(engine);
-    const username = String(payload.username || '').trim();
+    // Same per-user heavy-action lock the game review uses: anticheat holds
+    // the shared engine queue for minutes, so it must not run alongside (or
+    // be started during) a review or coach chat for the same account.
+    const lockUid = quotaState?.user?.uid || null;
+    if (!acquireHeavyAction(lockUid, 'anticheat')) {
+      const busy = getBusyAction(lockUid);
+      return json(429, {
+        error: busy === 'review'
+          ? 'You already have a review or anticheat check running. Please wait for it to finish.'
+          : 'You already have a coach chat running. Please wait for it to finish before starting an anticheat check.',
+        code: 'heavy_action_busy',
+      });
+    }
+    let lockHeld = true;
+    try {
+      return await _anticheatAnalysis({ payload, pgns, quotaState, username: String(payload.username || '').trim() });
+    } finally {
+      if (lockHeld) releaseHeavyAction(lockUid);
+    }
+  } catch (err) {
+    console.error('Anticheat failed:', err);
+    if (/cancelled|not ready|timed out waiting|out of memory|abort/i.test(String(err?.message || err))) {
+      // Non-destructive: clears the hash (UCI newGame) on the shared engine.
+      // We never destroy/recreate it — that would initEngine() a second time
+      // and crash the process.
+      try {
+        resetServerEngine();
+      } catch (_resetErr) {
+        // Ignore reset failures while recovering.
+      }
+    }
+    return json(err.statusCode || 500, { error: err.message || 'Anticheat analysis failed.', code: err.code, quota: err.quota, plan: err.plan });
+  }
+};
 
-    // Engine-only mode: return per-position engine evaluations for each PGN.
-    if (payload.mode === 'engine') {
+// The analysis body of the legacy sync handler, extracted so the per-user
+// heavy-action lock wraps it cleanly (acquire → run → release in finally).
+// Returns the response object; throws propagate to the caller's catch.
+async function _anticheatAnalysis({ payload, pgns, quotaState, username }) {
+  const engine = await withTimeout(getServerEngine(), 9000, 'Server engine is still warming up.');
+  const reviewEngine = cachedEngineAdapter(engine);
+
+  // Engine-only mode: return per-position engine evaluations for each PGN.
+  if (payload.mode === 'engine') {
       // Raised for depth 18: each position now budgets up to 8s, so a full
       // batch needs a much larger window than the old depth-12 22s cap.
       const overallTimeoutMs = 120000;
@@ -541,8 +580,8 @@ exports.handler = async (event, context = {}) => {
       return json(200, { ...result, quota: quotaState.quota, plan: quotaState.plan });
     }
 
-	    // Full server-side analysis (legacy): use MoveAnalyzer to compute metrics server-side.
-	    const { MoveAnalyzer } = loadAnalyzer();
+	  // Full server-side analysis (legacy): use MoveAnalyzer to compute metrics server-side.
+	  const { MoveAnalyzer } = loadAnalyzer();
 	    const analyzer = new MoveAnalyzer();
 	    analyzer.setReviewProfile(ANTICHEAT_PROFILE);
 	    const result = await withTimeout(withEngineQueue(async () => {
@@ -594,22 +633,8 @@ exports.handler = async (event, context = {}) => {
 	      };
 	    }), 180000, 'Anticheat overall processing timed out.');
 
-		    return json(200, { ...result, quota: quotaState.quota, plan: quotaState.plan });
-		  } catch (err) {
-    console.error('Anticheat failed:', err);
-    if (/cancelled|not ready|timed out waiting|out of memory|abort/i.test(String(err?.message || err))) {
-      // Non-destructive: clears the hash (UCI newGame) on the shared engine.
-      // We never destroy/recreate it — that would initEngine() a second time
-      // and crash the process.
-      try {
-        resetServerEngine();
-      } catch (_resetErr) {
-        // Ignore reset failures while recovering.
-      }
-    }
-	    return json(err.statusCode || 500, { error: err.message || 'Anticheat analysis failed.', code: err.code, quota: err.quota, plan: err.plan });
-	  }
-};
+	  return json(200, { ...result, quota: quotaState.quota, plan: quotaState.plan });
+}
 
 exports.streamHandler = async (req, res) => {
   res.set({
@@ -650,6 +675,32 @@ exports.streamHandler = async (req, res) => {
     return;
   }
 
+  // Concurrency cap before the quota charge (same reason as the submit
+  // handler: a capped-out user must not spend weekly games on a rejected
+  // stream request). requireUser is cheap here — getMe inside requireQuota
+  // reuses the same Firebase token verification, and this also gives us the
+  // uid the cap is keyed on.
+  let streamUser = null;
+  try {
+    streamUser = await requireUser({
+      httpMethod: req.method,
+      headers: req.headers || {},
+    });
+  } catch (err) {
+    sseWrite(res, 'error', { error: err.message || 'Login required.', code: err.code || 'unauthorized' });
+    res.end();
+    return;
+  }
+  const runningForUidEarly = [..._runningAnticheatJobs.values()].filter((u) => u === streamUser.uid).length;
+  if (runningForUidEarly >= MAX_ANTICHEAT_JOBS_PER_UID) {
+    sseWrite(res, 'error', {
+      error: `You already have ${runningForUidEarly} background review${runningForUidEarly === 1 ? '' : 's'} running. Wait for one to finish first.`,
+      code: 'too_many_jobs',
+    });
+    res.end();
+    return;
+  }
+
   let quotaState = null;
   try {
     // Charge per-game up front (Boost/Max weekly quota). Fails fast if the batch
@@ -673,6 +724,29 @@ exports.streamHandler = async (req, res) => {
   try {
     const pgns = preloadedPgns;
 
+    // Declared here so the finally below can reference it even when the
+    // early busy-returns skipped the close-listener setup (block-scoped let
+    // inside a deeper block would not be visible to finally).
+    let onClose = null;
+
+    // Same per-user heavy-action lock as the sync handler: the stream holds
+    // the shared engine queue for the whole batch, so it must not overlap a
+    // review / coach chat / other anticheat run for the same account.
+    let lockHeld = false;
+    const lockUid = streamUser?.uid || null;
+    if (!acquireHeavyAction(lockUid, 'anticheat')) {
+      const busy = getBusyAction(lockUid);
+      sseWrite(res, 'error', {
+        error: busy === 'review'
+          ? 'You already have a review or anticheat check running. Please wait for it to finish.'
+          : 'You already have a coach chat running. Please wait for it to finish before starting an anticheat check.',
+        code: 'heavy_action_busy',
+      });
+      res.end();
+      return;
+    }
+    lockHeld = true;
+
     const engine = await withTimeout(getServerEngine(), 9000, 'Server engine is still warming up.');
     const reviewEngine = cachedEngineAdapter(engine);
     const { MoveAnalyzer } = loadAnalyzer();
@@ -682,14 +756,27 @@ exports.streamHandler = async (req, res) => {
 
     sseWrite(res, 'status', { message: 'started', games: pgns.length });
 
+    // Client-gone detection: if the browser disconnects (tab closed, Cancel
+    // clicked), stop burning the engine queue on a nobody-is-watching batch.
+    // The loop checks clientGone between games; res.destroyed covers the
+    // inner per-position callbacks too. Removed in the finally below.
+    let clientGone = false;
+    onClose = () => { clientGone = true; };
+    req.on('close', onClose);
+
     const allMetrics = [];
     const aggregatedGames = [];
     let skipped = 0;
 
-    await withEngineQueue(async () => {
+    // Same caps as the sync handlers: { full: true } (unbounded plies) with no
+    // overall timeout once let one request hold an engine-queue slot for hours
+    // and starve every review. 15 games x 90 plies x 8s worst case ≈ this cap.
+    const streamOverallTimeoutMs = 420000;
+    await withTimeout(withEngineQueue(async () => {
       await reviewEngine.newGame();
+      let processedPositions = 0;
       for (let gameIndex = 0; gameIndex < pgns.length; gameIndex += 1) {
-        if (res.destroyed) return;
+        if (res.destroyed || clientGone) return;
         const pgn = pgns[gameIndex];
         sseWrite(res, 'progress', {
           phase: 'game',
@@ -699,8 +786,15 @@ exports.streamHandler = async (req, res) => {
         });
 
         try {
-          const parsed = parseGame(pgn, { full: true });
+          const parsed = parseGame(pgn);
           if (!parsed.moves.length) throw new Error('A PGN had no moves.');
+          const remaining = TOTAL_POSITIONS_LIMIT - processedPositions;
+          if (remaining <= 0) {
+            skipped += 1;
+            continue;
+          }
+          if (parsed.moves.length > remaining) parsed.moves = parsed.moves.slice(0, remaining);
+          processedPositions += parsed.moves.length;
 
           const positions = analyzer._positionsForMoves(
             parsed.moves,
@@ -710,7 +804,7 @@ exports.streamHandler = async (req, res) => {
             positions,
             reviewEngine,
             (index, total) => {
-              if (res.destroyed) return;
+              if (res.destroyed || clientGone) return;
               sseWrite(res, 'progress', {
                 phase: 'positions',
                 gameIndex: gameIndex + 1,
@@ -748,7 +842,7 @@ exports.streamHandler = async (req, res) => {
           console.warn('Anticheat stream skipped a game:', err.message);
         }
       }
-    });
+    }), streamOverallTimeoutMs, 'Anticheat analysis timed out.');
 
     if (!allMetrics.length) {
       sseWrite(res, 'error', { error: 'No standard chess games could be analyzed.' });
@@ -776,6 +870,13 @@ exports.streamHandler = async (req, res) => {
       plan: quotaState?.plan,
     });
   } finally {
+    // Detach the close listener (declared after lock acquisition; when we got
+    // here without it, there's nothing to clean up).
+    if (onClose) req.removeListener('close', onClose);
+    // Release the heavy-action lock — but only if this request actually
+    // acquired it. lockHeld stays false on the early busy-returns above,
+    // so we never drop another action's hold on the same uid.
+    if (lockHeld) releaseHeavyAction(lockUid);
     res.end();
   }
 };
@@ -1059,6 +1160,19 @@ exports.submit = async (event) => {
     if (!preloadedPgns.length) return json(400, { error: 'No games found.' });
   } catch (err) {
     return json(400, { error: err.message || 'Could not load games.' });
+  }
+
+  // Concurrency cap FIRST: each job holds the shared engine queue for up to
+  // ~1h, so a stacked request must be rejected before it spends any of the
+  // user's weekly quota. (This used to run after requireQuota + the report
+  // record write, so a rejected request still burned games and left a stale
+  // "running" report behind.)
+  const runningForUidEarly = [..._runningAnticheatJobs.values()].filter((u) => u === user.uid).length;
+  if (runningForUidEarly >= MAX_ANTICHEAT_JOBS_PER_UID) {
+    return json(429, {
+      error: `You already have ${runningForUidEarly} background review${runningForUidEarly === 1 ? '' : 's'} running. Wait for one to finish first.`,
+      code: 'too_many_jobs',
+    });
   }
 
   // Charge the per-game quota up front. Free users hard-block here; Boost

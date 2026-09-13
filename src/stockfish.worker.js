@@ -183,7 +183,7 @@ const ALLOWED_ORIGINS = new Set([
   'http://127.0.0.1:3000',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
-  'https://chess.sidastuff.com',
+  'https://chess.singdevelopments.com',
   'https://mastermind.singdevelopments.com',
 ]);
 
@@ -426,8 +426,17 @@ const topLevelOnMessage = async (e) => {
   try {
     switch (type) {
       case 'INIT': {
-        if (initPromise) return;
-        initPromise = (async () => { await initStockfish(payload); })();
+        // A dropped INIT is a guaranteed 120s hang on the main thread — its
+        // init timer waits for a READY/ERROR that would never arrive. The old
+        // `if (initPromise) return` dropped duplicates silently, AND left
+        // initPromise set after a FAILED boot, so every later INIT was
+        // dropped too. Dedupe by AWAITING the in-flight/complete init instead
+        // (both messages get their own READY); a failed boot clears
+        // initPromise so the next INIT genuinely retries.
+        if (!initPromise) {
+          initPromise = initStockfish(payload)
+            .catch((err) => { initPromise = null; throw err; });
+        }
         try {
           await initPromise;
           sendToMain('READY');

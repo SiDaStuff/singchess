@@ -406,9 +406,18 @@ class ChessReviewApp {
     // Opening-explorer source + filters (persisted). Masters is the default
     // (back-compat). Lichess = all-player rated games; filters default to ALL
     // OFF (load every result) — the user opts into speed/rating filters.
-    this._openingSource = localStorage.getItem('openingSource') || 'masters';
-    try { this._openingFilters = JSON.parse(localStorage.getItem('openingFilters')) || null; } catch (_) { this._openingFilters = null; }
-    if (!this._openingFilters) this._openingFilters = { speeds: [], ratings: [] };
+    // Wrapped: bare localStorage access THROWS (SecurityError) in Safari
+    // lockdown mode / blocked-storage browsers, and this ran in the
+    // constructor — one throw here meant the whole app never booted.
+    let openingSource = 'masters';
+    let openingFilters = null;
+    try {
+      openingSource = window.localStorage?.getItem('openingSource') || 'masters';
+      openingFilters = JSON.parse(window.localStorage?.getItem('openingFilters')) || null;
+    } catch (_) { /* storage blocked — defaults below */ }
+    this._openingSource = openingSource || 'masters';
+    if (!openingFilters) openingFilters = { speeds: [], ratings: [] };
+    this._openingFilters = openingFilters;
     this.elGameStatus = document.getElementById('game-status');
     this.elGameStatusTitle = document.getElementById('game-status-title');
     this.elGameStatusReason = document.getElementById('game-status-reason');
@@ -676,7 +685,10 @@ class ChessReviewApp {
 	    this.elEngineStrength.value = this.engineSettings.strength;
 	    if (this.elEngineMaxTime) this.elEngineMaxTime.value = String(this.engineSettings.maxTimeMs);
 	    if (this.elAnalysisLocation) this.elAnalysisLocation.value = this.engineSettings.analysisLocation;
-	    if (this.elServerStrongReview) this.elServerStrongReview.checked = !!this.engineSettings.serverStrongReview;
+	    // (The old `elServerStrongReview` checkbox is gone — the server review
+	    // strength is the #strength-chips radio group now, synced by
+	    // _syncServerStrongToggle. The legacy line here read an unassigned
+	    // property and could never do anything.)
 	    // Populate the /settings page engine form with the saved values.
 	    if (this.elSettingsEngineModule) this.elSettingsEngineModule.value = this.engineSettings.module;
 	    this._syncSettingsStrengthChips();
@@ -847,7 +859,7 @@ class ChessReviewApp {
   _saveEngineSettings() {
     // The /settings page engine form is the source of truth: engine module,
     // review strength tier (Quick/Standard/Thorough) OR advanced custom depth +
-    // per-move time. analysisLocation and serverStrongReview come from their own
+    // per-move time. analysisLocation and serverStrength come from their own
     // (in-review) controls.
     const module = (this.elSettingsEngineModule?.value || this.engineSettings.module || 'lite-single');
     const reviewStrength = (this.elSettingsReviewStrength?.value || this.engineSettings.reviewStrength || 'standard');
@@ -911,7 +923,11 @@ class ChessReviewApp {
       pieceAnimations: this.elPieceAnimations?.checked || false,
       animSpeed: animSpeedEl?.value || '0.5'
     };
-    localStorage.setItem('sidastuff.appearanceSettings', JSON.stringify(settings));
+    // Wrapped: a blocked-storage browser would otherwise throw straight out of
+    // this click handler with no feedback; apply+reload still run on failure.
+    try {
+      localStorage.setItem('sidastuff.appearanceSettings', JSON.stringify(settings));
+    } catch (_) { /* storage unavailable — apply in-memory only */ }
     if (this.elAppearanceSettingsStatus) {
       this.elAppearanceSettingsStatus.textContent = 'Appearance settings saved!';
       this.elAppearanceSettingsStatus.className = 'account-status success';
@@ -1289,6 +1305,17 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    // Reset to step 1 whenever the signup route is (re)shown.
 	    this.onboardingStep = 1;
 	    this._setOnboardingStep(1);
+
+	    // Listener binding is one-time: this runs again on EVERY /signup
+	    // navigation (route handler + startup bind), and each pass used to
+	    // re-attach the radio/change/click listeners to the same persistent DOM
+	    // — N visits = N change handlers firing per click. Only the reset and
+	    // preview refresh above are per-visit.
+	    if (this._onboardingBound) {
+	      this._renderBoardPreview('onboard-board-preview');
+	      return;
+	    }
+	    this._onboardingBound = true;
 
 	    // Live preview: apply the chosen theme immediately so the preview board
 	    // updates and the board theme takes effect the moment a chip is picked.
@@ -1687,10 +1714,19 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	      if (name) { view.setAttribute('href', `/profile/${encodeURIComponent(name)}`); view.setAttribute('data-route', `/profile/${name}`); view.classList.remove('disabled'); }
 	      else { view.setAttribute('href', '/account'); view.classList.add('disabled'); }
 	    }
-	    if (copy && !copy.dataset.bound && name) {
+	    if (copy && !copy.dataset.bound) {
 	      copy.dataset.bound = '1';
+	      // Read the CURRENT username at click time, not a captured `name` —
+	      // _setAccountProfileLink runs on every profile sync, and a click
+	      // listener bound once with the old value kept copying a stale (or
+	      // empty) link after the user changed their username.
 	      copy.addEventListener('click', async () => {
-	        const url = `${window.location.origin}/profile/${encodeURIComponent(name)}`;
+	        const current = String(this.authState?.profile?.username || '').trim();
+	        if (!current) {
+	          this._setAccountStatus?.('Set a username first to get a profile link.', 'error');
+	          return;
+	        }
+	        const url = `${window.location.origin}/profile/${encodeURIComponent(current)}`;
 	        try { await navigator.clipboard.writeText(url); this._setAccountStatus?.('Profile link copied.', 'success'); }
 	        catch (_) { window.prompt('Copy this link:', url); }
 	      });
@@ -1906,14 +1942,23 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	  async _adminBan(ban) {
 	    const email = document.getElementById('spa-ban-user-email')?.value?.trim();
 	    const reason = document.getElementById('spa-ban-user-reason')?.value?.trim();
+	    const status = document.getElementById('spa-ban-user-status');
+	    const set = (m, c) => { if (status) { status.textContent = m; status.className = 'account-status ' + c; } };
 	    if (!email) return;
 	    if (ban && !reason) { window.alert('Reason required to ban.'); return; }
+	    set('Working…', '');
 	    try {
-	      await apiFetch('/api/admin/ban-user', {
+	      const res = await apiFetch('/api/admin/ban-user', {
 	        method: 'POST', headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
 	        body: JSON.stringify({ action: ban ? 'ban' : 'unban', email, reason }),
 	      });
-	    } catch (_err) {}
+	      // res.ok used to go unchecked and errors were swallowed — an admin
+	      // "banning" a mistyped email saw no feedback at all and believed it
+	      // worked. Check, and report both HTTP errors and network failures.
+	      const data = await res.json().catch(() => ({}));
+	      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
+	      set(ban ? 'Account banned.' : 'Account unbanned.', 'success');
+	    } catch (err) { set(err.message || 'Ban action failed.', 'error'); }
 	  }
 
 	  async _loadAdminSupport() {
@@ -2490,7 +2535,19 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    // Dynamic profile route: /profile/<username>. This is the app's first
 		    // dynamic route, handled before the 404 guard below.
 		    if (route.startsWith('/profile/')) {
-		      const username = decodeURIComponent(route.slice('/profile/'.length)).replace(/\/+$/, '');
+		      // decodeURIComponent throws URIError on malformed sequences
+		      // (/profile/% or /profile/%E0%A4%A) — a raw throw here left the SPA
+		      // half-rendered. Malformed input is just a bad URL: show 404.
+		      let username = '';
+		      try {
+		        username = decodeURIComponent(route.slice('/profile/'.length)).replace(/\/+$/, '');
+		      } catch (_err) {
+		        this._enterInAppLayout();
+		        this._showRoutePage('404');
+		        document.title = 'Not found | Sing Chess';
+		        this._updateNavActiveState();
+		        return;
+		      }
 		      this._enterInAppLayout();
 		      this._showRoutePage('profile');
 		      this._loadPublicProfile(username || '');
@@ -4374,7 +4431,7 @@ this._syncAnticheatForm();
 	  // refresh above and the Refresh button don't double-fetch.
 	  async _loadAnticheatReports(force) {
 	    if (!this.elAnticheatSavedList) return;
-	    if (!this.authState || !this.authState.userId) {
+	    if (!this.authState || !this.authState.user) {
 	      if (this.elAnticheatSaved) this.elAnticheatSaved.hidden = true;
 	      return;
 	    }
@@ -4401,7 +4458,7 @@ this._syncAnticheatForm();
 	        this.elAnticheatSavedList.innerHTML =
 	          `<div class="anticheat-saved-empty">Couldn't load saved reviews. <button type="button" class="btn btn-ghost btn-sm" data-ac-retry>Retry</button></div>`;
 	        const retry = this.elAnticheatSavedList.querySelector('[data-ac-retry]');
-	        if (retry) retry.addEventListener('click', () => this._loadAnticheatReviews(true));
+	        if (retry) retry.addEventListener('click', () => this._loadAnticheatReports(true));
 	      }
 	    }
 	  }
@@ -4852,6 +4909,10 @@ if (this.elBtnAnticheatRefresh) {
 	      this.coachMode.thinking = false;
 	      this.board.clearBestMoveArrow();
 	      this._syncCoachControls();
+      // Stop the live game clock too — leaving it running kept the 250ms
+      // interval ticking (and able to flag the game) after leaving coach mode.
+      this._resetClockState();
+      this._updateClockDisplays();
 		    }
 		    this._syncServerStrongToggle();
 		    this._syncActionButtons();
@@ -4943,6 +5004,9 @@ if (this.elBtnAnticheatRefresh) {
 		    this.coachMode.thinking = false;
 		    this.puzzleMode.active = false;
 		    this.anticheatMode.active = false;
+	    // Stop the live game clock with coach mode — the 250ms interval must
+	    // not keep ticking (and able to flag the game) while on the home screen.
+	    this._resetClockState();
 		    this.board.clearLoading();
 		    this.board.clearBestMoveArrow();
 		    delete document.body.dataset.mode;
@@ -5731,7 +5795,8 @@ if (this.elBtnAnticheatRefresh) {
     this._ensureImportModalTabs();
     this.elPgnModal.style.display = 'flex';
     document.body.classList.add('modal-open');
-    document.getElementById('app')?.removeAttribute('aria-hidden');
+    // aria-hidden bookkeeping lives in _openDialog/_closeDialog now (the old
+    // removeAttribute here was a no-op — nothing ever set the attribute).
     this._openDialog(this.elPgnModal);
     this._setImportStatus('');
     this._renderImportResults([]);
@@ -5784,7 +5849,6 @@ if (this.elBtnAnticheatRefresh) {
   _hidePgnModal() {
     this.elPgnModal.style.display = 'none';
     document.body.classList.remove('modal-open');
-    document.getElementById('app')?.removeAttribute('aria-hidden');
     this._closeDialog(this.elPgnModal);
   }
 
@@ -5804,6 +5868,12 @@ if (this.elBtnAnticheatRefresh) {
       this._dialogStack = this._dialogStack.filter((el) => el !== overlay);
       this._dialogStack.push(overlay);
       overlay.setAttribute('aria-hidden', 'false');
+      // Hide the app background from AT while a dialog is open (the old code
+      // only ever REMOVED aria-hidden from #app, which nothing ever set — a
+      // dead no-op). #app is the page shell; dialogs live outside it, so this
+      // is safe and keeps screen readers from reading content behind the
+      // modal. Restored in _closeDialog.
+      try { document.getElementById('app')?.setAttribute('aria-hidden', 'true'); } catch (_) {}
       // Move focus into the dialog immediately.
       const first = overlay.querySelector('[data-autofocus], button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
       if (first) setTimeout(() => first.focus(), 0);
@@ -5815,6 +5885,10 @@ if (this.elBtnAnticheatRefresh) {
     if (!overlay) return;
     this._dialogStack = this._dialogStack.filter((el) => el !== overlay);
     overlay.setAttribute('aria-hidden', 'true');
+    if (this._dialogStack.length === 0) {
+      // Last dialog closed — give the background back to assistive tech.
+      try { document.getElementById('app')?.removeAttribute('aria-hidden'); } catch (_) {}
+    }
     const opener = this._dialogLastFocus;
     this._dialogLastFocus = null;
     if (typeof opener?.focus === 'function') {
@@ -9013,7 +9087,16 @@ _showPuzzleSuccessOverlay() {
       this._applyLiveResultToUI(liveResult, { context: { moveObj } });
     }
     this._updateEvalBar(liveResult.evalAfter);
-    this.liveEvalHistory[idx] = liveResult.evalAfter;
+    // liveEvalHistory is a SLIDING WINDOW: both push sites trim to the last
+    // 60 evals with shift(), so an absolute moveIndex stops addressing this
+    // array once the window slides — and idx >= 60 SPARSE-EXTENDS it with
+    // undefined holes, which turns _drawEvalGraph's min/max into NaN and
+    // blanks the whole graph. The deepened move is by definition the one
+    // being viewed, whose eval is the newest sample in the window; overwrite
+    // that entry (identical to the old write for the first 60 moves).
+    if (this.liveEvalHistory.length) {
+      this.liveEvalHistory[this.liveEvalHistory.length - 1] = liveResult.evalAfter;
+    }
     this._drawEvalGraph();
     if (this.currentMoveIndex === idx) {
       this._updateLiveEvalPanel({
@@ -11009,6 +11092,33 @@ _showMoveBadge(classification, targetSquare, options = {}) {
     // Apply to live results (in-game analysis).
     if (this.liveMoveResults && Array.isArray(this.liveMoveResults)) {
       applyToArray(this.liveMoveResults);
+    }
+
+    // Book re-stamping changes the input of every aggregate stat — accuracy,
+    // ACPL, CAPS, game rating and the phase summary all exclude BOOK moves —
+    // but those were computed during the analysis pass, before this async
+    // Lichess data arrived (detectOpening() is a no-op, so nothing was marked
+    // BOOK then). Recompute them so the summary reflects the book exclusion.
+    if (this.analysisResults && Array.isArray(this.analysisResults)) {
+      const r = this.analysisResults;
+      r.whiteAccuracy = this.analyzer.calculateAccuracy(r, 'white');
+      r.blackAccuracy = this.analyzer.calculateAccuracy(r, 'black');
+      r.whiteAcpl = this.analyzer.calculateAcpl(r, 'white');
+      r.blackAcpl = this.analyzer.calculateAcpl(r, 'black');
+      r.whiteCaps = this.analyzer.calculateCapsScore(r, 'white');
+      r.blackCaps = this.analyzer.calculateCapsScore(r, 'black');
+      r.whiteGameRating = this.analyzer.calculateGameRating(r, 'white');
+      r.blackGameRating = this.analyzer.calculateGameRating(r, 'black');
+      r.phaseSummary = {
+        white: this.analyzer.summarizeByPhase(r, 'white'),
+        black: this.analyzer.summarizeByPhase(r, 'black'),
+      };
+      // If the summary panel is already on screen, refresh it with the new
+      // numbers (the common case: the Lichess lookup resolves after
+      // _showReviewSummary first rendered with un-excluded stats).
+      if (this.elReviewSummary && this.elReviewSummary.style.display === 'block') {
+        this._showReviewSummary();
+      }
     }
 
     // Re-render the move list so BOOK badges appear.

@@ -95,9 +95,12 @@ function authHeader(headers = {}) {
 function authToken(event) {
   const headerAuth = String(authHeader(event.headers || ''));
   const headerMatch = headerAuth.match(/^Bearer\s+(.+)$/i);
-  if (headerMatch) return headerMatch[1];
-  const query = event.queryStringParameters || {};
-  return String(query.token || query.idToken || '').trim();
+  // Authorization header ONLY. The old `?token=` / `?idToken=` query-string
+  // fallback is gone: tokens in URLs leak into access logs (morgan logs the
+  // full URL), browser history, and Referer headers, and no current client
+  // needs it — every endpoint is reached through apiFetch POSTs with headers,
+  // and the EventSource-based status stream was disabled by user request.
+  return headerMatch ? headerMatch[1] : '';
 }
 
 async function getUserRecord(uid) {
@@ -529,6 +532,19 @@ function sanitizeNotificationSettings(input) {
 // rate-limited.
 const USERNAME_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
+// Server-side username shape check, mirrored from the client's
+// /^[a-zA-Z0-9._-]{3,40}$/ (src/app.js signup + account-save). This is the
+// REAL gate — usernames are lowercased and used as RTDB keys
+// (`usernames/${key}`), and an unvalidated string containing `/` would write
+// into a nested path, while `$ . # [ ] /` are illegal in RTDB keys entirely
+// (note: `.` IS legal as a key character in RTDB, unlike in paths we build
+// from user IDs). Validate BEFORE any ref() call; reject, don't strip —
+// silently mangling a username would desync the profile value from its index
+// entry.
+function isValidUsername(value) {
+  return typeof value === 'string' && /^[a-zA-Z0-9._-]{3,40}$/.test(value);
+}
+
 async function patchProfile(uid, update) {
   const { admin: firebaseAdmin, db: database } = initAdmin();
   // Sanitize: only allow known-safe keys, strip forbidden keys
@@ -555,8 +571,8 @@ async function patchProfile(uid, update) {
   // cooldown block below, which guards on `.trim()`, but still gets written),
   // then re-set a new name and be treated as a fresh first-set (exempt), fully
   // defeating the 7-day rate limit.
-  if ('username' in sanitized && !String(sanitized.username).trim()) {
-    const err = new Error('Username cannot be empty.');
+  if ('username' in sanitized && !isValidUsername(sanitized.username)) {
+    const err = new Error('Username must be 3–40 characters: letters, numbers, . _ - only.');
     err.statusCode = 400;
     err.code = 'invalid_username';
     throw err;
@@ -620,7 +636,13 @@ async function patchProfile(uid, update) {
 async function getPublicProfileByUsername(rawUsername) {
   if (!rawUsername) return null;
   const { db: database } = initAdmin();
-  const key = String(rawUsername).trim().toLowerCase().slice(0, 40);
+  const raw = String(rawUsername).trim();
+  // Same shape gate as patchProfile — a URL-supplied username reaches this
+  // function verbatim (/profile/:username), and ref(`usernames/${key}`) must
+  // never be built from arbitrary characters. Reject (→ null → 404) anything
+  // the write path could never have stored.
+  if (!isValidUsername(raw)) return null;
+  const key = raw.toLowerCase().slice(0, 40);
   let uid = null;
   try {
     const snap = await database.ref(`usernames/${key}`).once('value');
@@ -801,6 +823,28 @@ async function claimUsage(uid, kind, limit, { amount = 1, period = "day" } = {})
       // Wait briefly before retrying (exponential backoff)
       await new Promise((resolve) => setTimeout(resolve, 50 * Math.pow(2, attempt)));
     }
+  }
+}
+
+// Give back a usage claim when the action it paid for never ran (e.g. a
+// server review aborted by a retryable engine failure — the client retries,
+// and without the refund the retry burns a second daily slot). Mirrors
+// claimUsage's transaction shape with a negative delta, clamped at >= 0.
+// Best-effort: a failed refund must never mask the original error.
+async function refundUsage(uid, kind, { amount = 1, period = "day" } = {}) {
+  try {
+    const giveBack = Math.max(1, Math.trunc(Number(amount) || 1));
+    const { db: database } = initAdmin();
+    const window = period === "week" ? usageWeek() : usageDay();
+    const bucket = period === "week" ? `week/${window}` : window;
+    const ref = database.ref(`users/${uid}/usage/${bucket}/${kind}`);
+    await ref.transaction((current) => {
+      return Math.max(0, (Number(current) || 0) - giveBack);
+    }, undefined, false);
+    return { refunded: true };
+  } catch (_err) {
+    console.warn(`[quota] refund of ${kind} for ${uid} failed (ignored):`, _err && _err.message);
+    return { refunded: false };
   }
 }
 
@@ -1057,6 +1101,7 @@ module.exports = {
   planRank,
   isPaidOrAbove,
   requireQuota,
+  refundUsage,
   requireUser,
   reserveCoachTokens,
   reconcileCoachTokens,
