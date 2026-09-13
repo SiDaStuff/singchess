@@ -3641,7 +3641,9 @@ _syncAccountUi() {
 	  async _markNotificationRead(id) {
 	    if (!id) return;
 	    try {
-	      await fetch(`/api/notifications/${encodeURIComponent(id)}/read`, {
+	      // apiFetch, not raw fetch — raw same-origin calls hit the SPA host's
+	      // index.html fallback in production, so the write silently went nowhere.
+	      await apiFetch(`/api/notifications/${encodeURIComponent(id)}/read`, {
 	        method: 'POST',
 	        headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
 	        body: '{}',
@@ -3658,7 +3660,8 @@ _syncAccountUi() {
 	  async _deleteNotification(id) {
 	    if (!id) return;
 	    try {
-	      await fetch(`/api/notifications/${encodeURIComponent(id)}`, {
+	      // apiFetch — see _markNotificationRead.
+	      await apiFetch(`/api/notifications/${encodeURIComponent(id)}`, {
 	        method: 'DELETE',
 	        headers: await this._authHeaders(),
 	      });
@@ -3684,7 +3687,8 @@ _syncAccountUi() {
 	    // Best-effort batch write — fire and forget; per-id errors are swallowed.
 	    for (const n of unreadList) {
 	      try {
-	        await fetch(`/api/notifications/${encodeURIComponent(n.id)}/read`, {
+	        // apiFetch — see _markNotificationRead.
+	        await apiFetch(`/api/notifications/${encodeURIComponent(n.id)}/read`, {
 	          method: 'POST',
 	          headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
 	          body: '{}',
@@ -3793,7 +3797,11 @@ _syncAccountUi() {
 	      this._anticheatReportPollTimer = null;
 	    }
 	    try {
-      const response = await fetch(`/api/anticheat/status?jobId=${encodeURIComponent(jobId)}`, {
+      // apiFetch (not raw fetch): BASE points at the API host in production.
+      // A raw same-origin fetch here hit Netlify's SPA fallback, which served
+      // index.html with status 200 — response.ok passed, then .json() crashed
+      // with "Unexpected token '<', "<!DOCTYPE "... is not valid JSON".
+      const response = await apiFetch(`/api/anticheat/status?jobId=${encodeURIComponent(jobId)}`, {
         headers: await this._authHeaders(),
         cache: 'no-store',
       });
@@ -3805,6 +3813,11 @@ _syncAccountUi() {
         return;
       }
       if (!response.ok) throw new Error(`Report load failed with ${response.status}`);
+      // Defense-in-depth: an HTML body (SPA fallback, proxy error page) is not
+      // parseable JSON — fail with a clear message instead of "Unexpected
+      // token '<'" leaking out of response.json().
+      const contentType = String(response.headers.get('content-type') || '');
+      if (!contentType.includes('json')) throw new Error('Report service returned an invalid response (not JSON).');
       const report = await response.json();
       this._renderAnticheatReport(report);
     } catch (err) {
@@ -5873,7 +5886,17 @@ if (this.elBtnAnticheatRefresh) {
       // dead no-op). #app is the page shell; dialogs live outside it, so this
       // is safe and keeps screen readers from reading content behind the
       // modal. Restored in _closeDialog.
-      try { document.getElementById('app')?.setAttribute('aria-hidden', 'true'); } catch (_) {}
+      //
+      // inert goes on FIRST: focus is still inside #app at this instant (it
+      // moves into the dialog on the next tick), and a bare aria-hidden on an
+      // element whose descendant holds focus is refused by Chrome with a
+      // console warning. inert makes #app unfocusable too, so the browser
+      // releases focus before aria-hidden lands — no warning, no AT leak.
+      try {
+        const app = document.getElementById('app');
+        if (app && 'inert' in app) app.inert = true;
+        app?.setAttribute('aria-hidden', 'true');
+      } catch (_) {}
       // Move focus into the dialog immediately.
       const first = overlay.querySelector('[data-autofocus], button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
       if (first) setTimeout(() => first.focus(), 0);
@@ -5887,7 +5910,13 @@ if (this.elBtnAnticheatRefresh) {
     overlay.setAttribute('aria-hidden', 'true');
     if (this._dialogStack.length === 0) {
       // Last dialog closed — give the background back to assistive tech.
-      try { document.getElementById('app')?.removeAttribute('aria-hidden'); } catch (_) {}
+      // inert must clear BEFORE restoring focus to the opener: an inert
+      // element is unfocusable, so opener.focus() would silently fail.
+      try {
+        const app = document.getElementById('app');
+        if (app && 'inert' in app) app.inert = false;
+        app?.removeAttribute('aria-hidden');
+      } catch (_) {}
     }
     const opener = this._dialogLastFocus;
     this._dialogLastFocus = null;
@@ -8695,7 +8724,9 @@ _showPuzzleSuccessOverlay() {
       const params = new URLSearchParams({ source, username, limit: String(limit) });
 	// Bounded timeout: if the serverless proxy hangs, fail fast to the
 	// (now-bounded) browser fallback instead of freezing the popup.
-	const response = await this._fetchWithTimeout(`/api/recent-games?${params.toString()}`, { headers: { Accept: 'application/json' }, cache: 'no-store' }, 15000);
+	// apiUrl() prepends the API base — a raw same-origin path would resolve
+	// against the SPA host and get index.html back from its fallback.
+	const response = await this._fetchWithTimeout(`${window.apiUrl('/api/recent-games')}?${params.toString()}`, { headers: { Accept: 'application/json' }, cache: 'no-store' }, 15000);
       if (!response.ok) return null;
       const data = await response.json();
       if (!Array.isArray(data.games)) return null;
@@ -11258,8 +11289,9 @@ _showMoveBadge(classification, targetSquare, options = {}) {
         if (filters.speeds && filters.speeds.length) params.set('speeds', filters.speeds.join(','));
         if (filters.ratings && filters.ratings.length) params.set('ratings', filters.ratings.join(','));
       }
+      // apiUrl() prepends the API base (see _fetchRecentGamesViaServer).
       const res = await this._fetchWithTimeout(
-        `/api/opening-explorer?${params.toString()}`,
+        `${window.apiUrl('/api/opening-explorer')}?${params.toString()}`,
         { headers: { Accept: 'application/json' }, cache: 'no-store' },
         8000
       );
@@ -11307,7 +11339,8 @@ _showMoveBadge(classification, targetSquare, options = {}) {
         if (filters.speeds && filters.speeds.length) params.set('speeds', filters.speeds.join(','));
         if (filters.ratings && filters.ratings.length) params.set('ratings', filters.ratings.join(','));
       }
-      const res = await this._fetchWithTimeout(`/api/opening-explorer?${params.toString()}`, { headers: { Accept: 'application/json' }, cache: 'no-store' }, 8000);
+      // apiUrl() prepends the API base (see _fetchRecentGamesViaServer).
+      const res = await this._fetchWithTimeout(`${window.apiUrl('/api/opening-explorer')}?${params.toString()}`, { headers: { Accept: 'application/json' }, cache: 'no-store' }, 8000);
       if (!res.ok) { this._openingCache.set(cacheKey, null); return null; }
       const data = await res.json();
       // Lichess variant may return null opening name (only stats); still show stats.
