@@ -149,7 +149,13 @@ npm run preview   # optional local check of the built bundle
 `netlify.toml` handles the rest (publish `dist/`, security headers,
 `VITE_API_URL`, `VITE_RECAPTCHA_SITE_KEY` at build time). Push to deploy.
 
-### API server (VM behind nginx)
+### API server (VM behind the CAF central proxy + local nginx)
+
+**Topology:** the CAF reverse proxy terminates TLS for
+`mastermind.singdevelopments.com` (it owns the Let's Encrypt certificate — do
+**not** run certbot on this VM; HTTP-01 validation can't reach it). CAF forwards
+to this VM over plain HTTP on **:8080** (local nginx), which load-balances to
+the Node app on **127.0.0.1:3000** (PM2 cluster). The VM does not bind 80/443.
 
 ```bash
 npm install
@@ -160,26 +166,72 @@ pm2 save
 
 `ecosystem.config.cjs` defaults: **2 cluster instances**, `TRUST_PROXY=1`,
 `SERVE_STATIC=0` (API-only; Netlify serves the SPA). Override instances with
-`PM2_INSTANCES=N`.
+`PM2_INSTANCES=N`. The app binds `PORT` (default **3000**) — that is the only
+port CAF's route ultimately needs to reach (via local nginx on 8080).
 
 **Stale process gotcha:** if PM2 logs say
 `Cannot find module .../server/index.js`, the process list predates the
 `.cjs` rename → `pm2 delete all && pm2 start ecosystem.config.cjs --env production && pm2 save`.
 
-### nginx
+### nginx (internal listener on :8080)
 
 ```bash
-sudo cp mastermind.singdevelopments.com.nginx.conf /etc/nginx/sites-available/mastermind.singdevelopments.com
 sudo mkdir -p /etc/nginx/snippets
 sudo cp server/data/security-headers.conf /etc/nginx/snippets/
-# then fix the include paths inside the conf to /etc/nginx/snippets/security-headers.conf
+sudo cp mastermind.singdevelopments.com.nginx.conf /etc/nginx/sites-available/mastermind.singdevelopments.com
 sudo ln -s /etc/nginx/sites-available/mastermind.singdevelopments.com /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
+The conf listens on plain HTTP **:8080** (internal network only — no
+`listen 80/443`, no `ssl_*`, no certbot; TLS lives at the central proxy). It
+keeps local nginx for two reasons:
+
+1. **Sticky routing** across the 2-instance PM2 cluster (hash on the
+   `sid_device` cookie) — the Coach SSE `/api/coach/chat` stream parks pending
+   browser-tool calls in per-process memory, and `/api/coach/tool-result` must
+   land on the same instance.
+2. **SSE handling** — `proxy_buffering off` + 600s read timeouts on
+   `/api/coach/chat`, `/api/analyze/stream`, `/api/anticheat/stream`, and
+   `/api/users/me/stream`.
+
 `server/data/security-headers.conf` **must ship with the site conf** — every
-location that defines its own `add_header` (vendor, SSE) includes it, because
-nginx drops inherited headers in that case.
+location that defines its own `add_header` (vendor, SSE) includes it from
+`/etc/nginx/snippets/` (the conf already uses the absolute path), because nginx
+drops inherited headers in that case.
+
+**Firewall:** only :8080 needs to be reachable, from the CAF proxy subnet
+only. Ports 80/443 stay closed. If `ufw` is active:
+
+```bash
+sudo ufw allow from 192.168.254.0/24 to any port 8080 proto tcp
+```
+
+**Verify the listener** — this is exactly what the CAF team checks from their
+side; "connection refused on :8080" means this part isn't up:
+
+```bash
+sudo ss -tulpn | grep :8080        # want 0.0.0.0:8080 + [::]:8080
+curl -sS -H 'Host: mastermind.singdevelopments.com' \
+     http://127.0.0.1:8080/health  # want {"ok":true} — needs PM2 running too
+```
+
+No output from `ss` → nginx isn't installed/running or the site conf above
+isn't enabled (`systemctl status nginx`, `sudo nginx -t`). The plain
+`listen 8080` in the conf already binds all interfaces — it can never end up
+127.0.0.1-only.
+
+**What to tell the CAF proxy admins** (already reflected in the conf):
+
+- Backend route target: `http://<vm-internal-ip>:8080`, Host header
+  `mastermind.singdevelopments.com`.
+- **SSE / long requests**: disable proxy buffering and set read timeout ≥ 600s
+  for `/api/coach/chat`, `/api/analyze/stream`, `/api/anticheat/stream`, and
+  `/api/users/me/stream` (the app also sends `X-Accel-Buffering: no`).
+- **Body size**: allow ≥ 2 MB request bodies (game/PGN review uploads).
+- Forward `X-Forwarded-For` (append real client IP); the VM resolves the real
+  client from it (`TRUST_PROXY=1` + nginx `real_ip`).
+- No WebSockets — streaming is SSE over plain HTTP/1.1.
 
 ### Firebase rules
 
@@ -218,6 +270,7 @@ production API before `cap sync`.
 | Reviews stuck at "queued" forever | Another heavy action holds your lock → restart server (`pm2 reload chess-review`); locks are in-process by design. |
 | `EADDRINUSE :3000` | Another instance is running → `pm2 list` / `npx kill-port 3000`. |
 | Rate limits count every user as one IP | `TRUST_PROXY=1` not set (must be set behind nginx/Cloudflare). |
+| Site reachable but all requests 502 | CAF proxy can't reach :8080 → check local nginx is up (`systemctl status nginx`) and the firewall allows the proxy subnet. |
 
 ---
 
