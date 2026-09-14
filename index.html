@@ -1913,6 +1913,20 @@
       </button>
     </nav>
 
+    <div class="loading-overlay" id="loading-overlay" hidden>
+      <div class="loading-overlay-content">
+        <img class="loading-icon" src="/assets/icon.png" alt="Sing Chess">
+        <h2 class="loading-title">Sing Chess</h2>
+        <p class="loading-text" id="loading-text">Loading...</p>
+        <div class="loading-bar-track">
+          <div class="loading-bar-fill" id="loading-bar-fill"></div>
+        </div>
+      </div>
+    </div>
+
+    <div data-site-footer id="app-footer-slot"></div>
+  </div>
+
     <div class="modal-overlay" id="settings-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" aria-hidden="true">
       <div class="modal modal-settings">
         <div class="modal-header">
@@ -2164,17 +2178,6 @@
       </div>
     </div>
 
-    <div class="loading-overlay" id="loading-overlay" hidden>
-      <div class="loading-overlay-content">
-        <img class="loading-icon" src="/assets/icon.png" alt="Sing Chess">
-        <h2 class="loading-title">Sing Chess</h2>
-        <p class="loading-text" id="loading-text">Loading...</p>
-        <div class="loading-bar-track">
-          <div class="loading-bar-fill" id="loading-bar-fill"></div>
-        </div>
-      </div>
-    </div>
-
     <div class="modal-overlay" id="coach-setup-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="coach-setup-modal-title" aria-hidden="true">
       <div class="modal modal-coach-setup">
         <div class="modal-header">
@@ -2254,8 +2257,6 @@
       </div>
     </div>
 
-    <div data-site-footer id="app-footer-slot"></div>
-  </div>
 
   <!-- CDN libs: defer keeps document-order execution (chess.js first …
        firebase last, then main.js) while letting the browser fetch them all in

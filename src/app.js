@@ -2906,7 +2906,18 @@ return window.firebase;
 		  }
 
 		  async _authHeaders(extra = {}) {
-		    const token = await this.authState.user?.getIdToken?.();
+		    // getIdToken() can transiently reject when the cached token is mid-refresh
+		    // or the network hiccups, which surfaced as intermittent saved-reviews
+		    // load failures. Retry once with a forced refresh before giving up.
+		    let token = null;
+		    try {
+		      token = await this.authState.user?.getIdToken?.();
+		    } catch (_) {}
+		    if (!token) {
+		      try {
+		        token = await this.authState.user?.getIdToken?.(true);
+		      } catch (_) {}
+		    }
 		    return token ? { ...extra, Authorization: `Bearer ${token}` } : { ...extra };
 		  }
 
