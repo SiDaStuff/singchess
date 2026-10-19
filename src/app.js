@@ -5525,7 +5525,6 @@ if (this.elBtnAnticheatRefresh) {
 	    }
 
 	    this._setEngineControlsDisabled(true);
-	    this._showLoadingOverlay('Preparing engine settings...');
 	    this.elEngineStatus.textContent = `${moduleConfig.engineLabel}: Loading`;
     this.elEngineStatus.classList.remove('ready');
     this._setEngineLoadProgress(5, 'Preparing engine settings...');
