@@ -88,7 +88,7 @@ try {
       check(await page.evaluate(fen => window.Play.board.fen === fen, preReconnect), `${width}: reconnect preserves the displayed position`);
       await page.waitForFunction(() => window.Play.gameConnection === 'connected');
       await page.evaluate(() => window.app._navigateTo('/review', { skipImport: true }));
-      check(await page.locator('#play-fairplay-notice').isVisible(), `${width}: analysis stays locked after navigation`);
+      check(!(await page.locator('#play-fairplay-notice').isVisible()), `${width}: fair-play status stays silent after navigation`);
       await page.evaluate(() => window.app._navigateTo('/play')); await page.waitForTimeout(100);
       await page.evaluate(() => window.Play.showGame());
       await square('g1').click(); await square('f3').click(); await page.waitForFunction(() => window.Play.position?.ply === 3);

@@ -252,14 +252,11 @@ class ChessReviewApp {
     const wasBlocked = this._playFairPlayBlocked;
     this._playFairPlayBlocked = !!blocked;
     document.body.classList.toggle('play-fairplay-blocked', !!blocked);
+    // Fair-play verification is intentionally silent. The guard still
+    // disables analysis and coaching until status is authoritative, but it
+    // must not interrupt navigation with a banner while the request runs.
     const notice = document.getElementById('play-fairplay-notice');
-    if (notice) {
-      notice.hidden = !blocked;
-      const text = notice.querySelector('[data-fairplay-text]');
-      if (text) text.textContent = activeGames.length
-        ? 'Your online game is in progress. Analysis and coaching will return when it ends.'
-        : 'Could not verify your Lichess game status. Reconnecting automatically…';
-    }
+    if (notice) notice.hidden = true;
     if (blocked) {
       this.liveEvalToken += 1; this.liveDepthToken += 1;
       this._coachOverviewToken = (this._coachOverviewToken || 0) + 1;
@@ -2879,7 +2876,6 @@ return window.firebase;
 	    }
 
 		    this.authState.dbReady = true; // Profile persistence uses the server API.
-		    this._showLoadingOverlay('Loading profile...');
 		    const authInitFallback = setTimeout(() => {
 		      if (!this.authState.initialized) this._hideLoadingOverlay();
 		    }, 12000);
