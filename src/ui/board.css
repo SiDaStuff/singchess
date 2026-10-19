@@ -10,6 +10,7 @@ body[data-board-theme=walnut] { --sq-light: #f1d8ae; --sq-dark: #8a5a32; --sq-hi
 body[data-board-theme=rose] { --sq-light: #f7e2df; --sq-dark: #b56a72; --sq-highlight-light: #ffd9c7; --sq-highlight-dark: #c88771; }
 .board-wrapper { position: relative; width: 100%; aspect-ratio: 1; border-radius: 4px; overflow: hidden; box-shadow: 0 1px 4px #0002; }
 .chess-board { width: 100%; height: 100%; position: absolute; inset: 0; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); grid-template-rows: repeat(8, minmax(0, 1fr)); user-select: none; touch-action: manipulation; }
+.board-row { display: contents; }
 .square { position: relative; display: flex; align-items: center; justify-content: center; cursor: pointer; touch-action: manipulation; min-width: 0; min-height: 0; }
 .square.light { background: var(--sq-light); }
 .square.dark { background: var(--sq-dark); }

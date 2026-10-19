@@ -1,6 +1,3 @@
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/auth';
-import 'firebase/compat/analytics';
 import Swal from 'sweetalert2';
 import 'sweetalert2/dist/sweetalert2.css';
 import { marked } from 'marked';
@@ -14,4 +11,4 @@ import '@fontsource/ibm-plex-mono/latin-500.css';
 import '@fontsource/material-symbols-outlined/400.css';
 
 // Stable compat interfaces for the retained service and game controllers.
-Object.assign(window, { firebase, Swal, marked, DOMPurify });
+Object.assign(window, { Swal, marked, DOMPurify });

@@ -291,6 +291,10 @@ class ChessBoard {
     // _addDestroyableListener (see _bindContainerKeyboard).
     this.container.innerHTML = '';
     for (let row = 0; row < 8; row++) {
+      const rowElement = document.createElement('div');
+      rowElement.className = 'board-row';
+      rowElement.setAttribute('role', 'row');
+      this.container.appendChild(rowElement);
       for (let col = 0; col < 8; col++) {
         const r = this.flipped ? row : 7 - row;
         const c = this.flipped ? 7 - col : col;
@@ -331,7 +335,7 @@ class ChessBoard {
         // Click handling
         div.addEventListener('click', (e) => this._onSquareClick(sq, e));
 
-        this.container.appendChild(div);
+        rowElement.appendChild(div);
       }
     }
     this._ensureArrowLayer();

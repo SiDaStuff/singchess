@@ -206,7 +206,13 @@ class ChessReviewApp {
     this._syncPlayerNameplates();
 	    this._syncCoachVisibility();
 	    this._syncPuzzleVisibility();
-	    this._initEngine();
+	    // Keep the initial route responsive. Engine-dependent actions call
+	    // _initEngine() on demand; idle startup is delayed so the 7 MB WASM
+	    // payload never competes with the first paint.
+	    this._engineInitStarted = false;
+	    this._engineInitTimer = setTimeout(() => {
+	      if (!this.engine && !this._engineInitStarted) void this._initEngine();
+	    }, 5000);
 		    this._initAuth();
 		    this._updateBoard();
 		    this._updateLiveEvalPanel();
@@ -2866,6 +2872,17 @@ return window.firebase;
 	  }
 
 		  _initAuth() {
+		    import('./ui/firebase-runtime.js')
+		      .then(() => this._initAuthReady())
+		      .catch((err) => {
+		        console.warn('Firebase auth module failed to load:', err);
+		        this.authState.initialized = true;
+		        void window.PlayFairPlay?.onAuth();
+		        this._syncAccountUi();
+		      });
+		  }
+
+		  _initAuthReady() {
 		    const firebase = this._ensureFirebase();
 		    if (!firebase?.auth) {
           this.authState.initialized = true;
@@ -5516,6 +5533,8 @@ if (this.elBtnAnticheatRefresh) {
   }
 
 	  async _initEngine() {
+	    if (this._engineInitStarted && !this.engine) return false;
+	    this._engineInitStarted = true;
 	    const initToken = ++this.engineInitToken;
 	    const moduleConfig = getEngineModuleConfig(this.engineSettings.source, this.engineSettings.module);
 	    let initialized = false;
@@ -5647,6 +5666,7 @@ if (this.elBtnAnticheatRefresh) {
         console.error('Engine init failed:', err);
       }
     } finally {
+	      if (!initialized) this._engineInitStarted = false;
 	      if (initToken === this.engineInitToken) {
 	        this.board.clearLoading();
 	        this._hideLoadingOverlay();
