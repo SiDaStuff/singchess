@@ -66,7 +66,7 @@ function parseIncrement(headers) {
 
 function parseBaseClock(headers) {
 	const tc = String(headers.TimeControl || headers.Time || '');
-	const match = tc.match(/^\s*(\d+)\+/);
+	const match = tc.match(/^\s*(\d+)(?:\+\d+)?\s*$/);
 	return match ? Number(match[1]) || null : null;
 }
 
@@ -254,14 +254,51 @@ class BrowserMoveCoach {
   }
 
   explain(payload) {
-    const moveInfo = this._moveInfo(payload);
+    // Derive the explanation's board from the legal move, never a stale or
+    // mismatched supplied post-move FEN (including previously saved reviews).
+    const position = new Chess();
+    if (!payload?.fenBefore || !position.load(payload.fenBefore)) {
+      return 'The position is unavailable; a board-specific explanation cannot be verified.';
+    }
+    const legalCount = position.moves().length;
+    const wasInCheck = position.in_check();
+    const moveInfo = payload.moveUci
+      ? position.move({ from: payload.moveUci.slice(0, 2), to: payload.moveUci.slice(2, 4), promotion: payload.moveUci[4] })
+      : position.move(payload.moveSan, { sloppy: true });
+    if (!moveInfo) return 'The recorded move is not legal in this position; its explanation cannot be verified.';
+    payload = { ...payload, moveSan: moveInfo.san, fenAfter: position.fen() };
+    if (!(payload.opponentPvSan || payload.opponentPv) && (payload.bestMovePvSan || payload.bestMovePv)) {
+      const line = this._legalContinuation(payload.fenBefore, payload.bestMovePvSan || payload.bestMovePv);
+      if (line.length && this.analyzer._sameMoveSan(line[0].san, moveInfo.san)) {
+        payload.opponentPvSan = line.slice(1).map(move => move.san).join(' ');
+      }
+    }
     const key = this.analyzer.getClassificationKey(payload.classification);
     const san = moveInfo.san || payload.moveSan || 'This move';
+
+    // Terminal/forced positions take precedence over generic grade templates.
+    if (position.in_checkmate()) return this._explainCheckmate(payload, moveInfo, san);
+    const mateNext = this.analyzer._immediateMateMove(position.fen());
+    if (legalCount === 1) {
+      return `${san} is the only legal move${wasInCheck ? ' to get out of check' : ''}.${mateNext ? ` The opponent can still play ${mateNext.san}, which is checkmate.` : ''}`;
+    }
+    if (mateNext) {
+      const alternative = new Chess(payload.fenBefore);
+      const better = payload.bestMoveSan && alternative.move(payload.bestMoveSan);
+      const avoids = better && !this.analyzer._sameMoveSan(better.san, san)
+        && !this.analyzer._immediateMateMove(alternative.fen());
+      return `${san}${wasInCheck ? ' gets out of check' : ''}, but allows ${mateNext.san}, which is checkmate.${avoids ? ` Better was ${better.san}, which avoids this immediate mate.` : ''}`;
+    }
+    if (payload.playerEdgeBefore <= -9900 && payload.playerEdgeAfter <= -9900) {
+      const consequence = this._mateConsequence(payload);
+      return this._joinSentences([`${san} leaves a forced mate for the opponent according to the engine`, consequence]);
+    }
 
     if (['INACCURACY', 'MISTAKE', 'BLUNDER', 'MISS'].includes(key)) {
       return this._explainErrorMove(payload, moveInfo, key, san);
     }
-    return this._explainGoodMove(payload, moveInfo, key, san);
+    const explanation = this._explainGoodMove(payload, moveInfo, key, san);
+    return explanation;
   }
 
   _explainErrorMove(payload, moveInfo, key, san) {
@@ -280,19 +317,6 @@ class BrowserMoveCoach {
       ? this.analyzer._bestMoveReason(payload.fenBefore, payload.bestMove)
       : '';
 
-    if (key === 'MISS') {
-      if (payload.opponentJustBlundered && betterIsDifferent && betterReason) {
-        return `${san} is a miss. After their slip, ${betterSan} ${betterReason}.`;
-      }
-      if (betterIsDifferent && betterReason) {
-        return `${san} is a miss — you overlooked that ${betterSan} ${betterReason}.`;
-      }
-      if (betterIsDifferent) {
-        return `${san} is a miss. ${betterSan} would have kept the advantage.`;
-      }
-      return `${san} is a miss that lets a stronger continuation slip away.`;
-    }
-
     const mateConsequence = this._mateConsequence(payload);
     if (mateConsequence) {
       const priorNote = this._priorMoveNote(payload);
@@ -304,27 +328,27 @@ class BrowserMoveCoach {
         ? this._suggestBetterMove(payload, betterSan, betterReason, mateConsequence)
         : '';
       const text = this._joinSentences([lead, line, better]);
-      return this._withErrorPun(text, key);
+      return text;
     }
 
     const playedNote = this._playedMoveNote(payload, moveInfo);
-    const opponentReply = this._describeOpponentReply(payload);
+    const opponentReply = this._readableLesson(this._describeOpponentReply(payload), payload.fenAfter);
     const severity = this._severityClause(payload.cpLoss, payload.expectedLoss, key);
     const swing = this._evalSwingClause(payload);
 
     // If the move itself is checkmate but classified as an error (rare edge case),
     // explain it naturally rather than mechanically.
     if (san.endsWith('#')) {
-      return this._explainErrorCheckmate(payload, moveInfo, key, san, betterSan, betterReason, betterIsDifferent);
+      return this._explainCheckmate(payload, moveInfo, san);
     }
 
     // Compose a lead sentence. Prefer concrete specifics (opponent's punishing
     // reply, or what the played move tried to do) over a bare "is a blunder".
     let lead = '';
     if (opponentReply && playedNote) {
-      lead = `${san} is ${label}: ${playedNote}, but ${opponentReply}`;
+      lead = `${san} is ${label}: ${playedNote}. After this move, ${opponentReply}`;
     } else if (opponentReply) {
-      lead = `${san} is ${label} — ${opponentReply}`;
+      lead = `${san} is ${label}. After this move, ${opponentReply}`;
     } else if (playedNote) {
       lead = `${san} is ${label}: ${playedNote}`;
     } else {
@@ -343,57 +367,88 @@ class BrowserMoveCoach {
       ? this._suggestBetterMove(payload, betterSan, betterReason)
       : '';
 
-    const text = this._joinSentences([lead, better]);
-    return this._withErrorPun(text, key);
+    const consequence = this._lineOutcome(payload, moveInfo.color);
+    return this._joinSentences([lead, consequence, better]);
   }
 
-  // Natural-language explanation for a checkmate move that's somehow classified as an error.
-  _explainErrorCheckmate(payload, moveInfo, key, san, betterSan, betterReason, betterIsDifferent) {
-    const label = {
-      INACCURACY: 'an inaccuracy',
-      MISTAKE: 'a mistake',
-      BLUNDER: 'a blunder',
-    }[key] || 'an error';
-    const piece = moveInfo.piece ? this.pieceNames[moveInfo.piece] || 'piece' : 'piece';
-    const to = moveInfo.to || '';
-
-    let text = `${san} is checkmate, but it's classified as ${label}. `;
-    if (payload.cpLoss >= 300 || key === 'BLUNDER') {
-      text += `The position collapses after this — the king may be mated, but the material cost or positional damage is too high.`;
-    } else if (payload.cpLoss >= 120) {
-      text += `It weakens the position significantly despite the checkmate.`;
-    } else {
-      text += `There's a more precise way to finish the game.`;
+  _readableLesson(text, fen) {
+    if (!text) return '';
+    const relative = /^(.*?) (creates|maintains) a relative pin along ([a-h][1-8])[\u2013-]([a-h][1-8]) \u2014 the (\w+) on ([a-h][1-8]) shields the (\w+) on ([a-h][1-8])\./.exec(text);
+    if (relative) {
+      const [, prefix, action, , , front, square, rear, back] = relative;
+      const lead = `${prefix} ${action === 'maintains' ? 'keeps pressure on' : 'attacks'} the ${front} on ${square}, with the ${rear} on ${back} behind it`;
+      if (front !== 'pawn') return lead;
+      const example = /If (\S+), (\S+) is a legal capture of that \w+(?:; (\S+) keeps the line blocked)?/.exec(text);
+      return `${lead}.${example ? ` For example, ${example[1]} allows ${example[2]}${example[3] ? `; ${example[3]} keeps the line blocked` : ''}.` : ''} This does not establish a forced win`;
     }
-
-    if (betterIsDifferent && betterReason) {
-      text += ` ${this._capitalize(betterSan + ' ' + betterReason)}`;
-    } else if (betterIsDifferent) {
-      text += ` ${betterSan} would have been the more precise finish.`;
+    const pin = /^(.*?) (?:creates|maintains) a pin \u2014 the (\w+) on ([a-h][1-8]) shields the king on ([a-h][1-8])/.exec(text);
+    if (pin) {
+      const [, prefix, piece, square, king] = pin;
+      let advance = '';
+      if (piece === 'pawn' && fen) {
+        const board = new Chess(fen);
+        const legal = board.moves({ verbose: true }).find(move => move.from === square && move.to[0] === square[0] && !move.captured);
+        if (legal) advance = ` It can still play ${legal.san} along the same file`;
+      }
+      return `${prefix} pins the ${piece} on ${square} to the king on ${king}.${advance}`;
     }
-
     return text;
   }
 
-  // Adds a brief, empathetic note so blunders/mistakes don't feel purely
-  // punitive.
-  _withErrorPun(text, key) {
-    if (!text) return text;
-    if (key === 'BLUNDER') {
-      const notes = [
-        ' Tough position — even strong players miss this.',
-        ' A costly mistake, but part of the learning process.',
-      ];
-      return text + this._pick(notes);
+  _lineOutcome(payload, color) {
+    const line = this._legalContinuation(payload.fenAfter, payload.opponentPvSan || payload.opponentPv);
+    if (!line.length) return '';
+    const promotion = line.findIndex(move => move.promotion);
+    if (promotion >= 0 && promotion < 6) {
+      const move = line[promotion];
+      return `In the engine continuation, ${line.slice(0, promotion + 1).map(m => m.san).join(' ')}, the pawn promotes to a ${this.pieceNames[move.promotion]}`;
     }
-    if (key === 'MISTAKE') {
-      const notes = [
-        ' A slip that can happen under time pressure.',
-        ' Worth filing away for next time.',
-      ];
-      return text + this._pick(notes);
+    const before = this._boardMap(payload.fenAfter);
+    const original = file => Object.entries(before).filter(([sq, p]) => sq[0] === file && p.type === 'p' && p.color === color).length;
+    // Use the actual validated continuation, not a hypothetical knight move
+    // chosen merely because it would expose a queen behind it.
+    for (let i = 0; i < Math.min(6, line.length); i++) {
+      const move = line[i];
+      if (move.color !== color || move.piece !== 'p' || !move.captured) continue;
+      const pawns = Object.entries(this._boardMap(move.fen)).filter(([sq, p]) => sq[0] === move.to[0] && p.type === 'p' && p.color === color).map(([sq]) => sq);
+      if (pawns.length >= 2 && pawns.length > original(move.to[0])) {
+        return `In the engine continuation, ${line.slice(0, i + 1).map(m => m.san).join(' ')} leaves your pawns doubled on ${pawns.join(' and ')}`;
+      }
     }
-    return text;
+    const shown = line.slice(0, 6);
+    let loss = 0;
+    for (const move of shown) if (move.captured) loss += (move.color === color ? -1 : 1) * (this.pieceValues[move.captured] || 0);
+    if (loss >= 1) return `In the engine continuation, ${shown.map(m => m.san).join(' ')}, you finish ${loss} ${loss === 1 ? 'pawn' : 'pawns'} down in material compared with this position`;
+    return '';
+  }
+
+  _continuationExplanation(fen, pv, label = 'After the played move, the engine line is') {
+    if (!fen || !pv) return '';
+    const line = this._legalContinuation(fen, pv);
+    const consequences = [];
+    for (const move of line) {
+      if (move.mate) { consequences.push(`${move.san} is checkmate`); break; }
+      if (move.captured) consequences.push(`${move.san} captures the ${this.pieceNames[move.captured]} on ${move.to}`);
+      if (move.promotion) consequences.push(`${move.san} promotes the pawn to a ${this.pieceNames[move.promotion]}`);
+    }
+    if (line.length < 2) return '';
+    const important = [...consequences.filter(text => /checkmate/.test(text)), ...consequences.filter(text => !/checkmate/.test(text))].slice(0, 2);
+    return `${label} ${line.map(move => move.san).join(' ')}.${important.length ? ` ${important.join('; ')}.` : ''}`;
+  }
+
+  _legalContinuation(fen, pv) {
+    const chess = new Chess();
+    if (!fen || !pv || !chess.load(fen)) return [];
+    const line = [];
+    for (const token of String(pv).split(/\s+/).slice(0, 10)) {
+      const move = /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(token)
+        ? chess.move({ from: token.slice(0, 2), to: token.slice(2, 4), promotion: token[4] })
+        : chess.move(token);
+      if (!move) break;
+      line.push({ ...move, fen: chess.fen(), mate: chess.in_checkmate() });
+      if (chess.game_over()) break;
+    }
+    return line;
   }
 
   _pick(arr) {
@@ -446,7 +501,7 @@ class BrowserMoveCoach {
     if (threat.in === 2) {
       return move ? `${move} forces mate in 2` : 'there is a forced mate in 2';
     }
-    return move ? `${move} launches a winning attack` : 'the attack is decisive';
+    return move ? `${move} starts the reported mating line` : 'the engine reports a mating line';
   }
 
   _mateConsequence(payload) {
@@ -504,23 +559,22 @@ class BrowserMoveCoach {
       return `after their slip with ${payload.priorOpponentMoveSan}`;
     }
     if (payload.priorOpponentMoveSan && payload.priorOpponentThreat) {
-      return `after ${payload.priorOpponentMoveSan} intensified the attack`;
+      return `after ${payload.priorOpponentMoveSan}`;
     }
     return '';
   }
 
   _winningLineSnippet(payload) {
-    const pv = payload.opponentPvSan || '';
-    if (!pv) return '';
-    const moves = pv.split(/\s+/).filter(Boolean).slice(0, 4);
-    if (moves.length < 2) return '';
-    return `The line runs ${moves.join(' ')}.`;
+    return this._continuationExplanation(payload.fenAfter, payload.opponentPvSan || payload.opponentPv, 'The line runs');
   }
 
   _suggestBetterMove(payload, betterSan, betterReason, mateConsequence = '') {
     if (!betterSan) return '';
-    if (mateConsequence && /^K/.test(betterSan)) {
-      return `Better was ${betterSan}, tucking the king to safety.`;
+    const board = new Chess(payload.fenBefore);
+    const better = board.move(betterSan);
+    if (better && !mateConsequence) {
+      const insight = this._pickMoveInsight({ ...payload, fenAfter: board.fen() }, better);
+      if (insight) return `Better was ${betterSan}. ${this._capitalize(this._simplifyLesson(this._readableLesson(insight, board.fen())))}`;
     }
     if (mateConsequence && (!betterReason || betterReason === 'improves the position')) {
       return `Better was ${betterSan} to stop the mating attack.`;
@@ -546,20 +600,18 @@ class BrowserMoveCoach {
     }
 
     const insight = this._pickMoveInsight(payload, moveInfo);
-    const enriched = insight || this._positionalFallback(payload, moveInfo);
+    const enriched = this._readableLesson(insight || this._positionalFallback(payload, moveInfo), payload.fenAfter);
     const isInForcedMateBefore = payload.playerEdgeBefore <= -9000;
     const gainClause = this._gainClause(payload);
 
     if (key === 'BOOK') {
       const openingName = payload.openingName || '';
-      return openingName
-        ? `${san} is standard theory in the ${openingName} — a well-trodden move that has stood the test of time.`
-        : `${san} is a standard book move that follows well-established opening principles.`;
+      return this._joinSentences([`${san} is a book move${openingName ? ` in the ${openingName}` : ''}`, enriched]);
     }
 
     if (key === 'BEST') {
       if (isInForcedMateBefore) {
-        return `${san} is the most resilient defense — it delays the forced mate as long as possible in a difficult position.`;
+        return `${san} is the engine's recommended defense in a position it evaluated as a forced mate for the opponent.`;
       }
       if (enriched) {
         return this._composeBestMove(san, enriched, payload, moveInfo);
@@ -568,10 +620,13 @@ class BrowserMoveCoach {
     }
 
     if (key === 'EXCELLENT') {
-      const reason = enriched
-        ? `${this._cleanInsight(enriched)}, nearly as strong as the engine's first choice`
-        : 'keeps pace with the best continuation';
-      return this._composeGoodLead(san, `an excellent move — ${reason}`, gainClause);
+      const reason = enriched ? ` — ${this._cleanInsight(enriched)}` : '';
+      const comparison = payload.bestMoveSan
+        && !this.analyzer._sameMoveSan(payload.bestMoveSan, san)
+        && Number.isFinite(payload.cpLoss) && payload.cpLoss > 0 && payload.cpLoss <= 50
+        ? `The engine preferred ${payload.bestMoveSan}; the estimated evaluation loss is ${(payload.cpLoss / 100).toFixed(2)} pawns.`
+        : '';
+      return this._joinSentences([`${san} is an excellent move${reason}`, comparison]);
     }
 
     if (key === 'GOOD') {
@@ -581,14 +636,12 @@ class BrowserMoveCoach {
         const reason = enriched
           ? this._cleanInsight(enriched)
           : '';
-        return reason
-          ? `${san} is a reasonable move, though ${payload.bestMoveSan} was marginally more precise — ${reason}.`
-          : `${san} is a reasonable move, though ${payload.bestMoveSan} was slightly stronger here.`;
+        return this._joinSentences([`${san} is rated as a good move${reason ? ` — ${reason}` : ''}`, `The engine selected ${payload.bestMoveSan} instead`]);
       }
       const reason = enriched ? this._cleanInsight(enriched) : '';
       return reason
-        ? `${san} is a solid choice that maintains a good position — ${reason}.`
-        : `${san} is a solid move that maintains the balance of the position.`;
+        ? `${san} is rated as a good move — ${reason}.`
+        : `${san} is rated as a good move by the engine.`;
     }
 
     return enriched
@@ -627,24 +680,12 @@ class BrowserMoveCoach {
 
   // Natural-language checkmate explanation — no templates, no puns.
   _explainCheckmate(payload, moveInfo, san) {
-    const piece = moveInfo.piece ? this.pieceNames[moveInfo.piece] || 'piece' : 'piece';
-    const to = moveInfo.to || '';
-    const colorName = moveInfo.color === 'w' ? 'White' : 'Black';
-
-    // Check if it's a capture mate
-    if (moveInfo.captured) {
-      const captured = this.pieceNames[moveInfo.captured] || 'piece';
-      return `${san} is checkmate. By capturing the ${captured} on ${to}, ${colorName} delivers a mating blow — the enemy king has no escape.`;
-    }
-
-    // Check if it's a sacrifice mate (piece was not captured before)
-    const sacResult = this.analyzer.checkSacrifice(new Chess(payload.fenBefore), san);
-    if (sacResult.isPieceSacrifice) {
-      return `${san} is checkmate — a powerful sacrifice on ${to} leaves the king completely paralyzed with no legal response.`;
-    }
-
-    // Standard checkmate
-    return `${san} is checkmate. ${colorName} delivers the finishing blow on ${to}, and the king has nowhere to run.`;
+    const opponent = moveInfo.color === 'w' ? 'b' : 'w';
+    const king = this._kingSquare(payload.fenAfter, opponent);
+    return this._joinSentences([`${san} is checkmate`,
+      moveInfo.captured ? `It captures the ${this.pieceNames[moveInfo.captured]} on ${moveInfo.to}` : '',
+      moveInfo.promotion ? `The pawn promotes to a ${this.pieceNames[moveInfo.promotion]} on ${moveInfo.to}` : '',
+      `The king on ${king} is in check, and ${opponent === 'w' ? 'White' : 'Black'} has no legal reply`]);
   }
 
   // Compose a natural BEST move explanation: the assessment, the tactical or
@@ -660,59 +701,40 @@ class BrowserMoveCoach {
   }
 
   _explainGreat(payload, move, san) {
-    const insight = this._pickMoveInsight(payload, move) || this._positionalFallback(payload, move);
-    const gain = payload.playerEdgeAfter - payload.playerEdgeBefore;
-    // Use a more nuanced direction that accounts for small swings (e.g. a simple
-    // queen trade in a balanced game) so "swings what was a balanced game" isn't
-    // applied to moves that barely change the evaluation.
-    //   playerEdgeBefore <= -300   → pulling back from bad position
-    //   playerEdgeBefore >=  300   → converting a winning position
-    //   gain >= 350                → massive swing from a balanced position
-    //   gain >= 200                → significant improvement from a balanced position
-    //   gain >= 100                → modest improvement from a balanced position
-    //   otherwise                  → minor improvement, describe concretely
-    let direction;
-    if (payload.playerEdgeBefore <= -300) {
-      direction = 'pulls the position back from the brink and dramatically shifts the momentum';
-    } else if (payload.playerEdgeBefore >= 300) {
-      direction = 'turns an already favorable position into a crushing one';
-    } else if (gain >= 350) {
-      // A genuine decisive gain from a starting point close to equal — not just
-      // a queen trade or equal exchange that the engine rates slightly higher.
-      direction = 'swings what was a balanced game firmly in your favor';
-    } else if (gain >= 200) {
-      direction = 'creates a significant advantage from a roughly balanced position';
-    } else {
-      direction = 'shifts the momentum in your favor — the engine\'s evaluation climbs as a result';
-    }
-    return insight
-      ? `${san} is a great move that ${direction}. ${this._capitalize(insight)}`
-      : `${san} is a great move that ${direction}.`;
+    const insight = this._readableLesson(this._pickMoveInsight(payload, move) || this._positionalFallback(payload, move), payload.fenAfter);
+    return this._joinSentences([`${san} is rated as a great move`, insight, this._gainClause(payload)]);
   }
 
   _explainBrilliant(payload, moveInfo, san) {
     const drawResource = this.analyzer._acceptedOfferDrawResource(payload.fenBefore, payload.moveSan);
     if (drawResource) {
-      return `${san} is brilliant — it offers material, but if the opponent captures, the resulting position leads to a forced draw.`;
+      const drawn = new Chess(payload.fenAfter);
+      drawn.move(drawResource.captureSan);
+      const reason = drawn.in_stalemate() ? 'stalemate' : drawn.insufficient_material() ? 'insufficient material' : 'a drawn position';
+      return `${san} offers the ${this.pieceNames[drawResource.capturedPiece]} on ${drawResource.square}. If ${drawResource.captureSan}, the result is ${reason}.`;
     }
 
     const mateTrap = this.analyzer._mateTrapSacrifice(payload.fenBefore, payload.moveSan);
     if (mateTrap) {
-      const bait = mateTrap.captureSan || 'the piece';
-      const finish = mateTrap.mateSan ? `, checkmate follows with ${mateTrap.mateSan}` : ', checkmate follows';
-      return `${san} is a brilliant trap — if the opponent takes the bait with ${bait}${finish}.`;
+      return `${san} sets a mating trap: if ${mateTrap.captureSan}, ${mateTrap.mateSan} is checkmate. The capture is a legal option, not a forced reply.`;
     }
 
     const offer = this.analyzer._materialOfferAfterMove(payload.fenBefore, payload.moveSan);
     if (offer) {
       const offered = this.pieceNames[offer.captured] || 'piece';
-      return `${san} is a brilliant sacrifice — the ${offered} is offered as bait to fuel a decisive attack that the opponent will struggle to defend.`;
+      const capture = moveInfo.captured ? ` captures the ${this.pieceNames[moveInfo.captured]} on ${moveInfo.to} and offers` : ' offers';
+      const line = this._legalContinuation(payload.fenAfter, payload.opponentPvSan || payload.opponentPv);
+      const accepted = line[0]?.to === offer.to && line[0]?.captured === offer.captured;
+      const payoff = accepted && line.slice(1).find(move => move.color === moveInfo.color && (move.captured || move.mate || move.promotion));
+      const compensation = payoff
+        ? `In the engine line, after ${line[0].san}, ${payoff.san}${payoff.mate ? ' is checkmate' : payoff.promotion ? ` promotes to a ${this.pieceNames[payoff.promotion]}` : ` captures the ${this.pieceNames[payoff.captured]} on ${payoff.to}`}.`
+        : line.length ? 'The engine continuation below shows the follow-up; it does not establish that every capture of the offered piece loses.'
+        : 'The review rates this as brilliant, but no continuation was saved to establish the compensation after the capture.';
+      return `${san}${capture} the ${offered} on ${offer.to}: the opponent can play ${offer.san} to capture it. ${compensation}`;
     }
 
     const insight = this._pickMoveInsight(payload, moveInfo);
-    return insight
-      ? `${san} is a brilliant move — one of those sharp, hard-to-find ideas that can easily be missed at the board. ${this._capitalize(insight)}`
-      : `${san} is a brilliant find — a deep and creative idea that most players would overlook, even with time to think.`;
+    return this._joinSentences([`${san} is rated as brilliant by the review`, insight || this._positionalFallback(payload, moveInfo)]);
   }
 
   _pickMoveInsight(payload, move) {
@@ -740,11 +762,11 @@ class BrowserMoveCoach {
     const piece = this.pieceNames[move.piece] || 'piece';
 
     if (san.endsWith('#')) return 'it delivers checkmate, ending the game on the spot.';
-    if (san.endsWith('+')) return 'it forces a reply with check, keeping the opponent on the defensive.';
+    if (san.endsWith('+')) return 'it gives check.';
 
     if (move.flags?.includes('k') || move.flags?.includes('q')) {
       const side = move.flags?.includes('k') ? 'kingside' : 'queenside';
-      return `it castles ${side}, tucking the king to safety and bringing a rook toward the center.`;
+      return `it castles ${side}, moving both the king and rook.`;
     }
 
     if (move.captured) {
@@ -752,48 +774,46 @@ class BrowserMoveCoach {
     }
 
     if (move.piece && this.center.has(move.to)) {
-      return `the ${piece} takes up a strong central position, increasing its influence over the board.`;
+      return `the ${piece} moves to the central square ${move.to}.`;
     }
     if (move.piece && this.extendedCenter.has(move.to)) {
-      return `the ${piece} supports central influence from ${move.to}.`;
+      return `the ${piece} moves to ${move.to}, near the center.`;
     }
 
     if (move.piece === 'p') {
-      const ply = payload.movePly || 0;
-      if (ply <= 6) return 'this pawn move shapes the pawn structure and fights for the center.';
-      return 'this pawn move adjusts the structure and asserts control over key squares.';
+      return `the pawn advances from ${move.from} to ${move.to}.`;
     }
 
     if (move.piece === 'n') {
       const edge = /^[ah]/.test(move.to);
       return edge
         ? `the knight moves to ${move.to} on the edge of the board, where it typically has less influence.`
-        : `the knight moves to ${move.to}, improving its activity and expanding its scope.`;
+        : `the knight moves from ${move.from} to ${move.to}.`;
     }
 
     if (move.piece === 'b') {
-      return `the bishop moves to ${move.to}, controlling important diagonals across the board.`;
+      return `the bishop moves from ${move.from} to ${move.to}.`;
     }
 
     if (move.piece === 'r') {
-      return `the rook moves to ${move.to}, improving its position and contesting open files and ranks.`;
+      return `the rook moves from ${move.from} to ${move.to}.`;
     }
 
     if (move.piece === 'q') {
-      return `the queen takes up an active position on ${move.to}, adding significant pressure to the position.`;
+      return `the queen moves from ${move.from} to ${move.to}.`;
     }
 
     if (move.piece === 'k') {
-      return `the king moves to ${move.to}, improving its safety.`;
+      return `the king moves from ${move.from} to ${move.to}.`;
     }
 
-    return `it has improved the ${piece}'s placement on ${move.to}.`;
+    return `the ${piece} moves from ${move.from} to ${move.to}.`;
   }
 
   _playedMoveNote(payload, move) {
     const san = move.san || payload.moveSan || '';
     if (san.endsWith('#')) return 'it delivers checkmate';
-    if (san.endsWith('+')) return 'it gives check without a real follow-up';
+    if (san.endsWith('+')) return 'it gives check';
     if (move.captured) {
       return `it captures the ${this.pieceNames[move.captured] || 'piece'} on ${move.to}`;
     }
@@ -891,7 +911,7 @@ class BrowserMoveCoach {
 
     if (ply === 1) statements.push('This move begins the game and sets the pawn structure.');
     if (move.flags?.includes('k') || move.flags?.includes('q')) {
-      statements.push(`${colorName} castles, improving king safety and connecting the rooks.`);
+      statements.push(`${colorName} castles ${move.flags.includes('k') ? 'kingside' : 'queenside'}, moving both the king and rook.`);
     }
 
     if (ply <= 16 && move.piece && move.piece !== 'p' && this._isBackRank(move.from, move.color) && !this._isBackRank(move.to, move.color)) {
@@ -917,7 +937,7 @@ class BrowserMoveCoach {
       return p && p.color !== move.color;
     });
     if (centerAttacks.length >= 2 || centerEnemy) {
-      statements.push(`The ${piece} bears on the center.`);
+      statements.push(`The ${piece} attacks the central ${centerAttacks.length === 1 ? 'square' : 'squares'} ${centerAttacks.join(' and ')} from ${move.to}.`);
     }
 
     if (move.piece === 'p' && this._opensHomeDiagonal(payload.fenBefore, move)) {
@@ -983,7 +1003,7 @@ class BrowserMoveCoach {
     const fork = this._forkLesson(payload.fenAfter, move.to, move.color, move.piece, move, 'This move');
     if (fork) lessons.push(fork);
 
-    const lineTactic = this._lineTacticLesson(payload.fenAfter, move.to, move.color, move.piece, 'This move');
+    const lineTactic = this._lineTacticLesson(payload.fenAfter, move.to, move.color, move.piece, 'This move', payload.fenBefore, move.from);
     if (lineTactic) lessons.push(lineTactic);
 
     const discovered = this._discoveredAttackLesson(payload, move);
@@ -1016,26 +1036,26 @@ class BrowserMoveCoach {
       .filter((entry) => entry.piece.type !== 'k' && (this.pieceValues[entry.piece.type] || 0) >= 3)
       .sort((a, b) => (this.pieceValues[b.piece.type] || 0) - (this.pieceValues[a.piece.type] || 0));
 
-    // A genuine fork attacks at least two valuable targets simultaneously.
-    // King + one other piece (e.g. a queen giving check while also attacking a
-    // lone bishop) is NOT a fork — the check+attack pattern is just a tactical
-    // threat, not a true fork. Require king + >=2 non-king targets, or >=2
-    // non-king targets without a king involved.
-    if (king && targets.length >= 2) {
+    // Check plus another target is a geometric fork, but the attacker may
+    // itself be captured. Describe the legal defense rather than implying
+    // that the pattern necessarily wins material (e.g. Opera Game ...Qb4+).
+    const board = new Chess(fen);
+    const accepting = board.moves({ verbose: true }).find(reply => reply.to === square && reply.captured === type);
+    if (king && targets.length >= 1) {
       const target = targets[0];
-      return `${prefix} creates a fork — it delivers check while simultaneously attacking the ${this.pieceNames[target.piece.type]} on ${target.square}.`;
+      return `${prefix} checks the king on ${king.square} while attacking the ${this.pieceNames[target.piece.type]} on ${target.square}.${accepting ? ` The ${this.pieceNames[type]} can be captured with ${accepting.san}; the attack alone does not prove a material win.` : ''}`;
     }
 
     if (targets.length >= 2) {
       const first = targets[0];
       const second = targets[1];
-      return `${prefix} creates a fork — the ${this.pieceNames[type] || 'piece'} attacks both the ${this.pieceNames[first.piece.type]} on ${first.square} and the ${this.pieceNames[second.piece.type]} on ${second.square}.`;
+      return `${prefix} attacks both the ${this.pieceNames[first.piece.type]} on ${first.square} and the ${this.pieceNames[second.piece.type]} on ${second.square}.${accepting ? ` The attacker can be captured with ${accepting.san}.` : ''}`;
     }
 
     return '';
   }
 
-  _lineTacticLesson(fen, square, color, type, prefix = 'This move') {
+  _lineTacticLesson(fen, square, color, type, prefix = 'This move', fenBefore = '', from = '') {
     const directions = this._lineDirections(type);
     if (directions.length === 0) return '';
 
@@ -1063,18 +1083,25 @@ class BrowserMoveCoach {
           const backValue = this.pieceValues[piece.type] || 0;
 
           if (piece.type === 'k') {
-            return `${prefix} creates a pin — the ${frontName} on ${front.square} is pinned to the king on ${targetSquare}, and cannot move without exposing the king.`;
+            const action = this._existingLine(fenBefore, from, type, color, front, targetSquare) ? 'maintains' : 'creates';
+            return `${prefix} ${action} a pin — the ${frontName} on ${front.square} shields the king on ${targetSquare} from the ${this.pieceNames[type]} on ${square}. It cannot leave this line unless the check is prevented, for example by capturing the attacker.`;
           }
 
           if (backValue > frontValue && backValue >= 5) {
-            return `${prefix} creates a relative pin — moving the ${frontName} on ${front.square} would expose the more valuable ${backName} on ${targetSquare}.`;
+            const context = this._relativePinContext(fen, square, color, front.square, targetSquare);
+            // Alignment alone is insufficient: a pawn advancing along the file
+            // still blocks it, and a pinned attacker may not have a legal capture.
+            if (context) {
+              const action = this._existingLine(fenBefore, from, type, color, front, targetSquare) ? 'maintains' : 'creates';
+              return `${prefix} ${action} a relative pin along ${square}–${targetSquare} — the ${frontName} on ${front.square} shields the ${backName} on ${targetSquare}. If ${context.departure}, ${context.capture} is a legal capture of that ${backName}${context.blocking ? `; ${context.blocking} keeps the line blocked` : ''}. This is a possible continuation, not a forced win.`;
+            }
           }
 
           if ((front.piece.type === 'k' || frontValue > backValue) && frontValue >= 5) {
             if (front.piece.type === 'k') {
-              return `${prefix} creates a skewer — the king on ${front.square} must move, exposing the ${backName} on ${targetSquare} to capture.`;
+              return `${prefix} checks the king on ${front.square}, with the ${backName} on ${targetSquare} behind it on the same line. Whether this wins material depends on the reply.`;
             }
-            return `${prefix} creates a skewer — once the ${frontName} on ${front.square} is forced to move, the ${backName} on ${targetSquare} will be vulnerable.`;
+            return `${prefix} attacks the ${frontName} on ${front.square}, with the ${backName} on ${targetSquare} behind it on the same line. Moving off the line could expose the ${backName}; it is not necessarily forced.`;
           }
         }
         break;
@@ -1082,6 +1109,35 @@ class BrowserMoveCoach {
     }
 
     return '';
+  }
+
+  _existingLine(fen, from, type, color, front, targetSquare) {
+    if (!fen || !from) return false;
+    const board = this._boardMap(fen);
+    if (board[from]?.type !== type || board[from]?.color !== color
+      || board[front.square]?.type !== front.piece.type || board[front.square]?.color !== front.piece.color) return false;
+    return this._guardsSquare(fen, from, { type, color }, front.square, color)
+      && this._squaresBetween(from, targetSquare).includes(front.square)
+      && this._squaresBetween(front.square, targetSquare).every((sq) => !board[sq]);
+  }
+
+  _relativePinContext(fen, attackerSquare, color, frontSquare, backSquare) {
+    const chess = new Chess(fen);
+    if (chess.turn() === color) return null;
+    let exposed = null;
+    let blocking = '';
+    for (const candidate of chess.moves({ square: frontSquare, verbose: true })) {
+      chess.move(candidate);
+      const attacker = chess.get(attackerSquare);
+      if (attacker?.color === color) {
+        const capture = chess.moves({ square: attackerSquare, verbose: true })
+          .find((reply) => reply.to === backSquare && reply.captured);
+        if (capture && !exposed) exposed = { departure: candidate.san, capture: capture.san };
+        else if (this._squaresBetween(attackerSquare, backSquare).includes(candidate.to)) blocking ||= candidate.san;
+      }
+      chess.undo();
+    }
+    return exposed ? { ...exposed, blocking } : null;
   }
 
   _discoveredAttackLesson(payload, move) {
@@ -1115,22 +1171,24 @@ class BrowserMoveCoach {
 
     if (defendedTargets.length === 0) return '';
     const target = defendedTargets.sort((a, b) => (this.pieceValues[b.piece.type] || 0) - (this.pieceValues[a.piece.type] || 0))[0];
-    return `removing the defender — by taking the ${this.pieceNames[capturedDefender.type] || 'piece'}, the ${this.pieceNames[target.piece.type]} on ${target.square} is left without protection and can be picked off next.`;
+    if (this._isDefended(payload.fenAfter, target.square, target.piece.color)) return '';
+    return `it removes a defender — capturing the ${this.pieceNames[capturedDefender.type] || 'piece'} leaves the ${this.pieceNames[target.piece.type]} on ${target.square} undefended and under attack. Whether it can be won depends on the reply.`;
   }
 
   _backRankLesson(fenAfter, move) {
     if (!fenAfter || !/[+#]$/.test(move?.san || '')) return '';
+    if (!['r', 'q'].includes(move.piece)) return '';
     const board = new Chess(fenAfter);
     if (!board.in_check()) return '';
     const opponent = move.color === 'w' ? 'b' : 'w';
     const kingSquare = this._kingSquare(fenAfter, opponent);
     const homeRank = opponent === 'w' ? '1' : '8';
-    if (!kingSquare || kingSquare[1] !== homeRank) return '';
+    if (!kingSquare || kingSquare[1] !== homeRank || move.to[1] !== homeRank) return '';
 
     const kingMoves = board.moves({ verbose: true })
       .filter((candidate) => candidate.piece === 'k');
-    if (kingMoves.length > 1) return '';
-    return "creating back-rank pressure — the opponent's king is confined to the back rank with no flight square, making it highly vulnerable to a rook or queen check along the back rank.";
+    if (kingMoves.length) return '';
+    return `it checks the king on ${kingSquare} along the back rank. The king has no legal move in this position; a defense must block or capture the checking piece.`;
   }
 
   _loosePieceLesson(fen, square, color, type) {
@@ -1138,7 +1196,7 @@ class BrowserMoveCoach {
       .filter((entry) => entry.piece.type !== 'k' && (this.pieceValues[entry.piece.type] || 0) >= 3)
       .find((entry) => !this._isDefended(fen, entry.square, entry.piece.color));
     if (!target) return '';
-    return `the opponent's ${this.pieceNames[target.piece.type]} on ${target.square} is left undefended, and this move puts immediate pressure on it.`;
+    return `the opponent's ${this.pieceNames[target.piece.type]} on ${target.square} is undefended, and this move attacks it.`;
   }
 
 	  _describeOpponentReply(payload) {
@@ -1188,18 +1246,13 @@ class BrowserMoveCoach {
     } else if (highValueTarget && (this.pieceValues[highValueTarget.piece.type] || 0) >= 3) {
       threats.push(`attacks your ${this.pieceNames[highValueTarget.piece.type]} on ${highValueTarget.square}`);
     } else if (reply.captured) {
-      threats.push(`wins your ${this.pieceNames[reply.captured] || 'piece'} on ${reply.to}`);
+      threats.push(`captures your ${this.pieceNames[reply.captured] || 'piece'} on ${reply.to}`);
     }
 
-		    if (check && highValueTarget && reply.piece === 'q') {
-		      return `${reply.san} forks your king and ${this.pieceNames[highValueTarget.piece.type]} on ${highValueTarget.square}`;
-		    }
+    const replyFork = this._forkLesson(replyFen, reply.to, reply.color, reply.piece, reply, reply.san);
+    if (replyFork) return replyFork;
 
-		    if (check && highValueTarget) {
-		      return `${reply.san} forks your king and ${this.pieceNames[highValueTarget.piece.type]} on ${highValueTarget.square}`;
-		    }
-
-    const replyLineTactic = this._lineTacticLesson(replyFen, reply.to, reply.color, reply.piece, reply.san);
+    const replyLineTactic = this._lineTacticLesson(replyFen, reply.to, reply.color, reply.piece, reply.san, payload.fenAfter, reply.from);
     if (replyLineTactic) return this._simplifyLesson(replyLineTactic.replace(/^The reply /, ''));
 
 		    if (threats.length > 0) {
@@ -1212,7 +1265,7 @@ class BrowserMoveCoach {
       return `${colorName} sidesteps the check with ${reply.san}`;
     }
 
-    return '';
+    return `${reply.san} is the engine's recommended reply`;
   }
 
   _replyTradeContext(payload, reply) {
@@ -1245,11 +1298,8 @@ class BrowserMoveCoach {
     const won = this.pieceNames[playerMove.captured] || 'piece';
     const lost = this.pieceNames[reply.captured] || 'piece';
 
-    if (capturedValue >= recapturedValue) {
-      return `${reply.san} trades your ${lost} for their ${won}, but the resulting position is still worse`;
-    }
-
-    return `${reply.san} recaptures and you lose material in the exchange`;
+    const net = capturedValue - recapturedValue;
+    return `${reply.san} recaptures your ${lost} on ${reply.to}${reply.san.endsWith('+') ? ' with check' : ''}. In these two captures, you take a ${won} and give up a ${lost}${net > 0 ? `, a gain of ${net} material point${net === 1 ? '' : 's'}` : net < 0 ? `, a loss of ${-net} material point${net === -1 ? '' : 's'}` : ', an equal material exchange'}. Material alone does not explain the evaluation; compare the continuation`;
   }
 
   _isBackRank(square, color) {
@@ -1707,9 +1757,9 @@ class MoveAnalyzer {
     if (!move) return '';
 
     if (/#$/.test(move.san)) return 'delivers checkmate';
-    if (move.captured) return `wins the ${this._pieceName(move.captured)} on ${move.to}`;
+    if (move.captured) return `captures the ${this._pieceName(move.captured)} on ${move.to}`;
     if (move.promotion) return 'promotes the pawn';
-    if (/\+$/.test(move.san)) return 'keeps the initiative with a check';
+    if (/\+$/.test(move.san)) return 'gives check';
     return 'improves the position';
   }
 
@@ -2307,9 +2357,10 @@ class MoveAnalyzer {
 	      if (Date.now() - start > 16) return null;
 	      const playedAttack = board.move(attack.san);
 	      if (!playedAttack) continue;
-	      const replies = board.moves({ verbose: true }).slice(0, 28);
+	      const replies = board.moves({ verbose: true });
 	      let forced = replies.length > 0;
-	      for (const reply of replies.slice(0, 56)) {
+	      for (const reply of replies) {
+            if (Date.now() - start > 16) { board.undo(); return null; }
 	        const playedReply = board.move(reply.san);
 	        const mateNext = playedReply ? this._immediateMateMove(board.fen()) : null;
 	        if (playedReply) board.undo();
@@ -2331,6 +2382,48 @@ class MoveAnalyzer {
     const key = this.getClassificationKey(payload.classification);
     const san = payload.moveSan || 'This move';
     return `${san} is classified as ${MoveClassification[key]?.name?.toLowerCase() || 'worth reviewing'}.`;
+  }
+
+  matchesExplanationPosition(result, displayedFen) {
+    const board = new Chess();
+    if (!board.load(result?.fenBefore || result?.fen || '')) return false;
+    if (!board.move(result.moveSan || result.move)) return false;
+    // Clocks are irrelevant to the move's geometry, but side to move,
+    // castling and en-passant rights must agree with the displayed game.
+    const key = fen => String(fen || '').split(/\s+/).slice(0, 4).join(' ');
+    return key(board.fen()) === key(displayedFen);
+  }
+
+  explainResult(result) {
+    // Rebuild saved commentary with today's board checks, without modifying
+    // stored engine scores, classifications, or game data.
+    return this._coachingText({
+      ...result,
+      classification: MoveClassification[result.classificationKey] || result.classification,
+      fenBefore: result.fenBefore || result.fen,
+      moveSan: result.moveSan || result.move,
+      scoreBefore: result.evalBefore,
+      scoreAfter: result.evalAfter,
+      playerEdgeBefore: result.playerEdgeBefore ?? (result.isWhite ? result.evalBefore : -result.evalBefore),
+      playerEdgeAfter: result.playerEdgeAfter ?? (result.isWhite ? result.evalAfter : -result.evalAfter),
+      isBestMove: this._sameMoveSan(result.moveSan || result.move, result.bestMoveSan),
+      mateThreat: null,
+    });
+  }
+
+  explanationVariations(result) {
+    const fen = result.fenBefore || result.fen;
+    const board = new Chess();
+    if (!board.load(fen || '')) return [];
+    const played = board.move(result.moveSan || result.move);
+    if (!played) return [];
+    const best = this.coach._legalContinuation(fen, result.bestMovePvSan || result.bestMovePv);
+    const reply = this.coach._legalContinuation(board.fen(), result.opponentPvSan || result.opponentPv);
+    const after = reply.length ? reply : best[0]?.san === played.san ? best.slice(1) : [];
+    const variations = [];
+    if (after.length) variations.push({ label: 'After the played move', text: `After the played move, the engine line is ${after.map(move => move.san).join(' ')}.` });
+    if (best.length && best[0].san !== played.san) variations.push({ label: 'Engine alternative', text: `Compare the engine line ${best.map(move => move.san).join(' ')}.` });
+    return variations;
   }
 
   _lineToSan(fen, pvUci, maxPlies = 6) {
@@ -2799,6 +2892,8 @@ class MoveAnalyzer {
         opponentBestMoveSan,
         bestMovePv: evals[i].pv,
         bestMovePvSan: evals[i].pvSan,
+        opponentPvSan,
+        opponentPv: evals[i + 1]?.pv || '',
 	        alternatives,
 	        depth: evals[i].depth,
 	        fen,
@@ -2833,6 +2928,7 @@ class MoveAnalyzer {
           priorOpponentThreat,
           mateThreat,
           opponentPvSan,
+          bestMovePvSan: evals[i].pvSan,
           fenBefore: fen,
           fenAfter,
           openingName: opening ? (opening.ecoName || opening.name || '') : '',
@@ -3126,3 +3222,7 @@ window.MoveClassification = MoveClassification;
 window.CLASSIFICATION_ORDER = CLASSIFICATION_ORDER;
 window.MoveAnalyzer = MoveAnalyzer;
 window.clamp = clamp;
+// The retained UI controller consumes these PGN clock helpers.
+window.parseClock = parseClock;
+window.parseBaseClock = parseBaseClock;
+window.moveTimesFromPgn = moveTimesFromPgn;

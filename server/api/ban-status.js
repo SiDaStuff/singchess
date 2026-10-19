@@ -18,7 +18,7 @@ exports.handler = async (event) => {
     } catch (_err) { /* not authenticated */ }
     if (!isOwner) return json(200, { banned: !!result.banned });
     return json(200, result);
-  } catch (_err) {
+  } catch (err) {
     // Fail CLOSED on backend errors. Previously any error (e.g. a Firebase
     // outage) returned banned:false, which transiently "unbanned" every banned
     // account client-side. Return 5xx so the client can distinguish "not

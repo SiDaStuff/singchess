@@ -1,0 +1,65 @@
+.coach-card { display: grid; gap: 18px; }
+.coach-dialog { padding: 14px; border-radius: 7px; background: var(--bg-muted); color: var(--text-secondary); font-size: 12px; }
+.coach-state { color: var(--accent); font-size: 10px; }
+.coach-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 10px; }
+.coach-action { min-height: 44px; }
+.puzzle-level-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.puzzle-level-chip { position: relative; display: flex; flex-direction: column; gap: 4px; align-items: center; padding: 12px 6px; background: var(--bg-muted); border: 1px solid var(--border-color); border-radius: 7px; cursor: pointer; }
+.puzzle-level-chip input { position: absolute; opacity: 0; height: 1px; width: 1px; }
+.puzzle-level-chip span { font-size: 10px; }
+.puzzle-level-chip small { font: 9px var(--font-mono); color: var(--text-muted); }
+.puzzle-level-chip:has(input:checked) { border-color: var(--accent); color: var(--accent); background: var(--surface-selected); }
+.puzzle-level-chip:has(input:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.puzzle-level-embed { display: flex; align-items: center; gap: 14px; padding: 12px; border-radius: 8px; background: var(--bg-muted); border: 1px solid var(--border-soft); }
+.puzzle-level-embed-preview { display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, 1fr); aspect-ratio: 1; width: 100px; flex-shrink: 0; border-radius: 5px; overflow: hidden; }
+.puzzle-level-embed-meta { display: grid; gap: 7px; }
+.puzzle-level-embed-meta strong { font-size: 12px; }
+.puzzle-level-embed-meta > span { color: var(--text-muted); font-size: 10px; }
+.puzzle-level-embed-meta .btn { justify-self: start; min-height: 36px; padding: 8px 12px; font-size: 10px; }
+.puzzle-success-overlay { position: absolute; inset: 0; z-index: 20; border-radius: var(--card-radius); background: color-mix(in srgb, var(--bg-panel) 73%, transparent); display: grid; place-items: center; pointer-events: none; }
+.puzzle-success-check { color: var(--accent); }
+.puzzle-success-check .material-symbols-outlined { font-size: 80px; }
+.puzzle-loading .puzzle-meta strong { opacity: .45; }
+.puzzle-status.loading, .anticheat-status.loading { display: flex; align-items: center; gap: 10px; }
+.puzzle-status.loading::before, .anticheat-status.loading::before { content: ''; width: 14px; height: 14px; flex-shrink: 0; border: 2px solid var(--border-color); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+.notification-item { display: flex; gap: 8px; padding: 12px 8px; border-bottom: 1px solid var(--border-soft); border-radius: 5px; }
+.notification-item:hover { background: var(--bg-elevated); }
+.notification-item-dot { margin-top: 5px; width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: var(--accent); opacity: 0; }
+.notification-item-unread .notification-item-dot { opacity: 1; }
+.notification-item-body { flex: 1; min-width: 0; }
+.notification-item-title { font-size: 10px; font-weight: 550; overflow-wrap: anywhere; }
+.notification-item-text, .notification-item-time { font-size: 9px; color: var(--text-muted); overflow-wrap: anywhere; margin-top: 4px; }
+.notification-item-delete { flex-shrink: 0; width: 22px; height: 26px; border: 0; padding: 0; background: transparent; color: var(--text-muted); }
+.notification-item-delete .material-symbols-outlined { font-size: 15px; }
+.notification-item-delete:hover { color: var(--clr-blunder); }
+.notification-empty { font-size: 10px; color: var(--text-muted); padding: 6px 8px; }
+.import-results { display: grid; gap: 7px; max-height: 390px; overflow: auto; }
+.import-result { width: 100%; text-align: left; display: flex; align-items: center; gap: 10px; background: var(--bg-muted); border: 1px solid var(--border-soft); border-radius: 6px; padding: 12px; color: var(--text-primary); }
+.import-result:hover { border-color: var(--accent); }
+.import-result-badge { font: 10px var(--font-mono); background: var(--bg-elevated); border-radius: 4px; padding: 5px; flex-shrink: 0; }
+.import-result-main { min-width: 0; flex: 1; display: grid; gap: 4px; }
+.import-result-title { font-size: 11px; display: flex; flex-wrap: wrap; gap: 5px; }
+.import-result-elo, .import-result-vs, .import-result-subtitle { color: var(--text-muted); font-size: 9px; }
+.import-result-chevron { color: var(--text-muted); font-size: 17px; }
+.modal-help { font-size: 11px; color: var(--text-muted); }
+.engine-radio-group { flex-wrap: wrap; }
+.engine-radio { display: flex; align-items: center; gap: 7px; font-size: 11px; }
+.account-mode-switch { display: flex; border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; margin-bottom: 20px; }
+.account-mode { flex: 1; border: 0; padding: 12px; background: transparent; color: var(--text-muted); font-size: 12px; }
+.account-mode.active { background: var(--bg-elevated); color: var(--accent); }
+.account-signed-out .field + .field { margin-top: 16px; }
+.account-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.account-stats > div { display: grid; gap: 5px; }
+.account-stats span { font-size: 10px; color: var(--text-muted); }
+.account-usage { font-size: 12px; color: var(--text-secondary); }
+.export-field-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.export-field-label { color: var(--text-muted); font-size: 10px; letter-spacing: .08em; }
+.export-field-actions { display: flex; gap: 6px; }
+.review-summary h3 { margin-bottom: 16px; }
+.summary-metrics { margin-top: 14px; }
+.phase-breakdown { margin-top: 14px; }
+.phase-title { font-size: 10px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
+.phase-row { display: grid; grid-template-columns: .8fr 1fr 1fr; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border-soft); font-size: 10px; color: var(--text-muted); }
+.phase-name { color: var(--text-secondary); text-transform: capitalize; }
+@keyframes skeleton-sweep { 50% { opacity: .35; } }
+@media (max-width: 600px) { .puzzle-level-embed { flex-direction: column; align-items: flex-start; } .puzzle-level-embed-preview { width: 120px; } .anticheat-saved-item { flex-wrap: wrap; gap: 8px; } .anticheat-saved-time { margin-left: 34px; } }

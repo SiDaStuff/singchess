@@ -5,7 +5,7 @@
     "users": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
-        ".write": "auth != null && auth.uid === $uid",
+        ".write": false,
         "puzzleRating": { ".indexOn": [".value"] },
         "usage": {
           "$period": { ".read": "auth != null && auth.uid === $uid" }
@@ -88,6 +88,17 @@
         ".read": "auth != null && auth.uid === $uid",
         ".indexOn": ["createdAt", "startedAt"]
       }
+    },
+    "linkedChessPrivate": {
+      ".read": false,
+      ".write": false,
+      "cache": { ".indexOn": ["expiresAt"] }
+    },
+    "maxAutoReviewPrivate": {
+      ".read": false,
+      ".write": false,
+      "accounts": { ".indexOn": ["nextPollAt"] },
+      "reviews": { "$uid": { ".indexOn": ["createdAt"] } }
     },
     "publicStats": {
       ".read": true,

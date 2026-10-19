@@ -1,23 +1,20 @@
 // AI Coach chat — streaming endpoint.
 //
-// Streams an LLM reply (Cerebras, OpenAI-compatible) to the browser over SSE,
-// with a tool-use loop: the model can call tools (stockfish runs in the
-// browser; web_search/coach_games run server-side). Reuses the SSE pattern
-// from analyze.js streamHandler + users-me-stream.js.
-//
-// Max-users-only. API keys stay server-side (llm-service.js: Cerebras primary, Groq fallback).
+// NVIDIA-hosted inference; chess tools run in the browser or authenticated server.
+// Available to every signed-in plan with a daily generated-output allowance.
 //
 // SSE events: init | token | tool_call | tool_status | tool_result_visible | done | error | heartbeat
 
-const { requireUser, activePlan, initAdmin, usageDay, reserveCoachTokens, reconcileCoachTokens } = require('./_lib/user-service');
+const { requireFeature, activePlan, initAdmin, usageDay, reserveCoachTokens, reconcileCoachTokens } = require('./_lib/user-service');
 const llm = require('./_lib/llm-service');
+const { completionCost, compactHistory, publicCoachUsage } = require('./_lib/coach-budget');
+const { randomUUID } = require('node:crypto');
 const { TOOL_DEFINITIONS, getToolDefinitions, BROWSER_TOOLS, runServerTool } = require('./_lib/coach-tools');
 // action-lock is intentionally NOT used here: coach chat never acquires the
 // heavy-action lock (chatting during a review is allowed) and must never
 // release it either — a release here would free a lock held by the user's
 // running review and let a second review start on the shared engine.
 
-const LLM_HISTORY_LIMIT = 20;    // prior turns sent to the LLM (client caps this too)
 const MAX_TOOL_ROUNDS = 5;       // cap agentic loops
 const HEARTBEAT_MS = 20000;
 // Per-uid concurrency + burst limits (in-process; defense-in-depth alongside
@@ -60,15 +57,9 @@ function coachReleaseUid(uid) {
   if (recent.length === 0) coachRecent.delete(uid);
   else coachRecent.set(uid, recent);
 }
-// No Fast/Strong tiers anymore — a single model is used for every coach
-// message (see llm-service.js: gpt-oss-120b, falling back to gpt-oss-20b).
-// Quota cost is flat per message.
-const COACH_TIER_MULTIPLIER = 1;
-// Worst-case token cost reserved up front per request (before the real cost is
-// known). Sized to comfortably cover a max-length reply + a tool-loop turn, so
-// the atomic pre-reserve can't under-count a real request. Any over-reservation
-// is refunded after the stream via reconcile.
-const COACH_RESERVE = Math.round(3000 * COACH_TIER_MULTIPLIER);
+// Reserve one bounded output budget for the complete tool loop; unused output
+// is refunded. Prompts/history never consume the user's daily Coach allowance.
+const COACH_RESERVE = 3000;
 
 function sseWrite(res, event, data) {
   if (res.writableEnded) return;
@@ -125,7 +116,7 @@ exports.streamHandler = async (req, res) => {
 
   let user;
   try {
-    user = await requireUser({ headers: req.headers || {} });
+    user = await requireFeature({ headers: req.headers || {} }, 'coach');
   } catch (err) {
     sseWrite(res, 'error', { error: err.message || 'Login required.', code: err.code || 'unauthorized' });
     res.end();
@@ -161,29 +152,30 @@ exports.streamHandler = async (req, res) => {
   // reserves + reconciles coach tokens against the daily plan cap below,
   // which is the real abuse limiter. (Client gate removed to match.)
 
-  // Atomic quota gate: reserve a worst-case cost up front (transactional, so N
-  // parallel requests can't all pass the gate on the same stale read and run up
-  // the LLM bill past the cap). The over-reservation is refunded after the
-  // stream once the real cost is known. `reserveTotal` is the post-reserve total.
-  const reserveAmount = COACH_RESERVE;
+  // Partial reservations keep the remaining allowance usable; all provider
+  // rounds share this grant so concurrent streams cannot exceed the daily cap.
+  let reserveAmount = COACH_RESERVE;
   let reservedTotal;
+  let reservationDay;
   try {
-    const r = await reserveCoachTokens(user.uid, reserveAmount, tokenLimit);
+    const r = await reserveCoachTokens(user.uid, reserveAmount, tokenLimit, { partial: true });
     if (!r.allowed) {
       coachReleaseUid(user.uid);
       sseWrite(res, 'error', {
-        error: 'You\'ve used all your daily Coach tokens. They reset at midnight UTC — or upgrade for more.',
+        error: 'You\'ve used your daily AI Coach allowance. They reset at midnight UTC — or upgrade for more.',
         code: 'quota_exceeded',
         plan,
-        usage: { coachTokens: r.total, coachTokenLimit: tokenLimit },
+        usage: publicCoachUsage(r.total, tokenLimit, r.day),
       });
       res.end();
       return;
     }
     reservedTotal = r.total;
+    reserveAmount = r.amount;
+    reservationDay = r.day;
   } catch (err) {
     coachReleaseUid(user.uid);
-    sseWrite(res, 'error', { error: 'Could not verify token quota. Please try again.', code: 'quota_check_failed' });
+    sseWrite(res, 'error', { error: 'Could not verify Coach allowance. Please try again.', code: 'quota_check_failed' });
     res.end();
     return;
   }
@@ -192,7 +184,7 @@ exports.streamHandler = async (req, res) => {
   // turns in `payload.history`; we do NOT load/persist anything server-side
   // (keeps multi-chat state in the user's browser where the sidebar lives).
   // Hard-cap what we accept: 50 turns × 4000 chars each (matching the per-message
-  // cap). buildLlmMessages further trims to the last LLM_HISTORY_LIMIT turns.
+  // cap). buildLlmMessages further bounds the history sent to the provider.
   // Previously the raw client array flowed through unchecked — the 2MB body
   // limit allowed ~500k tokens in one request, blowing the daily cap in a
   // single message.
@@ -204,7 +196,7 @@ exports.streamHandler = async (req, res) => {
     : [];
 
   let closed = false;
-  req.on('close', () => { closed = true; });
+  res.on('close', () => { closed = true; });
 
   // Cooperative instance affinity: stamp the process pid on the init event so
   // the client can include it in /api/coach/tool-result. The sticky-routing in
@@ -216,6 +208,8 @@ exports.streamHandler = async (req, res) => {
   const heartbeat = setInterval(() => { if (!closed) sseWrite(res, 'heartbeat', { ts: Date.now() }); }, HEARTBEAT_MS);
   const stopHeartbeat = () => clearInterval(heartbeat);
 
+  const tokenUsage = { prompt: 0, completion: 0 };
+  const context = { text, requestId: randomUUID() };
   try {
     // Build the LLM message list (system + last N client-supplied messages +
     // this one). The client already includes the current `text` in history, so
@@ -224,31 +218,22 @@ exports.streamHandler = async (req, res) => {
 
     // Run the tool loop, then stream the final answer.
     let assistantText = '';
-    const conv = await runConversation({
-      res, llmMessages, user, closedRef: () => closed,
+    await runConversation({
+      res, llmMessages, user, context, tokenUsage, outputBudget: reserveAmount, closedRef: () => closed,
       onToken: (t) => { assistantText += t; sseWrite(res, 'token', { text: t }); },
       onToolCall: (call) => sseWrite(res, 'tool_call', call),
       onToolStatus: (status) => sseWrite(res, 'tool_status', status),
       onToolResultVisible: (vis) => sseWrite(res, 'tool_result_visible', vis),
     });
 
-    // Reconcile the charge to the REAL cost. We reserved a worst-case cost up
-    // front (reserveAmount); now apply the signed delta = realCost - reserved.
-    // Prefers REAL provider token counts (these include reasoning/"thinking"
-    // tokens it bills but never streams); falls back to a char estimate
-    // (~4 chars/token) when a provider omits usage. Scaled by the tier multiplier
-    // (Strong = 2×). Done BEFORE `done` so the client's usage bar is authoritative.
-    const usage = conv && conv.tokenUsage;
-    const realInput = Number(usage && usage.prompt) || 0;
-    const realOutput = Number(usage && usage.completion) || 0;
-    const inputTokens = realInput || Math.ceil(JSON.stringify(llmMessages).length / 4);
-    const outputTokens = realOutput || Math.ceil(assistantText.length / 4);
-    const totalTokens = Math.round((inputTokens + outputTokens) * COACH_TIER_MULTIPLIER);
+    // Settle generated output, including provider reasoning, against the
+    // original reservation day. Input tokens remain provider accounting only.
+    const totalTokens = Math.min(reserveAmount, tokenUsage.completion);
     const delta = totalTokens - reserveAmount; // negative → refund the over-reservation
     let chargedTotal = reservedTotal;
     try {
       if (delta !== 0) {
-        const rec = await reconcileCoachTokens(user.uid, delta);
+        const rec = await reconcileCoachTokens(user.uid, delta, reservationDay);
         chargedTotal = rec.total;
       }
     } catch (err) {
@@ -261,14 +246,14 @@ exports.streamHandler = async (req, res) => {
 
     // `done` now means stream AND charge complete — carries the fresh usage so
     // the client can update its bar without a separate round-trip.
-    sseWrite(res, 'done', { ts: Date.now(), usage: { coachTokens: chargedTotal, coachTokenLimit: tokenLimit } });
+    sseWrite(res, 'done', { ts: Date.now(), usage: publicCoachUsage(chargedTotal, tokenLimit, reservationDay) });
   } catch (err) {
     console.error('coach-chat error:', err && err.stack ? err.stack : err);
     // The stream failed before reconciliation — refund the up-front reservation
     // so the user isn't charged for a reply they never got. Best-effort: a
     // failed refund leaves them over-charged by the (bounded) reserve, not zero.
     if (user && user.uid) {
-      try { await reconcileCoachTokens(user.uid, -reserveAmount); }
+      try { await reconcileCoachTokens(user.uid, Math.min(reserveAmount, tokenUsage.completion + (tokenUsage.pending || 0)) - reserveAmount, reservationDay); }
       catch (_) {}
     }
     sseWrite(res, 'error', { error: err.message || 'Coach chat failed.', code: err.code || 'server_error' });
@@ -283,7 +268,7 @@ exports.streamHandler = async (req, res) => {
 };
 
 function buildLlmMessages(history, currentText, reviewContext) {
-  const recent = history.slice(-LLM_HISTORY_LIMIT);
+  const recent = compactHistory(history, currentText);
   const msgs = [{ role: 'system', content: llm.SYSTEM_PROMPT }];
   // Optional review seed: when the chat was opened from a game review, the
   // client sends the reviewed game's compact data so the coach can answer
@@ -311,29 +296,23 @@ function buildLlmMessages(history, currentText, reviewContext) {
 
 // Tool loop: each round STREAMS the model turn (real time-to-first-token). If
 // the model emits tool_calls, execute them and loop; otherwise the content was
-// already streamed live to the user. maxTokens is generous so a normal detailed
-// reply isn't truncated mid-sentence (Strong gets more headroom).
+// already streamed live to the user. Every round shares the reserved output budget.
 //
 // Guards against the "No response." failure mode: (a) every token is counted in
 // `emitted` via the `emit` wrapper, and (b) a guaranteed non-empty fallback is
 // streamed if nothing was emitted, so the client always receives ≥1 token.
-async function runConversation({ res, llmMessages, user, closedRef, onToken, onToolCall, onToolStatus, onToolResultVisible }) {
+async function runConversation({ res, llmMessages, user, context, tokenUsage, outputBudget, closedRef, onToken, onToolCall, onToolStatus, onToolResultVisible }) {
   // Wrap onToken so we know whether ANY content was streamed across all rounds.
   let emitted = '';
-  const emit = (t) => { if (t) { emitted += t; onToken(t); } };
-  const maxTokens = 3072;
-  // Accumulate real token usage across rounds (for charging thinking tokens).
-  const tokenUsage = { prompt: 0, completion: 0 };
-  const trackUsage = (u) => {
-    if (!u) return;
-    // prompt_tokens is the same growing context each round; take the max seen.
-    const p = Number(u.prompt_tokens) || 0;
-    if (p > tokenUsage.prompt) tokenUsage.prompt = p;
-    // completion accumulates across rounds (incl. reasoning/thinking tokens a
-    // provider may report under completion_tokens_details.reasoning_tokens).
-    const c = Number(u.completion_tokens) || 0;
-    const reasoning = Number(u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens) || 0;
-    tokenUsage.completion += Math.max(c, reasoning);
+  let pendingCharacters = 0;
+  const countPartial = t => { pendingCharacters += String(t || '').length; tokenUsage.pending = Math.ceil(pendingCharacters / 4); };
+  const emit = (t) => { if (t) { countPartial(t); emitted += t; onToken(t); } };
+  const nextBudget = () => Math.min(3072, Math.max(0, outputBudget - tokenUsage.completion));
+  const trackUsage = (result, reasoning) => {
+    tokenUsage.prompt += Number(result?.usage?.prompt_tokens) || 0;
+    tokenUsage.completion += completionCost(result, reasoning);
+    tokenUsage.pending = 0;
+    pendingCharacters = 0;
   };
 
   // Dedupe runaway web_search loops: if the model keeps re-issuing the SAME
@@ -356,6 +335,8 @@ async function runConversation({ res, llmMessages, user, closedRef, onToken, onT
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (closedRef()) throw new Error('Client disconnected.');
+    if (!nextBudget()) break;
+    let roundReasoning = '';
 
     // Stream this turn WITH tools available. We accumulate content (piped live
     // to emit) and tool_calls (assembled from deltas) in parallel. Reasoning
@@ -364,12 +345,12 @@ async function runConversation({ res, llmMessages, user, closedRef, onToken, onT
     // as reply content.
     const streamRes = await llm.chatCompletion({
       messages: llmMessages, tools: getToolDefinitions(), toolChoice: 'auto',
-      stream: true, maxTokens, temperature: 0.3,
+      stream: true, maxTokens: nextBudget(), temperature: 0.3,
     });
     const result = await llm.streamDeltas(streamRes, emit, {
-      onReasoning: (t) => { if (!closedRef()) sseWrite(res, 'reasoning', { text: t }); },
+      onReasoning: (t) => { roundReasoning += t; countPartial(t); if (!closedRef()) sseWrite(res, 'reasoning', { text: t }); },
     });
-    trackUsage(result && result.usage);
+    trackUsage(result, roundReasoning);
     const finalText = (result && result.content) || '';
 
     if (!result.toolCalls.length) {
@@ -473,7 +454,7 @@ async function runConversation({ res, llmMessages, user, closedRef, onToken, onT
       } else {
         onToolStatus({ id: callId, name: call.name, label: toolLabel(call.name) });
         let toolResult;
-        try { toolResult = await runServerTool(call.name, call.args, user); }
+        try { toolResult = await runServerTool(call.name, call.args, user, context); }
         catch (e) { toolResult = { error: e.message || 'Tool failed.' }; }
         // fetch_games carries the per-game PGNs so the client can render
         // clickable "Review" cards — piggyback them on the visible event.
@@ -490,14 +471,19 @@ async function runConversation({ res, llmMessages, user, closedRef, onToken, onT
   // Either the loop produced content and broke (normal) or we exhausted rounds
   // without a clean stop. Force one streamed answer with no tools available,
   // nudging the model to answer from what it already knows.
+  if (!nextBudget()) {
+    if (!emitted.trim()) emit('Your remaining daily Coach allowance was used on this request. It resets at midnight UTC.');
+    return { tokenUsage };
+  }
+  let roundReasoning = '';
   llmMessages.push({ role: 'system', content: 'Answer the user now in plain prose using the information you already have. Do not call any more tools.' });
   const finalRes = await llm.chatCompletion({
-    messages: llmMessages, stream: true, temperature: 0.4, maxTokens,
+    messages: llmMessages, stream: true, temperature: 0.4, maxTokens: nextBudget(),
   });
   const finalStream = await llm.streamDeltas(finalRes, emit, {
-    onReasoning: (t) => { if (!closedRef()) sseWrite(res, 'reasoning', { text: t }); },
+    onReasoning: (t) => { roundReasoning += t; countPartial(t); if (!closedRef()) sseWrite(res, 'reasoning', { text: t }); },
   });
-  trackUsage(finalStream && finalStream.usage);
+  trackUsage(finalStream, roundReasoning);
 
   // Last-resort guarantee: if nothing was streamed across all rounds AND the
   // forced answer, emit a short honest message so the client never shows
@@ -516,6 +502,7 @@ function fallbackReply() {
 function toolLabel(name) {
   if (name === 'web_search') return 'Searching the web…';
   if (name === 'exa_search') return 'Searching the web (Exa)…';
+  if (name === 'report_coach_misuse') return 'Checking chat boundaries';
   if (name === 'coach_games') return 'Reading your chess profile…';
   if (name === 'stockfish') return 'Analyzing the position…';
   if (name === 'lichess_opening') return 'Looking up the opening…';
@@ -552,6 +539,7 @@ function summariseBrowserResult(name, result) {
 function toolResultSummary(name, result) {
   if (!result) return 'no data';
   if (result.error) return result.error;
+  if (name === 'report_coach_misuse') return result.reported ? 'Repeated misuse reported for administrator review.' : 'Reminder: keep Coach chats respectful and focused on chess.';
   if (name === 'coach_games') return result.summary || 'No chess profile on file.';
   if (name === 'lichess_opening') return result.summary || (result.opening || 'No opening data.');
   if (name === 'lichess_player') return result.summary || (result.username || 'No player data.');
@@ -573,5 +561,7 @@ function toolResultSummary(name, result) {
 }
 
 // Exported for coach-tool-result.js (plain POST endpoint resolves a parked call).
+exports.buildLlmMessages = buildLlmMessages;
+exports.runConversation = runConversation;
 exports.resolveToolCall = resolveToolCall;
 exports.isBrowserToolCallPending = (callId) => pendingToolCalls.has(callId);

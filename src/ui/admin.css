@@ -1,0 +1,24 @@
+.admin-profile-panel { margin-block: 24px; padding: clamp(16px,3vw,28px); border: 1px solid var(--border-color); border-radius: 14px; background: var(--bg-panel); }
+.admin-control-card { margin-block: 18px; padding: 14px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-muted); }
+.admin-control-card h4 { margin: 0 0 8px; }
+.admin-feature-controls { display: grid; gap: 8px; margin-block: 12px; }
+.admin-profile-search { display: flex; gap: 12px; align-items: end; margin-block: 20px 12px; }
+.admin-profile-search .field { flex: 1; min-width: 0; margin: 0; }
+.admin-player-heading { display: flex; gap: 16px; justify-content: space-between; align-items: start; margin-top: 24px; }
+.admin-player-heading p,.admin-player-heading h3 { margin: 0 0 6px; overflow-wrap: anywhere; }
+.admin-profile-stats { display: grid; grid-template-columns: repeat(auto-fit,minmax(115px,1fr)); gap: 12px; margin-block: 20px; }
+.admin-profile-stats div { background: var(--bg-muted); border-radius: 10px; padding: 14px; }
+.admin-profile-stats span { display: block; color: var(--text-secondary); font-size: 12px; }
+.admin-profile-stats strong { display: block; font-size: 20px; margin-top: 6px; }
+.admin-profile-section { border-top: 1px solid var(--border-color); padding-block: 18px; }
+.admin-profile-section h4 { margin: 0 0 12px; }
+.admin-profile-section summary { cursor: pointer; font-weight: 600; }
+.admin-profile-fields { display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap: 12px 24px; margin-block: 14px; }
+.admin-profile-fields dt { font-size: 12px; color: var(--text-secondary); text-transform: capitalize; }
+.admin-profile-fields dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+.admin-profile-note { padding: 14px; border-radius: 10px; background: var(--bg-muted); margin-block: 12px; }
+.admin-profile-note p { white-space: pre-wrap; overflow-wrap: anywhere; margin-block: 8px; }
+.admin-profile-note span { display: block; color: var(--text-secondary); font-size: 12px; }
+.admin-note-form .field { width: 100%; }
+.admin-player-heading .is-banned { color: #e2706c; }
+@media(max-width:600px) { .admin-profile-search,.admin-player-heading { flex-direction: column; align-items: stretch; } .admin-profile-fields { grid-template-columns: 1fr; } }

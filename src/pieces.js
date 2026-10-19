@@ -263,7 +263,7 @@ function getPieceAssetTheme() {
 
 function getPieceAssetName(piece) {
   if (!piece || piece.length < 2) return '';
-  return `${piece[0]}${piece[1].toLowerCase()}`;
+  return `${piece[0]}${piece[1].toUpperCase()}`;
 }
 
 function getPieceAssetUri(piece) {

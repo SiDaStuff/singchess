@@ -1,4 +1,4 @@
-const { getProfile, patchProfile, requireUser, json, initAdmin } = require('./_lib/user-service');
+const { getProfile, patchProfile, requireFeature, json, initAdmin } = require('./_lib/user-service');
 
 function calculateRatingDelta(puzzleRating, userRating, won) {
   const expected = 1 / (1 + Math.pow(10, (puzzleRating - userRating) / 400));
@@ -15,7 +15,7 @@ exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Use POST.' });
 
   try {
-    const authUser = await requireUser(event);
+    const authUser = await requireFeature(event, 'puzzles');
     const body = JSON.parse(event.body || '{}');
 
     // Validate required fields

@@ -36,6 +36,14 @@ const PLAN_TIERS = Object.freeze({
 const PLAN_RANK = { free: 0, boost: 1, max: 2 };
 function planRank(plan) { return PLAN_RANK[String(plan || '').toLowerCase()] ?? 0; }
 function isPaidOrAbove(plan, floor) { return planRank(plan) >= planRank(floor); }
+const FEATURE_NAMES = Object.freeze(['puzzles', 'serverReviews', 'anticheat', 'coach', 'reviewBackground']);
+const DEFAULT_FEATURES = Object.freeze({
+  puzzles: true,
+  serverReviews: true,
+  anticheat: true,
+  coach: true,
+  reviewBackground: false,
+});
 // Back-compat alias for any code that still references FREE_LIMITS.
 const FREE_LIMITS = Object.freeze({
   anticheatRunsPerDay: 1,
@@ -73,7 +81,14 @@ function initAdmin() {
     }
     appReady = true;
   }
-  if (!db) db = admin.database();
+  if (!db) {
+    const { SqlDatabase } = require('./sql-database');
+    const path = require('node:path');
+    db = new SqlDatabase({
+      filename: path.resolve(process.env.SQLITE_DATABASE_PATH || path.join(__dirname, '../../data/application.sqlite')),
+      backup: require('./firebase-backup'),
+    });
+  }
   return { admin, db };
 }
 
@@ -132,11 +147,26 @@ async function requireUser(event) {
     error.statusCode = 401;
     throw error;
   }
+
   const { admin: firebaseAdmin, db: database } = initAdmin();
-  const decoded = await firebaseAdmin.auth().verifyIdToken(token);
+  let decoded;
+  try { decoded = await firebaseAdmin.auth().verifyIdToken(token); }
+  catch (error) {
+    const invalid = ['auth/id-token-expired', 'auth/id-token-revoked', 'auth/invalid-id-token', 'auth/argument-error'].includes(error.code);
+    throw Object.assign(new Error(invalid ? 'Your sign-in session expired. Please sign in again.' : 'Sign-in verification is temporarily unavailable.'), { statusCode: invalid ? 401 : 503, code: error.code });
+  }
   // Read the full profile in one shot — avoids a separate getBanForUid call
   // and lets getMe reuse the result instead of reading again.
-  const profileSnap = await database.ref(`users/${decoded.uid}/profile`).once('value');
+  const profileRef = database.ref(`users/${decoded.uid}/profile`);
+  let profileSnap = await profileRef.once('value');
+  if (!profileSnap.exists() && database.syncFromBackup) {
+    // A bulk-imported root can predate an account that still exists in Firebase.
+    // Try a bounded, missing-only recovery before creating an empty profile.
+    const recovered = await database.syncFromBackup(`users/${decoded.uid}`);
+    if (recovered.error) throw Object.assign(new Error('Account data recovery is temporarily unavailable. Please try again.'),
+      { statusCode: 503, code: 'profile_recovery_failed' });
+    profileSnap = await profileRef.once('value');
+  }
   const profile = profileSnap.val() || {};
   const ban = profile.ban || {};
   if (ban.disabled === true) {
@@ -147,11 +177,11 @@ async function requireUser(event) {
   try {
     const abuse = require('../admin-abuse-report.js');
     // Record this login's IP/cookie fingerprint into the index.
-    abuse.trackLoginFingerprint(decoded.uid, event).catch(() => {});
+    abuse.trackLoginFingerprint(decoded.uid, event).then(changed =>
+      changed ? abuse.checkMultiAccount(decoded.uid, event) : null).catch(() => {});
     // Proactively flag this account if it shares an IP/cookie with other
     // accounts (multi-accounting). This writes to abuse/multiAccount/<uid> so
     // the admin queue surfaces it even before anyone files a manual report.
-    abuse.checkMultiAccount(decoded.uid, event).catch(() => {});
   } catch (_) { /* admin-abuse-report may not be loaded yet */ }
   return {
     uid: decoded.uid,
@@ -165,6 +195,33 @@ async function requireUser(event) {
     _profileSnap: profileSnap,
     _profile: profile,
   };
+}
+
+async function getFeatureControls(uid = '', database = null) {
+  if (!database) ({ db: database } = module.exports.initAdmin());
+  const global = (await database.ref('adminControls/features').once('value')).val() || {};
+  const profile = uid ? ((await database.ref(`users/${uid}/profile/featureOverrides`).once('value')).val() || {}) : {};
+  const features = {};
+  for (const name of FEATURE_NAMES) {
+    features[name] = typeof profile[name] === 'boolean'
+      ? profile[name]
+      : typeof global[name] === 'boolean' ? global[name] : DEFAULT_FEATURES[name];
+  }
+  return { features, global };
+}
+
+async function requireFeature(event, feature) {
+  if (!FEATURE_NAMES.includes(feature)) throw new Error(`Unknown feature: ${feature}`);
+  const user = await requireUser(event);
+  const { features } = await getFeatureControls(user.uid);
+  if (!features[feature]) {
+    const error = new Error('This feature has been disabled for your account.');
+    error.statusCode = 403;
+    error.code = 'feature_disabled';
+    error.feature = feature;
+    throw error;
+  }
+  return user;
 }
 
 async function getBanStatus(event) {
@@ -365,6 +422,14 @@ async function _pruneStaleDataGlobal() {
     } catch (_) { /* best-effort */ }
 
     // Trim `reasons`/`flaggedBy` arrays on abuse/flagged/<uid> to last 20.
+    try {
+      const cutoff = now - 7 * 24 * 60 * 60 * 1000;
+      const stale = await db.ref('abuse/coach').orderByChild('lastSeenAt').endAt(cutoff).once('value');
+      const refs = [];
+      stale.forEach(c => { refs.push(c.ref); });
+      for (const ref of refs) await ref.transaction(current =>
+        current && Number(current.lastSeenAt) <= cutoff ? null : undefined);
+    } catch (_) { /* best-effort; administrator reports retain their evidence */ }
     try {
       const flaggedSnap = await db.ref('abuse/flagged').once('value');
       if (flaggedSnap.exists()) flaggedSnap.forEach((c) => {
@@ -762,9 +827,10 @@ async function getMe(event) {
     ...(usageSnap.val() || {}),
     anticheatGames: Math.max(0, Number(weekSnap.val()) || 0),
     week,
-    coachTokens: Math.max(0, Number(usageSnap.child?.('coachTokens')?.val?.() || (usageSnap.val() || {}).coachTokens) || 0),
-    coachTokenLimit: (plan.limits && plan.limits.coachTokensPerDay) || 0,
+    ...require('./coach-budget').publicCoachUsage(Number((usageSnap.val() || {}).coachTokens) || 0,
+      (plan.limits && plan.limits.coachTokensPerDay) || 0, day),
   };
+  delete usage.coachTokens;
   // Username-change cooldown info so the client can disable the editor and
   // show remaining time proactively. lastChangedAt = 0 means the username has
   // never been explicitly changed (first change is exempt from the cooldown).
@@ -775,7 +841,9 @@ async function getMe(event) {
     canChangeAt: lastUsernameChangedAt ? lastUsernameChangedAt + USERNAME_COOLDOWN_MS : null,
   };
   return {
-    user,
+    // Internal snapshots/reference handles belong to server-side auth context.
+    // Serializing them leaks storage internals and can traverse circular timers.
+    user: { uid: user.uid, email: user.email, name: user.name, disabled: user.disabled, admin: user.admin },
     profile,
     plan,
     usage,
@@ -848,18 +916,11 @@ async function refundUsage(uid, kind, { amount = 1, period = "day" } = {}) {
   }
 }
 
-// Atomic token accounting for the AI Coach. Two-phase:
-//   1) reserveCoachTokens: atomically add a WORST-CASE cost up front (rejecting
-//      the whole request if it would exceed the daily cap). This closes the
-//      race where N parallel requests each read the same sub-cap value and all
-//      pass the gate, letting a free user overrun the cap (and run up your LLM
-//      bill). Returns { allowed, total }.
-//   2) reconcileCoachTokens: after the real cost is known, apply a signed delta
-//      (negative = refund the over-reservation). Capped at >= 0.
-// `amount` is in coach-token units (already tier-multiplied by the caller).
-async function _coachTransaction(uid, mutate, { maxRetries = 3 } = {}) {
+// Atomic daily generated-output accounting. Reserve a bounded (optionally
+// partial) grant before inference, then settle unused output in the same UTC day.
+// Internal used counts stay server-side; public usage is a percentage.
+async function _coachTransaction(uid, mutate, { maxRetries = 3, day = usageDay() } = {}) {
   const { db: database } = initAdmin();
-  const day = usageDay();
   const ref = database.ref(`users/${uid}/usage/${day}/coachTokens`);
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
@@ -872,26 +933,41 @@ async function _coachTransaction(uid, mutate, { maxRetries = 3 } = {}) {
   }
 }
 
-async function reserveCoachTokens(uid, amount, limit = 0) {
+async function reserveCoachTokens(uid, amount, limit = 0, { partial = false } = {}) {
   const reserve = Math.max(0, Math.trunc(Number(amount) || 0));
+  const day = usageDay();
+  let granted = reserve;
   const { committed, total } = await _coachTransaction(uid, (current) => {
     const value = Math.max(0, Number(current) || 0);
-    if (limit > 0 && value + reserve > limit) return; // would exceed cap → abort
-    return value + reserve;
-  });
-  return { allowed: committed, total };
+    if (partial && !(limit > 0)) return;
+    granted = partial && limit > 0 ? Math.min(reserve, Math.max(0, limit - value)) : reserve;
+    if (!granted || (limit > 0 && value + granted > limit)) return;
+    return value + granted;
+  }, { day });
+  return { allowed: committed, total, amount: committed ? granted : 0, day };
 }
 
-async function reconcileCoachTokens(uid, delta) {
+async function reconcileCoachTokens(uid, delta, day = usageDay()) {
   const d = Math.trunc(Number(delta) || 0); // may be negative (refund)
   const { total } = await _coachTransaction(uid, (current) => {
     return Math.max(0, Math.trunc(Number(current) || 0) + d);
-  });
+  }, { day });
   return { total };
 }
 
 async function requireQuota(event, kind, options = {}) {
   const me = await getMe(event);
+  const feature = kind === 'serverReviews' ? 'serverReviews' : kind;
+  if (FEATURE_NAMES.includes(feature)) {
+    const { features } = await getFeatureControls(me.user.uid);
+    if (!features[feature]) {
+      const error = new Error('This feature has been disabled for your account.');
+      error.statusCode = 403;
+      error.code = 'feature_disabled';
+      error.feature = feature;
+      throw error;
+    }
+  }
   const planKey = me.plan.plan; // "free" | "boost" | "max"
   const limits = me.plan.limits || PLAN_TIERS.free.limits;
 
@@ -1101,6 +1177,10 @@ module.exports = {
   planRank,
   isPaidOrAbove,
   requireQuota,
+  requireFeature,
+  getFeatureControls,
+  FEATURE_NAMES,
+  DEFAULT_FEATURES,
   refundUsage,
   requireUser,
   reserveCoachTokens,

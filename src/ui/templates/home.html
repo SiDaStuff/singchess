@@ -1,0 +1,130 @@
+<section role="main" id="main-menu" class="main-menu" aria-label="Home">
+  <div class="home-heading"><div><span class="eyebrow"><span class="status-dot"></span> CHESS TRAINING</span><h1>Review your games.<br><span>Improve your play.</span></h1><p>Find the moves that mattered.<br>Review games, practice tactics, and ask the coach about positions.</p></div><a class="btn btn-secondary home-coach-link" href="/coach" data-route="/coach"><span class="material-symbols-outlined">school</span> Open coach <span aria-hidden="true">&nearr;</span></a></div>
+  <div class="home-workspace">
+    <div class="home-board-card">
+      <div class="home-board-head"><span class="home-feature-label"><span class="status-dot"></span> THE STUDY BOARD</span><span class="home-board-caption" id="home-study-caption">Paris &middot; 1858</span></div>
+      <div class="home-player"><span class="player-avatar"><img src="/assets/pieces/cburnett/bK.svg" alt=""></span><span><strong id="home-study-black">Duke Karl &amp; Count Isouard</strong><small>Black pieces</small></span><span class="home-piece-label">&#9818;</span></div>
+      <div class="board-wrapper home-board-wrapper"><div id="home-chess-board" class="chess-board" aria-label="Study position"></div></div>
+      <div class="home-player"><span class="player-avatar"><img src="/assets/pieces/cburnett/wK.svg" alt=""></span><span><strong id="home-study-white">Paul Morphy</strong><small>White pieces</small></span><span class="home-piece-label">&#9812;</span></div>
+      <div class="home-board-footer"><div><span class="eyebrow" id="home-study-label">THE OPERA GAME</span><p id="home-study-description">17 moves. A classic attacking game.</p></div><button type="button" id="btn-home-sample" class="btn btn-secondary">Review this game <span class="material-symbols-outlined">arrow_forward</span></button></div>
+    </div>
+    <div class="home-import-card"><div class="home-import-head"><span class="eyebrow">GAME REVIEW</span><h2>Learn from your games.</h2><p>Import a game and review the positions that changed it.</p></div>        <!-- Linked usernames: quick-load chips when signed in and linked -->
+        <div class="home-quick-load" id="home-quick-load" hidden>
+          <span class="home-quick-load-label">Open my recent games from</span>
+          <div class="home-quick-load-buttons" id="home-quick-load-buttons"></div>
+        </div>
+
+        <!-- Shared import-tool component (also used inside the modal) -->
+        <div class="import-tool" id="home-import-tool" data-import-scope="home">
+          <div class="import-tabs" role="tablist" aria-label="Import source">
+            <button type="button" class="import-tab active" data-import-tab="pgn" role="tab" aria-selected="true">
+              <span class="material-symbols-outlined">content_paste</span>
+              <span>Paste PGN</span>
+            </button>
+            <button type="button" class="import-tab" data-import-tab="lichess" role="tab" aria-selected="false">
+              <span class="import-tab-logo lichess-logo" aria-hidden="true"></span>
+              <span>Lichess</span>
+            </button>
+            <button type="button" class="import-tab" data-import-tab="chesscom" role="tab" aria-selected="false">
+              <span class="import-tab-logo chesscom-logo" aria-hidden="true"></span>
+              <span>Chess.com</span>
+            </button>
+          </div>
+
+          <div class="import-panels">
+            <!-- PGN panel -->
+            <div class="import-panel active" data-import-panel="pgn">
+              <p class="import-panel-hint">Paste a game in PGN format to review it instantly.</p>
+              <label class="field" for="home-pgn-input">Your game (PGN)</label>
+              <textarea id="home-pgn-input" class="import-pgn-input input-select" placeholder="[White &quot;You&quot;]&#10;[Black &quot;Your opponent&quot;]&#10;&#10;1. e4 e5 2. Nf3 Nc6 3. Bb5 a6..." rows="5"></textarea>
+              <div class="import-actions">
+                <button type="button" id="btn-home-load-pgn" class="btn btn-primary import-load-btn">
+                  <span class="btn-content">
+                    <span class="material-symbols-outlined btn-symbol">play_arrow</span>
+                    <span class="btn-label">Review game</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Lichess panel -->
+            <div class="import-panel" data-import-panel="lichess">
+              <p class="import-panel-hint">Enter a Lichess username to load their recent games.</p>
+              <label class="field">
+                <span class="field-label">Lichess username</span>
+                <input id="home-import-username-lichess" class="input-select import-username" type="text" placeholder="hikaru" data-source="lichess">
+              </label>
+              <div class="import-row">
+                <label class="field">
+                  <span class="field-label">Games</span>
+                  <select id="home-import-limit-lichess" class="input-select import-limit">
+                    <option value="10">Last 10</option>
+                    <option value="5">Last 5</option>
+                    <option value="20">Last 20</option>
+                  </select>
+                </label>
+                <button type="button" class="btn btn-primary import-load-username-btn" data-source="lichess">
+                  <span class="btn-content">
+                    <span class="material-symbols-outlined btn-symbol">download</span>
+                    <span class="btn-label">Review games</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Chess.com panel -->
+            <div class="import-panel" data-import-panel="chesscom">
+              <p class="import-panel-hint">Enter a Chess.com username to load their recent games.</p>
+              <label class="field">
+                <span class="field-label">Chess.com username</span>
+                <input id="home-import-username-chesscom" class="input-select import-username" type="text" placeholder="MagnusCarlsen" data-source="chesscom">
+              </label>
+              <div class="import-row">
+                <label class="field">
+                  <span class="field-label">Games</span>
+                  <select id="home-import-limit-chesscom" class="input-select import-limit">
+                    <option value="10">Last 10</option>
+                    <option value="5">Last 5</option>
+                    <option value="20">Last 20</option>
+                  </select>
+                </label>
+                <button type="button" class="btn btn-primary import-load-username-btn" data-source="chesscom">
+                  <span class="btn-content">
+                    <span class="material-symbols-outlined btn-symbol">download</span>
+                    <span class="btn-label">Review games</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="import-status" id="home-import-status" role="status" aria-live="polite"></div>
+          <div class="import-results" id="home-import-results"></div>
+        </div>
+<div class="import-trust"><span class="material-symbols-outlined">verified_user</span><span>Browser reviews are free. No account needed.</span></div><div class="home-study-note"><span class="material-symbols-outlined">lightbulb</span><div><strong>Review the turning points.</strong><p>Stockfish shows what happened. The coach explains the ideas behind the moves.</p></div></div></div>
+  </div>
+  <div class="home-lower"><div class="section-heading"><span class="eyebrow">TRAINING TOOLS</span><h2>Practice with a clear plan.</h2></div><div class="feature-grid">
+    <a id="btn-menu-puzzles" class="feature-card" href="/puzzles" data-route="/puzzles"><span class="feature-icon material-symbols-outlined">extension</span><div><strong>Solve puzzles</strong><p>Practice positions matched to your level.</p></div><span class="material-symbols-outlined">arrow_forward</span></a>
+    <a class="feature-card" href="/coach" data-route="/coach"><span class="feature-icon material-symbols-outlined">school</span><div><strong>Ask the coach</strong><p>Discuss an opening, position, or training goal.</p></div><span class="material-symbols-outlined">arrow_forward</span></a>
+    <a id="btn-menu-anticheat" class="feature-card" href="/anticheat" data-route="/anticheat"><span class="feature-icon material-symbols-outlined">shield</span><div><strong>Check fair play</strong><p>Review patterns in online games.</p></div><span class="material-symbols-outlined">arrow_forward</span></a>
+  </div></div>      <!-- Community stats -->
+      <div class="home-stats" id="home-stats" aria-label="Community stats">
+        <div class="home-stat-card" data-stat="reviews">
+          <span class="material-symbols-outlined home-stat-icon">analytics</span>
+          <span class="home-stat-value" id="home-stat-reviews">—</span>
+          <span class="home-stat-label">Moves reviewed</span>
+        </div>
+        <div class="home-stat-card" data-stat="puzzles">
+          <span class="material-symbols-outlined home-stat-icon">extension</span>
+          <span class="home-stat-value" id="home-stat-puzzles">—</span>
+          <span class="home-stat-label">Puzzles solved</span>
+        </div>
+        <div class="home-stat-card" data-stat="coaches">
+          <span class="material-symbols-outlined home-stat-icon">school</span>
+          <span class="home-stat-value" id="home-stat-coaches">—</span>
+          <span class="home-stat-label">Coach games played</span>
+        </div>
+      </div>
+
+<a id="btn-menu-plans" class="home-plans-link" href="/plans" data-route="/plans">Need more capacity? View Boost &amp; Max <span aria-hidden="true">&nearr;</span></a>
+</section>

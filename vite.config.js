@@ -1,7 +1,6 @@
 import { defineConfig, loadEnv } from 'vite';
 import path from 'path';
 import fs from 'fs';
-import tailwindcss from '@tailwindcss/vite';
 
 /**
  * Force Vite's dev server to serve .wasm files with the MIME type required by
@@ -56,6 +55,7 @@ export default defineConfig(({ mode }) => {
     publicDir: 'public',
     server: {
       port: 5173,
+      headers: { 'Cross-Origin-Opener-Policy': 'same-origin-allow-popups' },
       proxy: {
         '/api': {
           target: apiTarget,
@@ -63,17 +63,26 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    preview: { headers: { 'Cross-Origin-Opener-Policy': 'same-origin-allow-popups' } },
     build: {
       outDir: 'dist',
       assetsDir: 'assets',
       sourcemap: mode === 'development',
       rollupOptions: {
         input: './index.html',
+        output: {
+          manualChunks(id) {
+            if (id.includes('/src/ui/templates/')) return 'views';
+            if (id.includes('/node_modules/')) {
+              return /\/(@firebase|firebase)\//.test(id) ? 'firebase' : 'vendor';
+            }
+          },
+        },
       },
     },
     optimizeDeps: {
       entries: ['./index.html'],
     },
-    plugins: [tailwindcss(), wasmMimePlugin(), servePublicSvgPlugin()],
+    plugins: [wasmMimePlugin(), servePublicSvgPlugin()],
   };
 });

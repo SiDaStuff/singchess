@@ -1,7 +1,7 @@
 // Chess Board UI Module
 class ChessBoard {
 	  constructor(containerId) {
-	    this.container = document.getElementById(containerId);
+	    this.container = typeof containerId === 'string' ? document.getElementById(containerId) : containerId;
 	    this._applySavedVisualSettings();
 	    this.wrapper = this.container?.parentElement || null;
     this.flipped = false;
@@ -9,6 +9,11 @@ class ChessBoard {
     this.highlights = []; // [{ square, type }]
     this.bestMoveArrow = null;
     this.userArrows = [];
+    // Coach explanations own a declarative layer. They never mutate player
+    // drawings, legal-move dots, or the app's best-move arrow.
+    this.coachAnnotations = null;
+    this._displayedFen = null;
+    this._previewState = null;
     this.invertedSquares = new Set();
     this.annotationPointer = null;
     this.selectedSquare = null;
@@ -25,6 +30,7 @@ class ChessBoard {
     this._prefersTap = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
     this._onResize = () => {
       this._updateArrows();
+      this._updateCoachAnnotations();
       this._updateLoadingOverlay();
     };
     this.loadingSquare = null;
@@ -63,6 +69,8 @@ class ChessBoard {
   }
 
   destroy() {
+    this.cancelDrag?.();
+    this._cancelSlide();
     if (this._onResize) {
       window.removeEventListener('resize', this._onResize);
       this._onResize = null;
@@ -79,8 +87,13 @@ class ChessBoard {
     // without this they survive destroy() and stack under the next board that
     // reuses the same wrapper.
     try { this.arrowLayer?.remove(); } catch (_err) {}
+    try { this.coachAnnotationLayer?.remove(); } catch (_err) {}
     try { this.loadingOverlay?.remove(); } catch (_err) {}
     this.arrowLayer = null;
+    this.coachAnnotationLayer = null;
+    this.coachAnnotations = null;
+    if (this._previewState) this._previewState.restored = true;
+    this._previewState = null;
     this.loadingOverlay = null;
   }
 
@@ -125,6 +138,10 @@ class ChessBoard {
 
   // Set position from FEN
 	  setPositionFromFen(fen) {
+        if (this._slideElement) {
+          this._cancelSlide();
+          this._updatePieces();
+        }
 	    const previous = this.position || {};
 	    const next = {};
 	    const placement = fen.split(' ')[0];
@@ -158,7 +175,10 @@ class ChessBoard {
 	        if (previous[sq] && !next[sq]) {
 	          const pieceType = previous[sq];
 	          for (const otherSq of this.changedSquares) {
-	            if (otherSq !== sq && next[otherSq] === pieceType) {
+	            const promotes = pieceType[1] === 'P' &&
+                  (pieceType[0] === 'w' ? otherSq[1] === '8' : otherSq[1] === '1') &&
+                  next[otherSq]?.[0] === pieceType[0] && /^[QRBN]$/.test(next[otherSq]?.[1] || '');
+	            if (otherSq !== sq && (next[otherSq] === pieceType || promotes)) {
 	              slideFrom = sq;
 	              slideTo = otherSq;
 	              slidePiece = pieceType;
@@ -171,6 +191,10 @@ class ChessBoard {
 	    }
 
 	    this.position = next;
+        this._displayedFen = String(fen).trim();
+        if (this.coachAnnotations && !this._coachFenMatches(this.coachAnnotations.fen)) {
+          this.clearCoachAnnotations();
+        }
 
 	    if (this._skipNextSlide) {
 	      this._skipNextSlide = false;
@@ -184,16 +208,23 @@ class ChessBoard {
 	    }
 	  }
 
+	  _cancelSlide() {
+        clearTimeout(this._slideTimeout);
+        this._slideElement?.remove();
+        this._slideElement = null;
+        this._slideTimeout = null;
+      }
+
 	  _animateSlide(fromSq, toSq, piece) {
+	    if (document.body.classList.contains('no-piece-animations') || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          this._updatePieces();
+          return;
+        }
 	    if (!this.wrapper) { this._updatePieces(); return; }
 
 	    const fromEl = this.container.querySelector(`[data-square="${fromSq}"]`);
 	    const toEl = this.container.querySelector(`[data-square="${toSq}"]`);
 	    if (!fromEl || !toEl) { this._updatePieces(); return; }
-
-	    // Hide the original piece on the from-square immediately
-	    const fromPiece = fromEl.querySelector('.piece');
-	    if (fromPiece) fromPiece.style.opacity = '0';
 
 	    const wrapperRect = this.wrapper.getBoundingClientRect();
 	    const fromRect = fromEl.getBoundingClientRect();
@@ -203,6 +234,12 @@ class ChessBoard {
 	    const startTop = fromRect.top - wrapperRect.top;
 	    const endLeft = toRect.left - wrapperRect.left;
 	    const endTop = toRect.top - wrapperRect.top;
+
+        // Commit captures, the castling rook, and promotion immediately. Only
+        // the sliding piece is hidden at its destination until the motion ends.
+        this._updatePieces();
+        const destinationPiece = toEl.querySelector('.piece');
+        if (destinationPiece) destinationPiece.style.opacity = '0';
 
 	    const slideEl = document.createElement('div');
 	    slideEl.className = 'piece-slide';
@@ -217,6 +254,7 @@ class ChessBoard {
 	    slideEl.style.width = fromRect.width + 'px';
 	    slideEl.style.height = fromRect.height + 'px';
 	    this.wrapper.appendChild(slideEl);
+        this._slideElement = slideEl;
 
 	    slideEl.offsetHeight;
 
@@ -224,14 +262,18 @@ class ChessBoard {
 	    slideEl.style.top = endTop + 'px';
 
 	    const durationMs = parseFloat(getComputedStyle(document.body).getPropertyValue('--piece-slide-duration')) * 1000 || 500;
-	    setTimeout(() => {
+	    this._slideTimeout = setTimeout(() => {
+          if (this._slideElement !== slideEl) return;
 	      slideEl.remove();
+          this._slideElement = null;
+          this._slideTimeout = null;
 	      this._updatePieces();
 	    }, durationMs + 50);
 	  }
 
   // Update board display
   _render() {
+    this._cancelSlide();
     // Make the board a semantic, keyboard-navigable grid for assistive tech and
     // keyboard users alike (WCAG 2.1.1 / 2.1.2 / 4.1.2).
     this.container.setAttribute('role', 'grid');
@@ -288,9 +330,11 @@ class ChessBoard {
       }
     }
     this._ensureArrowLayer();
+    this._ensureCoachAnnotationLayer();
     this._updatePieces();
     this._updateHighlights();
     this._updateArrows();
+    this._updateCoachAnnotations();
     this._updateLoadingOverlay();
   }
 
@@ -392,6 +436,7 @@ class ChessBoard {
   }
 
   setBestMoveArrow(uciMove, options = {}) {
+    if (window.PlayFairPlay?.isBlocked()) { this.clearBestMoveArrow(); return; }
     if (!uciMove || uciMove.length < 4) {
       this.bestMoveArrow = null;
       this._updateArrows();
@@ -425,6 +470,140 @@ class ChessBoard {
     if (this.userArrows.length === 0) return;
     this.userArrows = [];
     this._updateArrows();
+  }
+
+  // The first four FEN fields identify a playable position. Half-move clocks
+  // and full-move numbers do not affect an explanation's board markings.
+  _coachFenMatches(fen) {
+    if (typeof fen !== 'string' || !this._displayedFen) return false;
+    const supplied = fen.trim().split(/\s+/);
+    const displayed = this._displayedFen.trim().split(/\s+/);
+    if (supplied[0] !== displayed[0]) return false;
+    if (displayed.length >= 4) {
+      return supplied.length >= 4 && supplied.slice(0, 4).join(' ') === displayed.slice(0, 4).join(' ');
+    }
+    return supplied.length === 1;
+  }
+
+  _coachOpacity(value, fallback = 1) {
+    return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : fallback;
+  }
+
+  setCoachAnnotations(annotation) {
+    if (window.PlayFairPlay?.isBlocked()) { this.clearCoachAnnotations(); return false; }
+    if (!annotation || !this._coachFenMatches(annotation.fen)) {
+      this.clearCoachAnnotations();
+      return false;
+    }
+    const roles = new Set(['suggestion', 'threat', 'tactic', 'defense']);
+    const square = value => typeof value === 'string' && /^[a-h][1-8]$/.test(value);
+    const label = value => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, 240) : '';
+    const arrows = (Array.isArray(annotation.arrows) ? annotation.arrows : []).slice(0, 32)
+      .filter(item => item && square(item.from) && square(item.to) && item.from !== item.to && roles.has(item.role))
+      .map(item => ({ from: item.from, to: item.to, role: item.role, label: label(item.label), opacity: this._coachOpacity(item.opacity, .88) }));
+    const highlights = (Array.isArray(annotation.highlights) ? annotation.highlights : []).slice(0, 32)
+      .filter(item => item && square(item.square) && roles.has(item.role))
+      .map(item => ({ square: item.square, role: item.role, label: label(item.label), opacity: this._coachOpacity(item.opacity, .9) }));
+    this.coachAnnotations = arrows.length || highlights.length ? {
+      fen: String(annotation.fen).trim(),
+      explanationId: String(annotation.explanationId || '').slice(0, 200),
+      opacity: this._coachOpacity(annotation.opacity), arrows, highlights,
+    } : null;
+    this._ensureCoachAnnotationLayer();
+    this._updateCoachAnnotations();
+    return true;
+  }
+
+  clearCoachAnnotations() {
+    this.coachAnnotations = null;
+    this._updateCoachAnnotations();
+  }
+
+  getCoachAnnotationDescription() {
+    if (!this.coachAnnotations) return '';
+    const names = { suggestion: 'Suggested move', threat: 'Threat', tactic: 'Tactical idea', defense: 'Defense' };
+    const describe = item => `${names[item.role]}: ${item.square || `${item.from} to ${item.to}`}${item.label ? `; ${item.label}` : ''}.`;
+    return [...this.coachAnnotations.highlights, ...this.coachAnnotations.arrows].map(describe).join(' ');
+  }
+
+  _ensureCoachAnnotationLayer() {
+    if (!this.wrapper) return;
+    if (this.coachAnnotationLayer?.parentElement === this.wrapper) return;
+    this.coachAnnotationLayer?.remove();
+    ChessBoard._coachLayerSequence = (ChessBoard._coachLayerSequence || 0) + 1;
+    this._coachLayerId = `coach-annotations-${ChessBoard._coachLayerSequence}`;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.classList.add('coach-annotation-overlay');
+    svg.setAttribute('viewBox', '0 0 800 800');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('focusable', 'false');
+    svg.style.pointerEvents = 'none';
+    svg.style.display = 'none';
+    this.coachAnnotationLayer = svg;
+    this.wrapper.appendChild(svg);
+  }
+
+  _updateCoachAnnotations() {
+    const layer = this.coachAnnotationLayer;
+    if (!layer) return;
+    layer.replaceChildren();
+    const annotation = this.coachAnnotations;
+    if (!annotation || !this._coachFenMatches(annotation.fen)) {
+      this.coachAnnotations = null;
+      layer.style.display = 'none';
+      layer.removeAttribute('aria-label');
+      layer.removeAttribute('data-explanation-id');
+      return;
+    }
+    layer.style.display = 'block';
+    layer.setAttribute('data-explanation-id', annotation.explanationId);
+    layer.setAttribute('aria-label', this.getCoachAnnotationDescription());
+    const colors = { suggestion: '#69d89a', threat: '#ef7972', tactic: '#eec85a', defense: '#76b7f0' };
+    const make = (name, attrs = {}, text = null) => {
+      const element = document.createElementNS('http://www.w3.org/2000/svg', name);
+      Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, String(value)));
+      if (text !== null) element.textContent = text;
+      return element;
+    };
+    const point = square => {
+      const file = square.charCodeAt(0) - 97;
+      const rank = Number(square[1]) - 1;
+      return { x: (this.flipped ? 7 - file : file) * 100 + 50, y: (this.flipped ? rank : 7 - rank) * 100 + 50 };
+    };
+    const description = make('desc', {}, this.getCoachAnnotationDescription());
+    const definitions = make('defs');
+    Object.entries(colors).forEach(([role, color]) => {
+      const marker = make('marker', { id: `${this._coachLayerId}-${role}`, markerWidth: 5, markerHeight: 5, refX: 4, refY: 2.5, orient: 'auto', markerUnits: 'strokeWidth' });
+      marker.appendChild(make('path', { d: 'M 0 0 L 5 2.5 L 0 5 Z', fill: color }));
+      definitions.appendChild(marker);
+    });
+    const group = make('g', { opacity: annotation.opacity });
+    annotation.highlights.forEach(item => {
+      const center = point(item.square);
+      const color = colors[item.role];
+      const mark = make('g', { class: `coach-highlight coach-annotation-${item.role}`, opacity: item.opacity, 'data-square': item.square });
+      mark.appendChild(make('title', {}, item.label || `${item.role}: ${item.square}`));
+      mark.appendChild(make('rect', { x: center.x - 46, y: center.y - 46, width: 92, height: 92, rx: 7, fill: color, 'fill-opacity': .2, stroke: color, 'stroke-width': 4 }));
+      group.appendChild(mark);
+    });
+    annotation.arrows.forEach(item => {
+      const from = point(item.from), to = point(item.to);
+      const dx = to.x - from.x, dy = to.y - from.y;
+      const length = Math.hypot(dx, dy);
+      const color = colors[item.role];
+      const mark = make('g', { class: `coach-arrow coach-annotation-${item.role}`, opacity: item.opacity, 'data-from': item.from, 'data-to': item.to });
+      mark.appendChild(make('title', {}, item.label || `${item.role}: ${item.from} to ${item.to}`));
+      mark.appendChild(make('line', {
+        x1: from.x + dx / length * 13, y1: from.y + dy / length * 13,
+        x2: to.x - dx / length * 19, y2: to.y - dy / length * 19,
+        stroke: color, 'stroke-width': 7, 'stroke-linecap': 'round',
+        'marker-end': `url(#${this._coachLayerId}-${item.role})`,
+      }));
+      mark.appendChild(make('circle', { cx: from.x, cy: from.y, r: 6, fill: color }));
+      group.appendChild(mark);
+    });
+    layer.append(description, definitions, group);
   }
 
   setLoading(square = null, message = 'Loading') {
@@ -518,7 +697,7 @@ class ChessBoard {
     if (!piece || typeof piece !== 'string' || piece.length < 2) return 'chess piece';
     const color = piece[0] === 'b' ? 'Black' : 'White';
     const names = { k: 'king', q: 'queen', r: 'rook', b: 'bishop', n: 'knight', p: 'pawn' };
-    return `${color} ${names[piece[1]] || 'piece'}`;
+    return `${color} ${names[piece[1].toLowerCase()] || 'piece'}`;
   }
 
   // Keyboard play: arrows move focus between squares, Enter/Space reuse the same
@@ -595,6 +774,65 @@ class ChessBoard {
 
   setChessInstance(chess) {
     this._chessInstance = chess;
+  }
+
+  previewPosition(chess, reference) {
+    // A new reference may arrive without the caller first leaving the previous
+    // one. Reuse the original review snapshot instead of capturing that preview.
+    if (this._previewState && !this._previewState.restored) {
+      this._previewState.restore.update(chess, reference);
+      return this._previewState.restore;
+    }
+    const saved = {
+      position: { ...this.position }, highlights: this.highlights,
+      bestMoveArrow: this.bestMoveArrow, userArrows: this.userArrows,
+      displayedFen: this._displayedFen, coachAnnotations: this.coachAnnotations,
+      checkSquare: this.checkSquare, interactive: this.interactive,
+      selectedSquare: this.selectedSquare, legalMoves: this.legalMoves,
+      invertedSquares: this.invertedSquares,
+      chess: this._chessInstance,
+    };
+    const state = { restored: false, restore: null };
+    const update = (position, target = {}) => {
+      if (state.restored || !position || typeof position.fen !== 'function') return false;
+      target = target && typeof target === 'object' ? target : {};
+      this.interactive = false;
+      this.selectedSquare = null; this.legalMoves = [];
+      this.invertedSquares = new Set();
+      this.setChessInstance(position);
+      this.checkSquare = target.kingSquare || null;
+      this.userArrows = target.checkArrows || [];
+      this._animateNext = target.animate === true;
+      this._skipNextSlide = !this._animateNext;
+      this.setPositionFromFen(position.fen());
+      this.setHighlights(target.square ? [{ square: target.square, type: 'highlight' }]
+        : [{ square: target.from, type: 'highlight' }, { square: target.to, type: 'highlight' }]);
+      this.setBestMoveArrow(target.from ? target.from + target.to : null, { color: '#61b8df' });
+      if (target.annotations) this.setCoachAnnotations(target.annotations);
+      else this.clearCoachAnnotations();
+      return true;
+    };
+    const restore = () => {
+      if (state.restored) return;
+      state.restored = true;
+      if (this._previewState === state) this._previewState = null;
+      this._cancelSlide();
+      this.position = saved.position; this.highlights = saved.highlights;
+      this.bestMoveArrow = saved.bestMoveArrow; this.userArrows = saved.userArrows;
+      this._displayedFen = saved.displayedFen;
+      this.coachAnnotations = saved.coachAnnotations;
+      this.checkSquare = saved.checkSquare; this.interactive = saved.interactive;
+      this.selectedSquare = saved.selectedSquare; this.legalMoves = saved.legalMoves;
+      this.invertedSquares = saved.invertedSquares;
+      this.setChessInstance(saved.chess);
+      this._updatePieces(); this._updateHighlights(); this._updateArrows();
+      this._updateCoachAnnotations();
+    };
+    restore.update = update;
+    state.restore = restore;
+    this._previewState = state;
+    update(chess, reference);
+    return restore;
   }
 
   _ensureArrowLayer() {
@@ -804,9 +1042,7 @@ class ChessBoard {
 
 	      if (wasDragging && event) {
 	        this._suppressNextClick = true;
-	        setTimeout(() => {
-	          this._suppressNextClick = false;
-	        }, 0);
+
         const toSq = getSquareFromPoint(event.clientX, event.clientY);
         if (toSq && dragFromSq && this.legalMoves.includes(toSq)) {
           if (this.onMove) this.onMove(dragFromSq, toSq);
@@ -815,9 +1051,7 @@ class ChessBoard {
 	        }
 	      } else if (event && this.pendingDrag?.sq) {
 	        this._suppressNextClick = true;
-	        setTimeout(() => {
-	          this._suppressNextClick = false;
-	        }, 0);
+
 	        this._selectSquare(this.pendingDrag.sq);
 	      }
 
@@ -834,9 +1068,11 @@ class ChessBoard {
       }
     };
 
+    this.cancelDrag = () => cleanupDrag();
     this._addDestroyableListener(this.container,'pointerdown', (e) => {
       if (!this.interactive) return;
-      if (this._prefersTap) return;
+      this._suppressNextClick = false;
+      if (this._prefersTap && e.pointerType !== 'mouse') return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       const sqEl = e.target.closest('.square');
       if (!sqEl) return;

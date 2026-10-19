@@ -35,6 +35,11 @@
     ].forEach((id) => { el[id] = $(id); });
   }
 
+  function setSidebarCollapsed(collapsed) {
+    el['coach-chat-card']?.classList.toggle('sidebar-collapsed', collapsed);
+    el['btn-coach-sidebar-toggle']?.setAttribute('aria-expanded', String(!collapsed));
+  }
+
   // ── localStorage (scoped per uid) ────────────────────────────────────
   function lsChatsKey() { return `sidastuff.coachChats.${state.uid}`; }
   function lsActiveKey() { return `sidastuff.coachActiveChat.${state.uid}`; }
@@ -84,7 +89,8 @@
     renderSidebar();
     renderMessages();
     // On mobile, collapse sidebar after selecting a chat
-    if (window.innerWidth <= 720) el['coach-chat-card']?.classList.add('sidebar-collapsed');
+    if (window.innerWidth <= 720) setSidebarCollapsed(true);
+    focusInput();
   }
   function deleteChat(id) {
     // Guard: deleting the active chat mid-stream orphans send()'s closure and
@@ -115,10 +121,14 @@
     state.chats.forEach((c) => {
       const row = document.createElement('div');
       row.className = 'coach-chat-item' + (c.id === state.activeId ? ' active' : '');
-      row.innerHTML = `<span class="coach-chat-item-title"></span>
-        <button type="button" class="coach-chat-item-del" aria-label="Delete chat"><span class="material-symbols-outlined">delete</span></button>`;
-      row.querySelector('.coach-chat-item-title').textContent = c.title || 'New chat';
-      row.addEventListener('click', () => selectChat(c.id));
+      row.innerHTML = `<button type="button" class="coach-chat-item-title"></button>
+        <button type="button" class="coach-chat-item-del" aria-label="Delete chat"><span class="material-symbols-outlined" aria-hidden="true">delete</span></button>`;
+      const selectButton = row.querySelector('.coach-chat-item-title');
+      selectButton.textContent = c.title || 'New chat';
+      selectButton.title = c.title || 'New chat';
+      selectButton.setAttribute('aria-pressed', String(c.id === state.activeId));
+      selectButton.addEventListener('click', () => selectChat(c.id));
+      row.querySelector('.coach-chat-item-del').setAttribute('aria-label', `Delete ${c.title || 'New chat'}`);
       row.querySelector('.coach-chat-item-del').addEventListener('click', (e) => { e.stopPropagation(); deleteChat(c.id); });
       el['coach-sidebar-list'].appendChild(row);
     });
@@ -130,8 +140,7 @@
     box.innerHTML = '';
     const chat = activeChat();
     if (!chat || !chat.messages.length) {
-      // Empty conversation: a centered welcome hint (NOT a saved message — it
-      // is a placeholder the user dismisses by sending their first message).
+      // Keep the empty-state hint separate from saved messages.
       const empty = document.createElement('div');
       empty.className = 'coach-empty';
       empty.innerHTML = `
@@ -269,6 +278,7 @@
 
   // ── Streaming send ───────────────────────────────────────────────────
   async function send() {
+    if (window.PlayFairPlay && !(await window.PlayFairPlay.verify())) return;
     if (state.streaming) return;
     if (isLocked()) return;
     const app = state.app;
@@ -511,7 +521,10 @@
           else if (event === 'tool_status' && h.onToolStatus) h.onToolStatus(data);
           else if (event === 'tool_result_visible' && h.onToolResultVisible) h.onToolResultVisible(data);
           else if (event === 'done' && h.onDone) h.onDone(data);
-          else if (event === 'error') throw new Error(data.error || 'Coach stream error.');
+          else if (event === 'error') {
+            if (data.usage) refreshUsage(data.usage);
+            throw new Error(data.error || 'Coach stream error.');
+          }
           // init + heartbeat ignored (client owns history now)
         }
       }
@@ -1040,11 +1053,17 @@
     // boost = more, max = most). Only show the locked panel for guests
     // (not signed in). While auth is resolving, hide both.
     if (!state.app || state.app.authState.initialized === false) {
-      el['coach-chat-locked'].hidden = true; el['coach-chat-body'].hidden = true; return;
+      el['coach-chat-locked'].hidden = true; el['coach-chat-body'].hidden = true;
+      if (el['coach-chat-form']) el['coach-chat-form'].hidden = true;
+      if (el['btn-coach-new-chat']) el['btn-coach-new-chat'].disabled = true;
+      return;
     }
     const signedIn = !!state.app.authState.user;
     el['coach-chat-locked'].hidden = signedIn;   // hide upsell when logged in
     el['coach-chat-body'].hidden = !signedIn;     // show chat when logged in
+    if (el['coach-chat-form']) el['coach-chat-form'].hidden = !signedIn;
+    if (el['btn-coach-new-chat']) el['btn-coach-new-chat'].disabled = !signedIn;
+    if (!signedIn) renderSidebar();
     if (signedIn) focusInput();
     applyLockedState();
     renderUsageBar();
@@ -1055,15 +1074,21 @@
     if (!el['coach-usage-bar']) return;
     const usage = state.app?.authState?.usage;
     const plan = state.app?.authState?.plan?.plan || 'free';
-    if (!usage || usage.coachTokens === undefined) { el['coach-usage-bar'].hidden = true; return; }
+    if (!usage || (usage.coachUsagePercent === undefined && usage.coachTokens === undefined)) { el['coach-usage-bar'].hidden = true; return; }
     const used = Number(usage.coachTokens) || 0;
     const limit = usage.coachTokenLimit || (plan === 'max' ? 100000 : plan === 'boost' ? 20000 : 5000);
     el['coach-usage-bar'].hidden = false;
-    const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+    const pct = usage.coachUsagePercent !== undefined ? Math.max(0, Math.min(100, Number(usage.coachUsagePercent) || 0))
+      : limit > 0 ? Math.min(100, Math.floor((used / limit) * 100)) : 0;
     const elFill = el['coach-usage-bar'].querySelector('.coach-usage-fill');
     const elText = el['coach-usage-bar'].querySelector('.coach-usage-text');
     if (elFill) elFill.style.width = pct + '%';
-    if (elText) elText.textContent = `${used.toLocaleString()} / ${limit.toLocaleString()} tokens used today`;
+    el['coach-usage-bar'].setAttribute('role', 'meter');
+    el['coach-usage-bar'].setAttribute('aria-label', 'Daily AI Coach usage');
+    el['coach-usage-bar'].setAttribute('aria-valuemin', '0');
+    el['coach-usage-bar'].setAttribute('aria-valuemax', '100');
+    el['coach-usage-bar'].setAttribute('aria-valuenow', String(pct));
+    if (elText) elText.textContent = `${pct}% of daily Coach allowance used`;
   }
 
   // Update the token usage bar after each message. The `done` SSE event carries
@@ -1074,9 +1099,14 @@
   function refreshUsage(serverUsage) {
     const app = state.app;
     if (!app || !app.authState) return;
-    if (serverUsage && (serverUsage.coachTokens !== undefined || serverUsage.coachTokenLimit !== undefined)) {
+    if (serverUsage?.day && serverUsage.day !== new Date().toISOString().slice(0, 10)) {
+      app._refreshMe?.().then(() => renderUsageBar()).catch(() => {});
+      return;
+    }
+    if (serverUsage && (serverUsage.coachUsagePercent !== undefined || serverUsage.coachTokens !== undefined || serverUsage.coachTokenLimit !== undefined)) {
       app.authState.usage = {
         ...(app.authState.usage || {}),
+        ...serverUsage,
         ...(serverUsage.coachTokens !== undefined ? { coachTokens: serverUsage.coachTokens } : {}),
         ...(serverUsage.coachTokenLimit !== undefined ? { coachTokenLimit: serverUsage.coachTokenLimit } : {}),
       };
@@ -1108,18 +1138,19 @@
     const ta = el['coach-chat-textarea'];
     const send = el['btn-coach-send'];
     const app = state.app;
+    const signedIn = !!app?.authState?.user;
     const reviewRunning = app && typeof app._isBusyWithHeavyAction === 'function' && app.busyAction === 'review';
     const locked = isLocked();
     if (ta) {
       // Disable during streaming too, so typing "silently dies" on Enter isn't
       // possible — the user can't send a second message until the first finishes.
-      ta.disabled = locked || reviewRunning || state.streaming;
+      ta.disabled = !signedIn || locked || reviewRunning || state.streaming;
       if (locked) ta.placeholder = 'This conversation has been ended.';
       else if (reviewRunning) ta.placeholder = 'A game review is running. Wait for it to finish.';
       else if (state.streaming) ta.placeholder = 'Waiting for the coach to finish…';
       else ta.placeholder = 'Ask the coach anything about chess…';
     }
-    if (send) send.disabled = locked || state.streaming || reviewRunning;
+    if (send) send.disabled = !signedIn || locked || state.streaming || reviewRunning;
     // Toggle a notice bubble if needed.
     const box = el['coach-chat-messages']; if (!box) return;
     let notice = box.querySelector('.coach-locked-notice');
@@ -1144,7 +1175,7 @@
       if (state.app && state.app._showCoachSetupModal) state.app._showCoachSetupModal();
     });
     el['btn-coach-sidebar-toggle']?.addEventListener('click', () => {
-      el['coach-chat-card']?.classList.toggle('sidebar-collapsed');
+      setSidebarCollapsed(!el['coach-chat-card']?.classList.contains('sidebar-collapsed'));
     });
     // On mobile the history sidebar is an overlay drawer. Clicking the dimmed
     // area behind it (or pressing Escape) closes the drawer. Listen on the
@@ -1159,14 +1190,14 @@
       // Only close when the drawer is open AND the click is outside the sidebar
       // AND not on the toggle button (which manages its own state).
       if (isMobile && open && !e.target.closest('.coach-sidebar') && !e.target.closest('#btn-coach-sidebar-toggle')) {
-        card.classList.add('sidebar-collapsed');
+        setSidebarCollapsed(true);
       }
     });
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
       const card = el['coach-chat-card'];
       if (card && window.innerWidth <= 720 && !card.classList.contains('sidebar-collapsed')) {
-        card.classList.add('sidebar-collapsed');
+        setSidebarCollapsed(true);
       }
     });
   }
@@ -1176,7 +1207,13 @@
   // reload-loses-history bug — mount() may run before Firebase auth resolves,
   // so we must reload when the uid first becomes known).
   function loadForUid(uid) {
-    if (!uid) { state.uid = null; return; }
+    if (!uid) {
+      state.uid = null;
+      state.chats = [];
+      state.activeId = null;
+      renderSidebar();
+      return;
+    }
     if (uid !== state.uid) {
       state.uid = uid;
       state.chats = []; state.activeId = null;
@@ -1195,7 +1232,7 @@
     if (!el['coach-chat-card']) resolveEls(); // resolve once
     if (!state.mounted) { bindEvents(); state.mounted = true; }
     // Collapse sidebar on mobile by default
-    if (window.innerWidth <= 720) el['coach-chat-card']?.classList.add('sidebar-collapsed');
+    if (window.innerWidth <= 720) setSidebarCollapsed(true);
     renderGate();
     const uid = app.authState && app.authState.user && app.authState.user.uid;
     loadForUid(uid);

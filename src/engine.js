@@ -1,3 +1,5 @@
+import './play/fair-play.js';
+
 const ENGINE_CATALOG = Object.freeze({
   browser: {
     label: 'Browser',
@@ -79,6 +81,7 @@ function getReviewStrengthTier(tierKey) {
 class UciEngine {
   constructor(moduleConfig) {
     this.moduleConfig = moduleConfig;
+    this._unregisterFairPlay = globalThis.window?.PlayFairPlay?.registerEngine?.(this);
     this.ready = false;
     this.messageQueue = [];
     this.activeSearch = null;
@@ -106,6 +109,7 @@ class UciEngine {
   }
 
   async _evaluate(fen, depth = 18, timeoutMs = 20000) {
+    await globalThis.window?.PlayFairPlay?.assertCanAnalyze();
     if (!this.ready) {
       // If crashed, try one auto-restart before giving up
       if (this.crashedError) {
@@ -191,6 +195,7 @@ class UciEngine {
   }
 
   async _evaluateInfinite(fen, timeoutMs = 20000, onDepth = null) {
+    await globalThis.window?.PlayFairPlay?.assertCanAnalyze();
     if (!this.ready) {
       if (this.crashedError) {
         const restarted = await this._restartAfterCrash();
@@ -280,6 +285,7 @@ class UciEngine {
   }
 
   async _evaluateMultiPV(fen, depth = 18, numPV = 3, timeoutMs = 20000) {
+    await globalThis.window?.PlayFairPlay?.assertCanAnalyze();
     if (!this.ready) {
       // If crashed, try one auto-restart before giving up
       if (this.crashedError) {
@@ -728,6 +734,15 @@ class BrowserStockfishEngine extends UciEngine {
   }
 
   _send(cmd) {
+    // Check again at the protocol boundary: a game can start while a queued
+    // search is waiting for Stockfish's ready response.
+    if (typeof cmd === 'string' && /^go\b/.test(cmd) && window.PlayFairPlay?.isBlocked()) {
+      this._searchRunning = false;
+      this._cancelActiveSearch();
+      const error = new Error('Analysis is paused until your online game ends.');
+      error.code = 'live_game_fair_play';
+      throw error;
+    }
     if (this.crashedError) {
       throw this.crashedError;
     }
@@ -761,6 +776,7 @@ class BrowserStockfishEngine extends UciEngine {
   }
 
   destroy() {
+    this._unregisterFairPlay?.();
     this._cancelActiveSearch();
     this.ready = false;
     if (this.worker) {

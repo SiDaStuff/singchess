@@ -6,7 +6,7 @@
 // rating delta twice. This handler now records attempted+1 (plus a per-puzzle
 // dedupe flag) WITHOUT touching rating/solved/streak, and never on a repeat
 // submission of the same puzzleId.
-const { getProfile, patchProfile, requireUser, json } = require('./_lib/user-service');
+const { getProfile, patchProfile, requireFeature, json } = require('./_lib/user-service');
 
 const MIN_RATING = 100;
 const MAX_RATING = 4000;
@@ -16,7 +16,7 @@ exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Use POST.' });
 
   try {
-    const authUser = await requireUser(event);
+    const authUser = await requireFeature(event, 'puzzles');
     const body = JSON.parse(event.body || '{}');
 
     const userId = String(body.userId || '').trim();
@@ -47,4 +47,3 @@ exports.handler = async (event) => {
     return json(err.statusCode || 500, { error: err.message || 'Could not record puzzle attempt.' });
   }
 };
-

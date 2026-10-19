@@ -19,6 +19,7 @@
 // existing firebase usage/{uid}/{day}/{kind} structure. No separate counter needed.
 
 const crypto = require('crypto');
+const { aggregateFlag } = require('./_lib/coach-abuse');
 const cookie = require('cookie');
 const { initAdmin, requireUser, json, activePlan, usageDay, usageWeek, planRank } = require('./_lib/user-service');
 
@@ -107,38 +108,25 @@ async function reportAbuse(event) {
       return json(429, { error: 'You have submitted too many reports. Please slow down.' });
     }
 
-    // Save the individual report.
-    const reportRef = db.ref('abuse/reports').push();
-    await reportRef.set({
-      reporterUid: reporter.uid,
-      reporterEmail: reporter.email,
-      flaggedUid: flaggedUser.uid,
-      flaggedEmail,
-      reason,
-      details,
-      reportedAt: firebaseAdmin.database.ServerValue.TIMESTAMP,
-      dismissed: false,
+    // Save the report and its active index atomically, so a simultaneous
+    // dismissal cannot reopen already-closed evidence or hide a new report.
+    const reportId = db.ref('abuse/reports').push().key;
+    await db.ref('abuse').transaction(root => {
+      const data = root || {};
+      data.flagged ||= {};
+      data.reports ||= {};
+      const now = Math.max(Date.now(), (Number(data.flagged[flaggedUser.uid]?.lastReportedAt) || 0) + 1);
+      data.reports[reportId] = { reporterUid: reporter.uid, reporterEmail: reporter.email,
+        flaggedUid: flaggedUser.uid, flaggedEmail, reason, details, reportedAt: now, dismissed: false };
+      data.flagged[flaggedUser.uid] = aggregateFlag(data.flagged[flaggedUser.uid], {
+        reason, reporter: reporter.email, email: flaggedEmail, now,
+      });
+      return data;
     });
 
-    // Aggregate into the flagged index.
-    const flaggedRef = db.ref(`abuse/flagged/${flaggedUser.uid}`);
-    await flaggedRef.transaction((current) => {
-      const data = current || { count: 0, reasons: [], flaggedBy: [], firstReportedAt: Date.now(), lastReportedAt: Date.now() };
-      if (!Array.isArray(data.reasons)) data.reasons = [];
-      if (!Array.isArray(data.flaggedBy)) data.flaggedBy = [];
-      data.count = (data.count || 0) + 1;
-      data.reasons.push(reason);
-      data.flaggedBy.push(reporter.email);
-      data.lastReportedAt = Date.now();
-      if (!data.firstReportedAt) data.firstReportedAt = Date.now();
-      data.flaggedEmail = flaggedEmail;
-      return data;
-    }, undefined, false);
-
-    // Track fingerprints for multi-account detection (both reporter and flagged).
+    // Record only the reporter's actual fingerprint; never assign it to the accused.
     const fp = clientFingerprint(event);
     await _recordFingerprints(db, reporter.uid, fp);
-    await _recordFingerprints(db, flaggedUser.uid, fp);
 
     return json(200, { success: true, message: 'Account flagged for review. Thank you.' });
   } catch (err) {
@@ -169,7 +157,7 @@ async function listFlaggedAccounts(event) {
   // Resolve email for each flagged uid.
   const results = [];
   for (const [uid, data] of Object.entries(flagged)) {
-    if (data.dismissedAt) continue; // skip dismissed
+    if (data.dismissedAt && Number(data.lastReportedAt) <= Number(data.dismissedAt)) continue;
 
     // Gather all individual reports for this uid.
     const uidReports = [];
@@ -356,10 +344,7 @@ async function _computeUsageAbuseScore(uid) {
     const coachLimit = plan === 'boost' ? 20000 : plan === 'max' ? 100000 : 5000;
     if (coachLimit && coachTokens > coachLimit * 1.5) {
       score += 0.4;
-      details.push(`Coach tokens far over daily cap: ${coachTokens}/${coachLimit}`);
-    } else if (coachLimit && coachTokens > coachLimit * 0.8) {
-      score += 0.2;
-      details.push(`Coach tokens near daily cap: ${coachTokens}/${coachLimit}`);
+      details.push(`AI Coach usage far over daily allowance: ${Math.floor(coachTokens / coachLimit * 100)}%`);
     }
 
     // Check for manual PGN imports (bulk importers).
@@ -372,29 +357,8 @@ async function _computeUsageAbuseScore(uid) {
       details.push(`Elevated PGN importing: ${manualImports} imports today`);
     }
 
-    // Total API calls (sum of everything in today's usage except nested week).
-    // NOT gated on plan — a free account making thousands of calls is MORE
-    // suspicious (quota bypass), and even paid accounts shouldn't be at 10k+.
-    let totalCalls = 0;
-    for (const [key, val] of Object.entries(todayUsage)) {
-      if (key !== 'week' && typeof val === 'number') totalCalls += val;
-    }
-    if (totalCalls > 10000) {
-      score += 1.2;
-      details.push(`Extreme API activity: ${totalCalls} calls today (likely automated/abuse)`);
-    } else if (totalCalls > 5000) {
-      score += 0.9;
-      details.push(`Very high API activity: ${totalCalls} calls today`);
-    } else if (totalCalls > 2000) {
-      score += 0.6;
-      details.push(`High API activity: ${totalCalls} calls today`);
-    } else if (totalCalls > 800) {
-      score += 0.4;
-      details.push(`Elevated API activity: ${totalCalls} calls today`);
-    } else if (totalCalls > 300) {
-      score += 0.2;
-      details.push(`Above-normal API activity: ${totalCalls} calls today`);
-    }
+    // These counters measure different units (generated output, games, imports).
+    // They cannot be added to infer API requests or justify an abuse score.
   } catch (_) {
     // Best-effort — don't fail the whole request if usage stats are unavailable.
   }
@@ -513,52 +477,25 @@ async function handleAbuseAction(event) {
   const { db, admin: firebaseAdmin } = initAdmin();
 
   if (action === 'dismiss') {
-    // Mark the aggregated flagged entry as dismissed.
-    await db.ref(`abuse/flagged/${targetUid}/dismissedAt`).set(firebaseAdmin.database.ServerValue.TIMESTAMP);
-    await db.ref(`abuse/flagged/${targetUid}/dismissedBy`).set(actor.email);
-
-    // Audit log.
-    await db.ref('abuse/actions').push().set({
-      action: 'dismiss',
-      actor: actor.email,
-      targetUid,
-      timestamp: firebaseAdmin.database.ServerValue.TIMESTAMP,
-    });
-
-    // Mark all individual reports as dismissed.
-    const reportsSnap = await db.ref('abuse/reports')
-      .orderByChild('flaggedUid')
-      .equalTo(targetUid)
-      .once('value');
-    if (reportsSnap.exists()) {
-      const updates = {};
-      reportsSnap.forEach((child) => {
-        updates[`${child.key}/dismissed`] = true;
-        updates[`${child.key}/dismissedAt`] = firebaseAdmin.database.ServerValue.TIMESTAMP;
-        updates[`${child.key}/dismissedBy`] = actor.email;
-      });
-      const batch = {};
-      for (const [key, val] of Object.entries(updates)) {
-        batch[`abuse/reports/${key}`] = val;
-      }
-      // Write in chunks to avoid oversized updates.
-      const chunks = [];
-      let current = {};
-      let size = 0;
-      for (const [k, v] of Object.entries(batch)) {
-        current[k] = v;
-        size += JSON.stringify([k, v]).length;
-        if (size > 8000) { // keep under 16K Firebase limit
-          chunks.push(current);
-          current = {};
-          size = 0;
+    const auditId = db.ref('abuse/actions').push().key;
+    await db.ref('abuse').transaction(root => {
+      const data = root || {};
+      const now = Date.now();
+      data.flagged ||= {};
+      const flag = data.flagged[targetUid] ||= {};
+      flag.dismissedAt = Math.max(now, Number(flag.lastReportedAt) || 0);
+      flag.dismissedBy = actor.email;
+      for (const report of Object.values(data.reports || {})) {
+        if (report.flaggedUid === targetUid && Number(report.reportedAt) <= flag.dismissedAt) {
+          report.dismissed = true;
+          report.dismissedAt = flag.dismissedAt;
+          report.dismissedBy = actor.email;
         }
       }
-      if (Object.keys(current).length) chunks.push(current);
-      for (const chunk of chunks) {
-        await db.ref().update(chunk);
-      }
-    }
+      data.actions ||= {};
+      data.actions[auditId] = { action: 'dismiss', actor: actor.email, targetUid, timestamp: now };
+      return data;
+    });
 
     return json(200, { success: true, action: 'dismissed', uid: targetUid });
   }
@@ -610,12 +547,25 @@ async function handleAbuseAction(event) {
 
 // ── Track user fingerprint for multi-account detection ───────────────────────
 // Called from other handlers (e.g. on login, game import) to build up the index.
-async function trackLoginFingerprint(uid, event) {
+const fingerprintSeen = new Map();
+const fingerprintPending = new Map();
+function trackLoginFingerprint(uid, event) {
+  const task = (fingerprintPending.get(uid) || Promise.resolve()).then(() => recordLoginFingerprint(uid, event));
+  fingerprintPending.set(uid, task);
+  return task.finally(() => { if (fingerprintPending.get(uid) === task) fingerprintPending.delete(uid); });
+}
+async function recordLoginFingerprint(uid, event) {
   try {
     const { db } = initAdmin();
     const fp = clientFingerprint(event);
+    const signature = `${fp.ipHash || ''}:${fp.cookieHash || ''}:${sha256(`${fp.ua}:${fp.lang}`)}`;
+    const now = Date.now(), previous = fingerprintSeen.get(uid);
+    if (previous?.signature === signature && now - previous.at < 120000) return false;
     await _recordFingerprints(db, uid, fp);
-  } catch (_) { /* best-effort */ }
+    fingerprintSeen.set(uid, { signature, at: now });
+    if (fingerprintSeen.size > 4096) fingerprintSeen.delete(fingerprintSeen.keys().next().value);
+    return true;
+  } catch (_) { return false; /* best-effort */ }
 }
 
 // Flag a user for potential multi-accounting (called when the same IP is
@@ -666,19 +616,10 @@ async function checkMultiAccount(uid, event) {
       // to avoid false positives from shared networks (office/school/cafe).
       if (confidence === 'high') {
         const flaggedRef = db.ref(`abuse/flagged/${uid}`);
-        await flaggedRef.transaction((current) => {
-          const data = current || { count: 0, reasons: [], flaggedBy: [], firstReportedAt: now, lastReportedAt: now };
-          if (!Array.isArray(data.reasons)) data.reasons = [];
-          if (!Array.isArray(data.flaggedBy)) data.flaggedBy = [];
-          data.count = (data.count || 0) + 1;
-          data.reasons.push(`Multi-account: shares IP + device cookie with ${linked.length} account(s)`);
-          data.flaggedBy.push('system:multi-account');
-          data.lastReportedAt = now;
-          if (!data.firstReportedAt) data.firstReportedAt = now;
-          data.autoFlagged = true;
-          data.autoFlagSource = 'multi-account';
-          return data;
-        }, undefined, false);
+        await flaggedRef.transaction(current => ({
+          ...aggregateFlag(current, { reason: `Multi-account: shares IP + device cookie with ${linked.length} account(s)`, reporter: 'system:multi-account', now }),
+          autoFlagged: true, autoFlagSource: 'multi-account',
+        }), undefined, false);
       }
 
       return { linkedUids: linked, count: linked.length };

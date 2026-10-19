@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import { Chess } from 'chess.js';
+import { TIME_CONTROLS, reconstructGame, completedPgn, resultFor, isFinished, consumeNdjson, consumeSse } from '../src/play/state.js';
+
+const full = { id: 'abcd1234', initialFen: 'startpos', rated: false, clock: { initial: 600000, increment: 5000 }, white: { id: 'alice', name: 'Alice', rating: 1600 }, black: { id: 'bob', name: 'Bob', rating: 1650 } };
+assert.equal(TIME_CONTROLS.length, 11);
+assert.deepEqual(TIME_CONTROLS.filter(c => c.mode === 'seek').map(c => `${c.time}+${c.increment}`), ['10+0', '10+5', '15+10', '30+0', '30+20']);
+assert.equal(TIME_CONTROLS.filter(c => c.group === 'Bullet').every(c => c.mode === 'unavailable'), true);
+const state = { moves: 'e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 b5a4 g8f6 e1h1', status: 'resign', winner: 'white' };
+const position = reconstructGame(full, state);
+assert.equal(position.ply, 9); assert.equal(position.lastMove, 'e1g1'); assert.equal(position.chess.get('g1').type, 'k');
+const parsed = new Chess(); assert.equal(parsed.load_pgn(completedPgn(full, state)), true); assert.equal(parsed.history().length, 9); assert.equal(parsed.header().Result, '1-0'); assert.equal(parsed.header().TimeControl, '600+5');
+assert.equal(resultFor(full, state, 'white').outcome, 'Victory'); assert.equal(resultFor(full, state, 'black').outcome, 'Defeat');
+assert.equal(resultFor(full, { status: 'draw' }, 'black').outcome, 'Draw'); assert.equal(isFinished('started'), false);
+assert.throws(() => completedPgn(full, { status: 'started', moves: 'e2e4' }), /after/);
+assert.throws(() => reconstructGame(full, { moves: 'e2e5' }), /synchronized/);
+const aborted = new Chess(); assert.equal(aborted.load_pgn(completedPgn(full, { status: 'aborted', moves: '' })), true); assert.equal(aborted.header().Termination, 'aborted');
+const promoted = reconstructGame({ ...full, initialFen: '7k/P7/8/8/8/8/8/7K w - - 0 1' }, { moves: 'a7a8n', status: 'started' }); assert.equal(promoted.chess.get('a8').type, 'n');
+const encoder = new TextEncoder(), events = [];
+const response = new Response(new ReadableStream({ start(controller) { for (const text of ['\n{"type":"game', 'State","moves":"e2e4"}\n\n', '{"type":"gameState","moves":"e2e4 e7e5"}']) controller.enqueue(encoder.encode(text)); controller.close(); } }));
+await consumeNdjson(response, event => events.push(event)); assert.equal(events.length, 2); assert.equal(events[1].moves, 'e2e4 e7e5');
+const sseEvents = [];
+await consumeSse(new Response(': keep-alive\n\ndata: {"type":"gameState","moves":"e2e4"}\n\n'), event => sseEvents.push(event));
+assert.equal(sseEvents.length, 1); assert.equal(sseEvents[0].moves, 'e2e4');
+console.log('PASS Play control restrictions, authoritative replay/castling/promotion, terminal results, real PGN round-trip and split NDJSON streaming');

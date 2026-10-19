@@ -4,8 +4,8 @@
   "description": "AI chess review, coach, and puzzle training.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f1115",
-  "theme_color": "#0f1115",
+  "background_color": "#141817",
+  "theme_color": "#141817",
   "icons": [
     {
       "src": "/assets/icon.png",

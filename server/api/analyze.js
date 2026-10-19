@@ -50,11 +50,12 @@ const REALLY_BIG_SEVERITY = 1.0;
 
 // Build a review profile object from a profile spec + user multiPv override.
 function _reviewProfile(spec, profile) {
+  const selectedProfile = profile || {};
   return {
     mode: spec.mode,
     movetimeMs: spec.movetimeMs,
     depth: spec.depth,
-    multiPv: Math.max(1, Math.min(Number(profile.multiPv) || spec.multiPv, spec.multiPv)),
+    multiPv: Math.max(1, Math.min(Number(selectedProfile.multiPv) || spec.multiPv, spec.multiPv)),
     timeoutMs: spec.timeoutMs,
   };
 }
@@ -155,10 +156,14 @@ async function _evaluateProgressiveReview({ analyzer, engines, moves, initialFen
   const midStart = Math.floor(total * 0.50);
   const deepStart = Math.floor(total * 0.75);
 
+  // Strong reviews have no separate mid profile; use their deep profile for
+  // the middle tier so every position is still analyzed exactly once.
+  const midSpec = baseProfile.mid || baseProfile.deep || baseProfile.quickScan;
+  const deepSpec = baseProfile.deep || baseProfile.mid || baseProfile.quickScan;
   const tiers = [
-    { name: 'quick', start: 0, end: midStart, spec: baseProfile.quickScan },
-    { name: 'mid', start: midStart, end: deepStart, spec: baseProfile.mid },
-    { name: 'deep', start: deepStart, end: total, spec: baseProfile.deep },
+    { name: 'quick', start: 0, end: midStart, spec: baseProfile.quickScan || midSpec },
+    { name: 'mid', start: midStart, end: deepStart, spec: midSpec },
+    { name: 'deep', start: deepStart, end: total, spec: deepSpec },
   ];
 
   for (const tier of tiers) {
@@ -212,15 +217,19 @@ function cachedEngineAdapter(engine) {
   // The trailing options arg carries mode/movetimeMs for server review.
   // Cache keys include the resolved mode + budget so depth- and movetime-mode
   // results for the same FEN never collide.
-  const optKey = (options) =>
-    options && options.mode === 'movetime' ? `|mt|${options.movetimeMs}` : '|dep';
+  const optKey = (options, timeoutMs) => {
+    const mode = options?.mode || 'depth';
+    const budget = mode === 'movetime' || mode === 'depth+movetime'
+      ? Math.max(0, Number(options.movetimeMs) || 0) : 0;
+    return `|${mode}|${budget}|timeout:${Number(timeoutMs) || 0}`;
+  };
   return {
     get ready() {
       return engine.ready;
     },
     newGame: () => engine.newGame(),
     evaluate: async (fen, depth, timeoutMs, options) => {
-      const key = `eval|${depth}|${hashFen(fen)}${optKey(options)}`;
+      const key = `eval|${depth}|${hashFen(fen)}${optKey(options, timeoutMs)}`;
       const cached = cacheGet(key);
       if (cached) return cached;
       const result = await engine.evaluate(fen, depth, timeoutMs, options);
@@ -228,7 +237,7 @@ function cachedEngineAdapter(engine) {
       return result;
     },
     evaluateMultiPV: async (fen, depth, numPV, timeoutMs, options) => {
-      const key = `multipv|${depth}|${numPV}|${hashFen(fen)}${optKey(options)}`;
+      const key = `multipv|${depth}|${numPV}|${hashFen(fen)}${optKey(options, timeoutMs)}`;
       const cached = cacheGet(key);
       if (cached) return cached;
       const result = await engine.evaluateMultiPV(fen, depth, numPV, timeoutMs, options);

@@ -31,6 +31,7 @@
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
+    Cross-Origin-Opener-Policy = "same-origin-allow-popups"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
     Strict-Transport-Security = "max-age=31536000; includeSubDomains"
 
@@ -46,6 +47,12 @@
   for = "/index.html"
   [headers.values]
     Cache-Control = "no-store"
+
+[[headers]]
+  for = "/play/callback"
+  [headers.values]
+    Cache-Control = "no-store"
+    Referrer-Policy = "no-referrer"
 
 # SPA fallback: every unmatched path serves index.html (so client-side routing
 # /coach /review /account works on a cold load / refresh). Must be status 200

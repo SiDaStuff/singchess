@@ -1,0 +1,1084 @@
+<section role="main" id="play-page" class="page-panel play-page" aria-label="Play" hidden></section>
+
+<section role="main" id="page-login" class="page-panel auth-page" hidden>
+      <div class="auth-intro">
+        <span class="eyebrow">Sing Chess</span>
+        <p class="auth-story-heading">Every game.<br>A chance to improve.</p>
+        <p>Your games and progress in one place.</p>
+        <div class="auth-scene" aria-hidden="true">
+          <div class="auth-scene-board">
+            <span></span><span></span><span><img src="/assets/pieces/cburnett/bK.svg" alt=""></span><span></span>
+            <span></span><span><img src="/assets/pieces/cburnett/bP.svg" alt=""></span><span></span><span></span>
+            <span></span><span></span><span><img src="/assets/pieces/cburnett/wN.svg" alt=""></span><span></span>
+            <span><img src="/assets/pieces/cburnett/wK.svg" alt=""></span><span></span><span></span><span></span>
+          </div>
+          <span class="auth-scene-caption">Review. Practice. Improve.</span>
+        </div>
+      </div>
+      <div class="card panel-wide page-card auth-card">
+        <div class="page-card-head">
+          <h1>Welcome back</h1>
+          <p>Sign in to save your reviews and continue your training.</p>
+        </div>
+        <label class="field">
+          <span class="field-label">Email</span>
+          <input id="login-email" class="input-select" type="email" autocomplete="email" placeholder="you@example.com">
+        </label>
+        <label class="field">
+          <span class="field-label">Password</span>
+          <input id="login-password" class="input-select" type="password" autocomplete="current-password" placeholder="Password">
+        </label>
+        <div class="auth-actions"><span class="auth-divider">Your move</span>
+          <button id="btn-login-submit" class="btn btn-primary" type="button">Sign In</button>
+          <button id="btn-login-google" class="btn btn-google" type="button">
+            <span class="btn-content">
+              <svg class="btn-google-icon" viewBox="0 0 24 24" width="18" height="18" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path fill="#4285F4" d="M23.64 12.205c0-.78-.07-1.53-.2-2.255H12v4.27h6.84c-.295 1.57-1.19 2.9-2.54 3.8v3.15h4.1c2.4-2.205 3.78-5.42 3.78-9.0z"/>
+                <path fill="#34A853" d="M12 24c3.24 0 5.97-1.075 7.96-2.92l-4.1-3.15c-1.145.77-2.6 1.225-3.86 1.225-2.97 0-5.49-2.005-6.4-4.705H1.37v2.95C3.35 21.94 7.35 24 12 24z"/>
+                <path fill="#FBBC05" d="M5.6 14.4c-.26-.77-.41-1.585-.41-2.425s.15-1.655.41-2.425V6.6H1.37A11.965 11.965 0 0 0 0 12c0 1.95.45 3.8 1.37 5.4l4.23-3.0z"/>
+                <path fill="#EA4335" d="M12 4.8c1.76 0 3.35.605 4.6 1.795l3.45-3.45C17.97 1.3 15.24 0 12 0 7.35 0 3.35 2.06 1.37 5.6l4.23 3.0C6.51 6.795 9.03 4.8 12 4.8z"/>
+                <path fill="none" d="M0 0h24v24H0z"/>
+              </svg>
+              <span class="btn-label">Continue with Google</span>
+            </span>
+          </button>
+        </div>
+        <p class="account-status" id="login-status" aria-live="polite" role="status"></p>
+        <div class="page-actions">
+          <button id="btn-login-forgot-password" class="btn btn-secondary" type="button">Forgot password?</button>
+          <button id="btn-page-to-signup" class="btn btn-secondary" type="button">Create account</button>
+        </div>
+      </div>
+    </section>
+
+<section role="main" id="page-signup" class="page-panel onboarding-page" hidden>
+      <div class="card panel-wide page-card onboarding-card">
+        <div class="page-card-head">
+          <span class="eyebrow" id="signup-eyebrow">Make yourself at home</span>
+          <h1 id="signup-headline">Your chess, your way.</h1>
+          <p id="signup-subtitle">Choose a board you love. Find your level. Start improving.</p>
+        </div>
+
+        
+        <div class="onboard-wizard-progress" aria-hidden="true">
+          <div class="onboard-wizard-progress-fill" id="onboard-progress-fill" style="width:40%"></div>
+        </div>
+        <p class="onboarding-step-label" id="onboard-step-label" aria-live="polite" role="status">Step 1 of 4</p>
+
+        
+        <div class="onboard-step" id="onboard-step-1">
+          <h2 class="onboard-step-title">Build your favorite board</h2>
+          <p class="onboard-step-sub">Try a color and piece set. Your preview updates as you choose.</p>
+          <div class="onboard-appearance-grid">
+            <div class="field">
+              <span class="field-label">Board Colors</span>
+              <div class="select-row" data-cols="3" role="radiogroup" aria-label="Board colors">
+                <label class="select-row-item board-color-chip">
+                  <input type="radio" name="onboard-board-theme" value="classic" checked>
+                  <span class="board-color-split" style="background:linear-gradient(135deg,#f7f1e4 50%,#b88d58 50%)"></span>
+                  <span class="board-color-chip-label">Classic</span>
+                </label>
+                <label class="select-row-item board-color-chip">
+                  <input type="radio" name="onboard-board-theme" value="green">
+                  <span class="board-color-split" style="background:linear-gradient(135deg,#eeeed2 50%,#769656 50%)"></span>
+                  <span class="board-color-chip-label">Tournament Green</span>
+                </label>
+                <label class="select-row-item board-color-chip">
+                  <input type="radio" name="onboard-board-theme" value="blue">
+                  <span class="board-color-split" style="background:linear-gradient(135deg,#d8e2e7 50%,#799db3 50%)"></span>
+                  <span class="board-color-chip-label">Coastal Blue</span>
+                </label>
+                <label class="select-row-item board-color-chip">
+                  <input type="radio" name="onboard-board-theme" value="slate">
+                  <span class="board-color-split" style="background:linear-gradient(135deg,#dfe5ea 50%,#6d7883 50%)"></span>
+                  <span class="board-color-chip-label">Slate</span>
+                </label>
+                <label class="select-row-item board-color-chip">
+                  <input type="radio" name="onboard-board-theme" value="walnut">
+                  <span class="board-color-split" style="background:linear-gradient(135deg,#f1d8ae 50%,#8a5a32 50%)"></span>
+                  <span class="board-color-chip-label">Walnut</span>
+                </label>
+                <label class="select-row-item board-color-chip">
+                  <input type="radio" name="onboard-board-theme" value="rose">
+                  <span class="board-color-split" style="background:linear-gradient(135deg,#f7e2df 50%,#b56a72 50%)"></span>
+                  <span class="board-color-chip-label">Rosewood</span>
+                </label>
+              </div>
+            </div>
+            <div class="field">
+              <span class="field-label">Piece Icons</span>
+              <div class="select-row" data-cols="3" role="radiogroup" aria-label="Piece icons">
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="cburnett" checked>
+                  <img class="piece-set-knight" src="/assets/pieces/cburnett/wN.svg" alt="">
+                  <span class="piece-set-name">Cburnett</span>
+                </label>
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="celtic">
+                  <img class="piece-set-knight" src="/assets/pieces/celtic/wN.svg" alt="">
+                  <span class="piece-set-name">Celtic</span>
+                </label>
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="chessnut">
+                  <img class="piece-set-knight" src="/assets/pieces/chessnut/wN.svg" alt="">
+                  <span class="piece-set-name">Chessnut</span>
+                </label>
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="fantasy">
+                  <img class="piece-set-knight" src="/assets/pieces/fantasy/wN.svg" alt="">
+                  <span class="piece-set-name">Fantasy</span>
+                </label>
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="firi">
+                  <img class="piece-set-knight" src="/assets/pieces/firi/wN.svg" alt="">
+                  <span class="piece-set-name">Firi</span>
+                </label>
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="kiwen-suwi">
+                  <img class="piece-set-knight" src="/assets/pieces/kiwen-suwi/wN.svg" alt="">
+                  <span class="piece-set-name">Kiwen-suwi</span>
+                </label>
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="merida">
+                  <img class="piece-set-knight" src="/assets/pieces/merida/wN.svg" alt="">
+                  <span class="piece-set-name">Merida</span>
+                </label>
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="rhosgfx">
+                  <img class="piece-set-knight" src="/assets/pieces/rhosgfx/wN.svg" alt="">
+                  <span class="piece-set-name">Rhosgfx</span>
+                </label>
+                <label class="select-row-item piece-set-chip">
+                  <input type="radio" name="onboard-piece-theme" value="spatial">
+                  <img class="piece-set-knight" src="/assets/pieces/spatial/wN.svg" alt="">
+                  <span class="piece-set-name">Spatial</span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="settings-preview-grid onboarding-preview"><div><span class="eyebrow">Live preview</span><p>A board that feels like yours.</p></div>
+            <div class="appearance-preview-board" id="onboard-board-preview" aria-label="Board preview"></div>
+          </div>
+          <div class="onboard-nav">
+            <span></span>
+            <button id="btn-onboard-next-1" class="btn btn-primary" type="button">Continue</button>
+          </div>
+          <button id="btn-onboard-skip-1" class="onboard-skip" type="button">Use the defaults and create an account</button>
+        </div>
+
+        
+        <div class="onboard-step" id="onboard-step-2" hidden>
+          <h2 class="onboard-step-title">Pick your skill level</h2>
+          <p class="onboard-step-sub">We'll match puzzles to your level. You can change this anytime in Settings.</p>
+          <div class="field">
+            <span class="field-label">Your skill level</span>
+            <div class="select-row" data-cols="2" role="radiogroup" aria-label="Skill level">
+              <label class="select-row-item">
+                <input type="radio" name="onboard-skill" value="1000">
+                <span>Beginner</span>
+                <small class="onboard-skill-rating">1000</small>
+              </label>
+              <label class="select-row-item">
+                <input type="radio" name="onboard-skill" value="1500" checked>
+                <span>Intermediate</span>
+                <small class="onboard-skill-rating">1500</small>
+              </label>
+              <label class="select-row-item">
+                <input type="radio" name="onboard-skill" value="1900">
+                <span>Advanced</span>
+                <small class="onboard-skill-rating">1900</small>
+              </label>
+              <label class="select-row-item">
+                <input type="radio" name="onboard-skill" value="2200">
+                <span>Expert</span>
+                <small class="onboard-skill-rating">2200</small>
+              </label>
+            </div>
+          </div>
+          <div class="onboard-nav">
+            <button id="btn-onboard-back-2" class="btn btn-secondary" type="button">Back</button>
+            <button id="btn-onboard-next-2" class="btn btn-primary" type="button">Continue</button>
+          </div>
+          <button id="btn-onboard-skip-2" class="onboard-skip" type="button">Use the defaults and create an account</button>
+        </div>
+
+        
+        <div class="onboard-step" id="onboard-step-3" hidden>
+          <h2 class="onboard-step-title">Connect your chess accounts</h2>
+          <p class="onboard-step-sub">Add a Lichess or Chess.com username to make importing your games one click. We only load public games.</p>
+          <div class="onboard-integration-list">
+            <label class="field onboard-integration-field">
+              <span class="field-label"><span class="onboard-provider-mark lichess-logo" aria-hidden="true"></span>Lichess username</span>
+              <input id="onboard-lichess-username" class="input-select" type="text" autocomplete="off" placeholder="e.g. hikaru" maxlength="40">
+              <span class="onboard-field-help">Import your recent public Lichess games.</span>
+            </label>
+            <label class="field onboard-integration-field">
+              <span class="field-label"><span class="onboard-provider-mark chesscom-logo" aria-hidden="true"></span>Chess.com username</span>
+              <input id="onboard-chesscom-username" class="input-select" type="text" autocomplete="off" placeholder="e.g. MagnusCarlsen" maxlength="40">
+              <span class="onboard-field-help">Import your recent public Chess.com games.</span>
+            </label>
+          </div>
+          <div class="onboard-integration-note">
+            <span class="material-symbols-outlined" aria-hidden="true">bolt</span>
+            <span>After setup, use Quick load in the Import a game window to review a recent game.</span>
+          </div>
+          <div class="onboard-nav">
+            <button id="btn-onboard-back-3" class="btn btn-secondary" type="button">Back</button>
+            <button id="btn-onboard-next-3" class="btn btn-primary" type="button">Continue</button>
+          </div>
+          <button id="btn-onboard-skip-3" class="onboard-skip" type="button">Skip for now</button>
+        </div>
+
+        <div class="onboard-step" id="onboard-step-4" hidden>
+          <h2 class="onboard-step-title">Create your free account</h2>
+          <p class="onboard-step-sub">Save your setup, track progress, and keep your settings everywhere.</p>
+          <label class="field">
+            <span class="field-label">Username</span>
+            <input id="signup-username" class="input-select" type="text" autocomplete="username" placeholder="Your public username" maxlength="40">
+          </label>
+          <label class="field">
+            <span class="field-label">Email</span>
+            <input id="signup-email" class="input-select" type="email" autocomplete="email" placeholder="you@example.com">
+          </label>
+          <label class="field">
+            <span class="field-label">Password</span>
+            <input id="signup-password" class="input-select" type="password" autocomplete="new-password" placeholder="Password">
+          </label>
+          <div class="auth-actions">
+            <button id="btn-signup-submit" class="btn btn-primary" type="button">Create Account</button>
+            <button id="btn-signup-google" class="btn btn-google" type="button">
+              <span class="btn-content">
+                <svg class="btn-google-icon" viewBox="0 0 24 24" width="18" height="18" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path fill="#4285F4" d="M23.64 12.205c0-.78-.07-1.53-.2-2.255H12v4.27h6.84c-.295 1.57-1.19 2.9-2.54 3.8v3.15h4.1c2.4-2.205 3.78-5.42 3.78-9.0z"/>
+                  <path fill="#34A853" d="M12 24c3.24 0 5.97-1.075 7.96-2.92l-4.1-3.15c-1.145.77-2.6 1.225-3.86 1.225-2.97 0-5.49-2.005-6.4-4.705H1.37v2.95C3.35 21.94 7.35 24 12 24z"/>
+                  <path fill="#FBBC05" d="M5.6 14.4c-.26-.77-.41-1.585-.41-2.425s.15-1.655.41-2.425V6.6H1.37A11.965 11.965 0 0 0 0 12c0 1.95.45 3.8 1.37 5.4l4.23-3.0z"/>
+                  <path fill="#EA4335" d="M12 4.8c1.76 0 3.35.605 4.6 1.795l3.45-3.45C17.97 1.3 15.24 0 12 0 7.35 0 3.35 2.06 1.37 5.6l4.23 3.0C6.51 6.795 9.03 4.8 12 4.8z"/>
+                  <path fill="none" d="M0 0h24v24H0z"/>
+                </svg>
+                <span class="btn-label">Continue with Google</span>
+              </span>
+            </button>
+          </div>
+          <p class="account-status" id="signup-status" aria-live="polite" role="status"></p>
+          <p class="onboard-legal">By continuing you agree to our <a href="/terms" data-route="/terms">Terms</a> and <a href="/privacy" data-route="/privacy">Privacy Policy</a>.</p>
+          <div class="onboard-nav">
+            <button id="btn-onboard-back-4" class="btn btn-secondary" type="button">Back</button>
+          </div>
+          <div class="page-actions">
+            <button id="btn-page-to-login" class="btn btn-secondary" type="button">Already have an account</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+<section role="main" id="page-account" class="page-panel" hidden>
+      <div class="card panel-wide page-card account-page-card" id="account-page-card">
+        <div class="page-card-head">
+          <span class="eyebrow">Your space</span><h1>Your chess is taking shape.</h1>
+          <p>A clear view of your progress, your plan, and the details that make this account yours.</p>
+        </div>
+        <div id="account-loading" class="account-loading" hidden aria-live="polite" role="status">
+          <p>Loading your account…</p>
+        </div>
+        <div id="account-signed-out-page" hidden>
+          <div class="account-hero">
+            <h2>Welcome back</h2>
+            <p>Sign in to view your plan, usage, and puzzle rating.</p>
+          </div>
+          <div class="standalone-actions">
+            <button id="btn-page-account-to-signin" class="btn btn-primary" type="button">Sign In</button>
+            <button id="btn-page-account-to-signup" class="btn btn-secondary" type="button">Create Account</button>
+          </div>
+        </div>
+        <div id="account-signed-in-page" hidden>
+          <div class="account-hero">
+            <div class="account-profile-row">
+              <div class="account-avatar material-symbols-outlined" aria-hidden="true">person</div>
+              <div>
+                <strong id="spa-account-display-name">Player</strong>
+                <span id="spa-account-email-label"></span>
+              </div>
+            </div>
+            <p class="account-usage" id="spa-account-usage"></p>
+          </div>
+          <h2 class="page-section-label">Training at a glance</h2><div class="account-grid">
+            <div class="standalone-stat"><span>Plan</span><strong id="spa-account-plan">Free</strong></div>
+            <div class="standalone-stat"><span>Puzzle rating</span><strong id="spa-account-puzzle-rating">1500</strong></div>
+            <div class="standalone-stat"><span>Solved</span><strong id="spa-account-puzzles-solved">0</strong></div>
+            <div class="standalone-stat"><span>Attempted</span><strong id="spa-account-puzzles-attempted">0</strong></div>
+          </div>
+          <div class="usage-section" id="spa-account-usage-section"></div>
+          <section class="account-details-panel" aria-label="Public profile"><h2>Your public profile</h2><p class="section-description">Share your progress with a username that is easy to remember.</p><div class="account-profile-link-row">
+            <span class="account-profile-label">Your public profile</span>
+            <a class="btn btn-secondary btn-small" id="btn-account-view-profile" href="/" data-route="/index">View profile</a>
+            <button class="btn btn-secondary btn-small" id="btn-account-copy-profile" type="button">Copy link</button>
+          </div>
+          <div class="account-username-row">
+            <label class="field account-username-field">
+              <span class="field-label">Username (your profile URL)</span>
+              <input id="spa-account-username-input" class="input-select" type="text" maxlength="40" placeholder="Choose a username" autocomplete="username">
+            </label>
+            <button class="btn btn-secondary btn-small" id="spa-btn-save-username" type="button">Save username</button>
+          </div>
+          <p class="account-status" id="spa-account-username-status" aria-live="polite" role="status"></p></section>
+          <div id="spa-account-boost-cta" class="text-center" style="display:none">
+            <a id="btn-account-to-plans" class="btn btn-primary" href="/plans" data-route="/plans">Explore plans</a>
+          </div>
+          <section class="admin-profile-panel" id="admin-profile-panel" hidden>
+            <div class="admin-profile-heading"><div><span class="eyebrow">Administrator</span><h3>Find a player</h3></div></div>
+            <p class="muted">Look up an account to inspect saved statistics, restrictions, reports, and notes.</p>
+            <section class="admin-control-card">
+              <h4>Site-wide feature controls</h4>
+              <p class="muted">Background review is off by default. When enabled, users may opt in; games are not silently synchronized.</p>
+              <label class="checkbox-row"><input id="admin-global-background-review" type="checkbox"> Allow background reviews for all users</label>
+              <p id="admin-global-feature-status" class="account-status" role="status" aria-live="polite"></p>
+            </section>
+            <form id="admin-profile-search" class="admin-profile-search">
+              <label class="field"><span class="field-label">Email or profile username</span><input id="admin-profile-query" class="input-select" type="search" maxlength="254" autocomplete="off" placeholder="player@example.com or username" required></label>
+              <button class="btn btn-primary" type="submit">Find account</button>
+            </form>
+            <p id="admin-profile-status" class="account-status" role="status" aria-live="polite"></p>
+            <div id="admin-profile-result"></div>
+          </section>
+          <div class="admin-boost-panel" id="spa-admin-boost-panel" hidden>
+            <h3>Plans &amp; subscriptions</h3>
+            <label class="field"><span class="field-label">Email</span><input id="spa-gift-boost-email" class="input-select" type="email" placeholder="player@example.com"></label>
+            <label class="field"><span class="field-label">Days</span><input id="spa-gift-boost-days" class="input-select" type="number" min="1" max="366" value="30"></label>
+            <div class="standalone-actions">
+              <button id="spa-btn-gift-boost" class="btn btn-primary" type="button">Gift Boost</button>
+              <button id="spa-btn-gift-max" class="btn btn-primary" type="button">Gift Max</button>
+              <button id="spa-btn-remove-subscription" class="btn btn-secondary" type="button">Remove Subscription</button>
+            </div>
+            <p class="account-status" id="spa-gift-boost-status" aria-live="polite" role="status"></p>
+          </div>
+          <div class="admin-ban-panel" id="admin-ban-panel" hidden>
+            <h3>Ban / Unban Player</h3>
+            <label class="field"><span class="field-label">Email</span><input id="spa-ban-user-email" class="input-select" type="email" placeholder="player@example.com"></label>
+            <label class="field"><span class="field-label">Reason</span><input id="spa-ban-user-reason" class="input-select" type="text" placeholder="Policy violation or abuse"></label>
+            <div class="standalone-actions">
+              <button id="btn-ban-user" class="btn btn-primary" type="button">Ban User</button>
+              <button id="btn-unban-user" class="btn btn-secondary" type="button">Unban User</button>
+            </div>
+            <p class="account-status" id="spa-ban-user-status" aria-live="polite" role="status"></p>
+          </div>
+          <div class="admin-support-panel" id="spa-admin-support-panel" hidden>
+            <h3>Support messages</h3>
+            <button id="spa-btn-refresh-support" class="btn btn-secondary btn-small" type="button">Refresh</button>
+            <div class="admin-support-list" id="spa-admin-support-list"><p class="account-status" aria-live="polite" role="status">Click Refresh to load messages.</p></div>
+          </div>
+          <div class="admin-abuse-panel" id="spa-admin-abuse-panel" hidden>
+            <h3>Flagged accounts</h3>
+            <button id="spa-btn-refresh-abuse" class="btn btn-secondary btn-small" type="button">Refresh</button>
+            <div class="admin-abuse-list" id="spa-admin-abuse-list"><p class="account-status" aria-live="polite" role="status">Click Refresh to load flagged accounts.</p></div>
+            <p class="account-status" id="spa-admin-abuse-status" aria-live="polite" role="status"></p>
+          </div>
+          <div class="standalone-actions account-security-actions" aria-label="Account security">
+            <button id="spa-btn-report-account" class="btn btn-secondary" type="button">Report an account</button>
+            <button id="spa-btn-reset-password" class="btn btn-secondary" type="button">Reset password</button>
+            <button id="btn-signout" class="btn btn-secondary" type="button">Sign out</button>
+          </div>
+        </div>
+        <p class="account-status" id="spa-page-status" aria-live="polite" role="status"></p>
+      </div>
+    </section>
+
+<section role="main" id="page-settings" class="page-panel" hidden>
+      <div class="settings-page-header page-card-head"><span class="eyebrow">Fine-tune your experience</span><h1>Make the board yours.</h1><p>Set up your analysis, personalize your board, and choose how you stay in the loop.</p></div>
+      <div class="settings-workspace">
+        <nav class="settings-nav" aria-label="Settings categories">
+          <a href="#settings-analysis"><span class="material-symbols-outlined" aria-hidden="true">analytics</span>Analysis</a>
+          <a href="#settings-browser"><span class="material-symbols-outlined" aria-hidden="true">memory</span>Browser engine</a>
+          <a href="#settings-board"><span class="material-symbols-outlined" aria-hidden="true">palette</span>Board &amp; pieces</a>
+          <a href="#settings-notifications"><span class="material-symbols-outlined" aria-hidden="true">notifications</span>Notifications</a>
+          <a href="#settings-storage"><span class="material-symbols-outlined" aria-hidden="true">folder</span>Local data</a>
+        </nav>
+        <div class="settings-content">
+        <section class="card settings-section" id="settings-analysis">
+          <h2 class="settings-section-title">Review strength</h2>
+          <p class="settings-section-sub">How deeply the engine analyses each move. Quick is fastest; Thorough is most accurate.</p>
+          <div class="field">
+            <div class="chip-row" id="settings-review-strength-chips" role="radiogroup" aria-label="Review strength"
+                 data-target="settings-review-strength">
+              <label class="chip-label">
+                <input type="radio" name="settings-review-strength-chip" value="quick">
+                <span class="chip">Quick</span>
+              </label>
+            <label class="chip-label">
+              <input type="radio" name="settings-review-strength-chip" value="standard" checked>
+              <span class="chip">Standard</span>
+            </label>
+            <label class="chip-label">
+              <input type="radio" name="settings-review-strength-chip" value="thorough">
+              <span class="chip">Thorough</span>
+            </label>
+          </div>
+          <p class="account-status" id="settings-review-strength-note"  aria-live="polite" role="status">Standard review balances speed and accuracy (depth 14).</p>
+        </div>
+        
+        <input type="hidden" id="settings-review-strength" value="standard">
+        </section>
+
+        <section class="card settings-section" id="settings-source">
+          <h2 class="settings-section-title">Where reviews run</h2>
+          <p class="settings-section-sub">Choose where game reviews run. Server reviews are faster and stronger but require an account.</p>
+          <label class="field">
+            <span class="field-label">Default Review Source</span>
+            <select id="analysis-location" class="input-select">
+              <option value="browser">Browser (local)</option>
+              <option value="server">Server (requires account)</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="card settings-section" id="settings-browser">
+          <h2 class="settings-section-title">Browser engine</h2>
+          <p class="settings-section-sub">These settings apply when using browser review, coach, live eval, and local analysis.</p>
+          <label class="field">
+            <span class="field-label">Engine Type</span>
+            <select id="settings-engine-module" class="input-select">
+              <option value="lite-single">Stockfish 18 Lite WASM (7 MB, recommended)</option>
+              <option value="full-single">Stockfish 18 Full WASM (108 MB)</option>
+            </select>
+          </label>
+          <label class="switch-row app-switch-row">
+            <span>
+              <strong>Keep analyzing the current position</strong>
+              <small>Let Stockfish search deeper while you study a position. Turn this off to use a fixed depth.</small>
+            </span>
+            <span class="app-switch">
+              <input id="settings-live-deepening" type="checkbox" checked>
+              <span class="app-switch-track"></span>
+            </span>
+          </label>
+          <label class="field" id="settings-forced-depth-field">
+            <span class="field-label">Forced Depth (when climbing is off)</span>
+            <select id="settings-forced-depth" class="input-select">
+              <option value="10">Depth 10 (fast)</option>
+              <option value="14">Depth 14</option>
+              <option value="16" selected>Depth 16 (default)</option>
+              <option value="18">Depth 18</option>
+              <option value="20">Depth 20</option>
+              <option value="22">Depth 22</option>
+              <option value="24">Depth 24</option>
+            </select>
+          </label>
+        <label class="switch-row app-switch-row">
+          <span>
+            <strong>Advanced engine settings</strong>
+            <small>Pin a custom search depth and per-move time cap, overriding the strength tier.</small>
+          </span>
+          <span class="app-switch">
+            <input id="settings-advanced-toggle" type="checkbox">
+            <span class="app-switch-track"></span>
+          </span>
+        </label>
+        <div id="settings-advanced-engine" class="settings-advanced-engine-fields" hidden>
+          <label class="field">
+            <span class="field-label">Custom Search Depth</span>
+            <select id="settings-engine-depth" class="input-select">
+              <option value="8">Depth 8</option>
+              <option value="10">Depth 10</option>
+              <option value="12">Depth 12</option>
+              <option value="14">Depth 14</option>
+              <option value="16" selected>Depth 16</option>
+              <option value="18">Depth 18</option>
+              <option value="20">Depth 20</option>
+              <option value="22">Depth 22</option>
+              <option value="26">Depth 26</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Per-Move Time Cap</span>
+            <select id="settings-engine-timeout" class="input-select">
+              <option value="500">0.5s</option>
+              <option value="1000">1s</option>
+              <option value="2000">2s</option>
+              <option value="3000">3s</option>
+              <option value="4500" selected>4.5s</option>
+              <option value="8000">8s</option>
+              <option value="15000">15s</option>
+              <option value="30000">30s</option>
+            </select>
+          </label>
+        </div>
+        <button id="btn-save-engine-settings" class="btn btn-primary" type="button">Save engine settings</button>
+        <p class="account-status" id="engine-settings-status" aria-live="polite" role="status"></p>
+        </section>
+
+        <section class="card settings-section" id="settings-board">
+          <h2 class="settings-section-title">Board &amp; pieces</h2>
+          <div class="field">
+            <span class="field-label">App Theme</span>
+            <div class="select-row" data-cols="3" role="radiogroup" aria-label="App theme">
+              <label class="select-row-item">
+                <input type="radio" name="settings-color-theme" value="system" checked>
+                <span class="chip">System default</span>
+              </label>
+              <label class="select-row-item">
+                <input type="radio" name="settings-color-theme" value="light">
+                <span class="chip">Light</span>
+              </label>
+              <label class="select-row-item">
+                <input type="radio" name="settings-color-theme" value="dark">
+                <span class="chip">Dark</span>
+              </label>
+            </div>
+          </div>
+          <div class="field">
+            <span class="field-label">Board Colors</span>
+            <div class="select-row" data-cols="3" role="radiogroup" aria-label="Board colors">
+              <label class="select-row-item board-color-chip">
+                <input type="radio" name="settings-board-theme" value="classic">
+                <span class="board-color-split" style="background:linear-gradient(135deg,#f7f1e4 50%,#b88d58 50%)"></span>
+                <span class="board-color-chip-label">Classic</span>
+              </label>
+              <label class="select-row-item board-color-chip">
+                <input type="radio" name="settings-board-theme" value="green">
+                <span class="board-color-split" style="background:linear-gradient(135deg,#eeeed2 50%,#769656 50%)"></span>
+                <span class="board-color-chip-label">Tournament Green</span>
+              </label>
+              <label class="select-row-item board-color-chip">
+                <input type="radio" name="settings-board-theme" value="blue">
+                <span class="board-color-split" style="background:linear-gradient(135deg,#d8e2e7 50%,#799db3 50%)"></span>
+                <span class="board-color-chip-label">Coastal Blue</span>
+              </label>
+              <label class="select-row-item board-color-chip">
+                <input type="radio" name="settings-board-theme" value="slate">
+                <span class="board-color-split" style="background:linear-gradient(135deg,#dfe5ea 50%,#6d7883 50%)"></span>
+                <span class="board-color-chip-label">Slate</span>
+              </label>
+              <label class="select-row-item board-color-chip">
+                <input type="radio" name="settings-board-theme" value="walnut">
+                <span class="board-color-split" style="background:linear-gradient(135deg,#f1d8ae 50%,#8a5a32 50%)"></span>
+                <span class="board-color-chip-label">Walnut</span>
+              </label>
+              <label class="select-row-item board-color-chip">
+                <input type="radio" name="settings-board-theme" value="rose">
+                <span class="board-color-split" style="background:linear-gradient(135deg,#f7e2df 50%,#b56a72 50%)"></span>
+                <span class="board-color-chip-label">Rosewood</span>
+              </label>
+            </div>
+          </div>
+        <div class="field">
+          <span class="field-label">Piece Icons</span>
+          <div class="select-row" data-cols="3" role="radiogroup" aria-label="Piece icons">
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="cburnett">
+              <img class="piece-set-knight" src="/assets/pieces/cburnett/wN.svg" alt="">
+              <span class="piece-set-name">Cburnett</span>
+            </label>
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="celtic">
+              <img class="piece-set-knight" src="/assets/pieces/celtic/wN.svg" alt="">
+              <span class="piece-set-name">Celtic</span>
+            </label>
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="chessnut">
+              <img class="piece-set-knight" src="/assets/pieces/chessnut/wN.svg" alt="">
+              <span class="piece-set-name">Chessnut</span>
+            </label>
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="fantasy">
+              <img class="piece-set-knight" src="/assets/pieces/fantasy/wN.svg" alt="">
+              <span class="piece-set-name">Fantasy</span>
+            </label>
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="firi">
+              <img class="piece-set-knight" src="/assets/pieces/firi/wN.svg" alt="">
+              <span class="piece-set-name">Firi</span>
+            </label>
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="kiwen-suwi">
+              <img class="piece-set-knight" src="/assets/pieces/kiwen-suwi/wN.svg" alt="">
+              <span class="piece-set-name">Kiwen-suwi</span>
+            </label>
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="merida">
+              <img class="piece-set-knight" src="/assets/pieces/merida/wN.svg" alt="">
+              <span class="piece-set-name">Merida</span>
+            </label>
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="rhosgfx">
+              <img class="piece-set-knight" src="/assets/pieces/rhosgfx/wN.svg" alt="">
+              <span class="piece-set-name">Rhosgfx</span>
+            </label>
+            <label class="select-row-item piece-set-chip">
+              <input type="radio" name="settings-piece-theme" value="spatial">
+              <img class="piece-set-knight" src="/assets/pieces/spatial/wN.svg" alt="">
+              <span class="piece-set-name">Spatial</span>
+            </label>
+          </div>
+        </div>
+        <div class="settings-preview-grid"><div><span class="eyebrow">Live preview</span><p>Your chosen board and pieces.</p></div>
+          <div class="appearance-preview-board" id="appearance-board-preview" aria-label="Board preview"></div>
+        </div>
+        <label class="switch-row app-switch-row">
+          <span>
+            <strong>Piece Animations</strong>
+            <small>Smoothly animate pieces to their new squares.</small>
+          </span>
+          <span class="app-switch">
+            <input id="settings-piece-animations" type="checkbox" checked>
+            <span class="app-switch-track"></span>
+          </span>
+        </label>
+        <div class="settings-anim-speed" id="settings-anim-speed-group">
+          <span class="field-label">Animation Speed</span>
+          <div class="chip-row">
+            <label class="chip-label">
+              <input type="radio" name="settings-anim-speed" value="0.2">
+              <span class="chip">0.2s</span>
+            </label>
+            <label class="chip-label">
+              <input type="radio" name="settings-anim-speed" value="0.5" checked>
+              <span class="chip">0.5s</span>
+            </label>
+            <label class="chip-label">
+              <input type="radio" name="settings-anim-speed" value="1">
+              <span class="chip">1s</span>
+            </label>
+          </div>
+        </div>
+        <div class="settings-color-grid">
+          <label class="field">
+            <span class="field-label">Arrow Color</span>
+            <input id="settings-arrow-color" class="input-select input-color" type="color" value="#d88a1d">
+          </label>
+          <label class="field">
+            <span class="field-label">Highlight Color</span>
+            <input id="settings-highlight-color" class="input-select input-color" type="color" value="#d22626">
+          </label>
+        </div>
+        <button id="btn-save-appearance-settings" class="btn btn-primary" type="button">Save appearance</button>
+        <p class="account-status" id="appearance-settings-status" aria-live="polite" role="status"></p>
+        </section>
+
+        <section class="card settings-section" id="settings-notifications">
+          <h2 class="settings-section-title">Notifications</h2>
+          <p class="settings-section-sub">Pick when you want to be notified. We never send marketing email.</p>
+          <label class="switch-row app-switch-row">
+            <span>
+              <strong>Anticheat completion</strong>
+              <small>Show a notification when a background anticheat review finishes.</small>
+            </span>
+            <span class="app-switch">
+              <input id="settings-notify-anticheat" type="checkbox" checked>
+              <span class="app-switch-track"></span>
+            </span>
+          </label>
+          <label class="switch-row app-switch-row">
+            <span>
+              <strong>Browser notifications</strong>
+              <small>Show a system popup when this tab is in the background. Your browser will ask for permission.</small>
+            </span>
+            <span class="app-switch">
+              <input id="settings-notify-push" type="checkbox">
+              <span class="app-switch-track"></span>
+            </span>
+          </label>
+          <button id="btn-save-notify-settings" class="btn btn-primary" type="button">Save notifications</button>
+          <p class="account-status" id="notify-settings-status" aria-live="polite" role="status"></p>
+        </section>
+
+        <section class="card settings-section" id="settings-storage">
+          <h2 class="settings-section-title">Local preferences &amp; progress</h2>
+          <p class="settings-section-sub">Clear local settings and puzzle progress stored in this browser.</p>
+          <button id="btn-clear-cache" class="btn btn-secondary" type="button">Clear local preferences</button>
+        </section>
+
+        <section class="card settings-section" id="settings-saved-data">
+          <h2 class="settings-section-title">Saved games &amp; conversations</h2>
+          <p class="settings-section-sub">Remove saved review and coach games stored in this browser.</p>
+          <button id="btn-clear-saved-games" class="btn btn-secondary" type="button">Clear saved games</button>
+          <p class="settings-section-sub">Remove all saved AI Coach chat conversations from this browser.</p>
+          <button id="btn-clear-coach-chats" class="btn btn-secondary" type="button">Clear coach conversations</button>
+          <p class="account-status" id="page-status" aria-live="polite" role="status"></p>
+        </section>
+        </div>
+      </div>
+    </section>
+
+<section role="main" id="page-boost" class="page-panel" hidden>
+      <div class="card panel-wide page-card plans-page-card">
+        <canvas id="confetti-canvas" class="confetti-canvas" aria-hidden="true"></canvas><div class="page-card-head plans-page-head"><span class="eyebrow">Plans</span><h1>Choose the right tools for your games.</h1><p>All plans include local analysis and puzzles. Paid plans add server capacity and fair-play reviews.</p></div>
+        <div class="boost-status-container" id="spa-boost-status-container" hidden aria-live="polite" role="status">
+          <div class="boost-status-card" id="spa-boost-status-card" aria-live="polite" role="status">
+            <span class="material-symbols-outlined boost-status-icon" aria-hidden="true">check_circle</span>
+            <div>
+              <strong id="spa-plans-status-title">Active</strong>
+              <p id="spa-boost-status-text" aria-live="polite" role="status">Your plan features are ready.</p>
+            </div>
+          </div>
+        </div>
+        <div class="boost-auth-required" id="spa-boost-auth-required" hidden>
+          <h2>Manage your plan.</h2>
+          <p>Sign in to see your current plan and manage your account.</p>
+          <div class="standalone-actions center-actions">
+            <button id="btn-boost-to-signin" class="btn btn-primary" type="button">Sign In</button>
+            <button id="btn-boost-to-signup" class="btn btn-secondary" type="button">Create Account</button>
+          </div>
+        </div>
+        <div id="spa-boost-content" hidden>
+          <section class="boost-pricing-section">
+            <h2 class="sr-only">Compare plans</h2>
+            <p class="text-center section-subtitle">Unlimited local analysis and puzzles on every plan. Extra server capacity when you need it.</p>
+            <div class="plan-tiers">
+              <div class="plan-tier plan-tier-free">
+                <div class="plan-tier-name">Free</div>
+                <div class="plan-tier-price"><span class="amount">$0</span><span class="period">/mo</span></div>
+                <ul class="plan-tier-list">
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> 3 server reviews / 24h</li>
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> AI Coach with a daily allowance</li>
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> Unlimited local Stockfish analysis</li>
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> Unlimited coach games</li>
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> Unlimited puzzles</li>
+                  <li><span class="material-symbols-outlined" aria-hidden="true">close</span> No anticheat reviews</li>
+                </ul>
+                <div class="plan-tier-cta"><span class="plan-tier-current" id="plan-tier-current-free" hidden>Your plan</span></div>
+              </div>
+
+              <div class="plan-tier plan-tier-boost featured">
+                <span class="plan-tier-badge">More capacity</span>
+                <div class="plan-tier-name">Boost</div>
+                <div class="plan-tier-price"><span class="amount">$4</span><span class="period">/mo</span></div>
+                <ul class="plan-tier-list">
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> Everything in Free</li>
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> Unlimited server reviews</li>
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> More daily AI Coach allowance</li>
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> 25 anticheat games / week</li>
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> No ads</li>
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> Boost flair on profile</li>
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> Support the site</li>
+                </ul>
+                <div class="plan-tier-cta">
+                  <a class="btn btn-primary" id="btn-boost-subscribe" href="/contact" data-route="/contact">Contact us to upgrade</a>
+                  <span class="plan-tier-current" id="plan-tier-current-boost" hidden>Your plan</span>
+                </div>
+              </div>
+
+              <div class="plan-tier plan-tier-max">
+                <div class="plan-tier-name">Max</div>
+                <div class="plan-tier-price"><span class="amount">$8</span><span class="period">/mo</span></div>
+                <ul class="plan-tier-list">
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> Everything in Boost</li>
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> 5× more AI Coach allowance / day</li>
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> 100 anticheat games / week</li>
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> Max flair on profile</li>
+                  <li><span class="material-symbols-outlined" aria-hidden="true">check</span> Automatic post-game reviews <span class="beta-badge">Beta</span></li>
+                </ul>
+                <div class="plan-tier-cta">
+                  <a class="btn btn-primary" id="btn-max-subscribe" href="/contact" data-route="/contact">Contact us to upgrade</a>
+                  <span class="plan-tier-current" id="plan-tier-current-max" hidden>Your plan</span>
+                </div>
+              </div>
+            </div>
+          </section>
+          <div class="boost-footer-link" >
+            <a id="btn-boost-to-account" href="/account" data-route="/account">Back to Account</a>
+          </div>
+        </div>
+        <p class="account-status boost-error-status" id="spa-boost-status" aria-live="polite" role="status"></p>
+      </div>
+    </section>
+
+<section role="main" id="page-auth" class="page-panel auth-page" hidden>
+      <div class="auth-intro">
+        <span class="eyebrow">Account access</span>
+        <p class="auth-story-heading">Reset your password.<br>Return to your games.</p>
+        <p>Reset your password and get back to your games, puzzles, and progress.</p>
+        <div class="auth-scene" aria-hidden="true">
+          <div class="auth-scene-board">
+            <span></span><span></span><span><img src="/assets/pieces/cburnett/bK.svg" alt=""></span><span></span>
+            <span></span><span><img src="/assets/pieces/cburnett/bP.svg" alt=""></span><span></span><span></span>
+            <span></span><span></span><span><img src="/assets/pieces/cburnett/wN.svg" alt=""></span><span></span>
+            <span><img src="/assets/pieces/cburnett/wK.svg" alt=""></span><span></span><span></span><span></span>
+          </div>
+          <span class="auth-scene-caption">Your games are waiting.</span>
+        </div>
+      </div>
+      <div class="card panel-wide page-card auth-card">
+        <div class="page-card-head">
+          <h1>Reset your password</h1>
+          <p>Enter your account email. We’ll send you a secure password reset link.</p>
+        </div>
+        <label class="field">
+          <span class="field-label">Email</span>
+          <input id="reset-email" class="input-select" type="email" autocomplete="email" placeholder="you@example.com">
+        </label>
+        <div id="reset-new-password-area" style="display:none">
+          <label class="field">
+            <span class="field-label">New password</span>
+            <input id="reset-new-password" class="input-select" type="password" autocomplete="new-password" placeholder="New password">
+          </label>
+          <label class="field">
+            <span class="field-label">Confirm password</span>
+            <input id="reset-confirm-password" class="input-select" type="password" autocomplete="new-password" placeholder="Confirm password">
+          </label>
+        </div>
+        <div class="standalone-actions">
+          <button id="btn-reset-password" class="btn btn-primary" type="button">Send reset link</button>
+          <button id="btn-page-auth-to-signin" class="btn btn-secondary" type="button">Sign In</button>
+          <button id="btn-page-auth-to-signup" class="btn btn-secondary" type="button">Create Account</button>
+        </div>
+        <p class="account-status" id="auth-page-status" aria-live="polite" role="status"></p>
+      </div>
+    </section>
+
+<section role="main" id="page-incompatible-browser" class="page-panel message-page" hidden>
+      <div class="card panel-wide page-card message-card"><div class="message-icon" aria-hidden="true"><span class="material-symbols-outlined" aria-hidden="true">browser_updated</span></div><span class="eyebrow">Browser update</span>
+        <div class="page-card-head">
+          <h1>Upgrade your browser</h1>
+          <p>The chess app requires modern features like WebAssembly, workers, fetch, URL, and local storage. Update to the latest Chrome, Edge, Firefox, or Safari.</p>
+        </div>
+      </div>
+    </section>
+
+<section role="main" id="page-404" class="page-panel message-page" hidden>
+      <div class="card panel-wide page-card message-card"><div class="message-icon" aria-hidden="true"><span class="material-symbols-outlined" aria-hidden="true">explore</span></div><span class="eyebrow">Page not found</span>
+        <div class="page-card-head">
+          <h1>This square is empty.</h1>
+          <p>We couldn’t find this page.</p>
+        </div>
+        <div class="standalone-actions">
+          <a class="btn btn-primary" href="/" data-route="/index">Back to home</a>
+          <a class="btn btn-secondary" href="/review" data-route="/review">Review a game</a>
+        </div>
+      </div>
+    </section>
+
+<section role="main" id="page-profile" class="page-panel" hidden>
+      <div class="card panel-wide page-card profile-page-card" id="profile-card">
+        <div id="profile-loading" class="profile-loading" aria-live="polite" role="status">
+          <p>Loading profile…</p>
+        </div>
+        <div id="profile-not-found" hidden>
+          <div class="page-card-head">
+            <h1>Profile not found</h1>
+            <p>This player doesn’t have a public profile, or the username is incorrect.</p>
+          </div>
+          <div class="standalone-actions">
+            <a class="btn btn-primary" href="/" data-route="/index">Back to home</a>
+          </div>
+        </div>
+        <div id="profile-content" hidden>
+          <span class="eyebrow">Player profile</span><div class="profile-header">
+            <div class="profile-avatar" id="profile-avatar" aria-hidden="true"></div>
+            <div class="profile-header-copy">
+              <h1 id="profile-username">Player</h1>
+              <span class="plan-badge" id="profile-plan-badge">Free</span>
+            </div>
+          </div>
+          <h2 class="page-section-label">On the training board</h2><div class="profile-stats-grid">
+            <div class="standalone-stat"><span>Puzzle rating</span><strong id="profile-rating">1500</strong></div>
+            <div class="standalone-stat"><span>Solved</span><strong id="profile-solved">0</strong></div>
+            <div class="standalone-stat"><span>Attempted</span><strong id="profile-attempted">0</strong></div>
+            <div class="standalone-stat"><span>Streak</span><strong id="profile-streak">0</strong></div>
+          </div>
+          <p class="profile-member-since" id="profile-member-since"></p>
+          <div class="standalone-actions" id="profile-owner-actions" hidden>
+            <a class="btn btn-secondary" href="/account" data-route="/account">Edit my profile</a>
+          </div>
+          <div class="standalone-actions">
+            <button id="btn-profile-share" class="btn btn-primary" type="button">Share profile</button>
+          </div>
+          <p class="profile-share-status" id="profile-share-status" aria-live="polite" role="status"></p>
+        </div>
+      </div>
+    </section>
+
+<section role="main" id="page-contact" class="page-panel contact-page" hidden>
+      <div class="contact-intro"><span class="eyebrow">We’re here to help</span><p class="contact-story-heading">Good chess starts<br>with a conversation.</p><p>A question about your account, a bug you spotted, or an idea for the board. Send it our way.</p><div class="contact-detail"><span class="material-symbols-outlined" aria-hidden="true">forum</span><span>Account help · Feedback · Billing</span></div></div><div class="card panel-wide page-card contact-card">
+        <div class="page-card-head">
+          <h1>Send us a message</h1>
+          <p>Tell us what’s on your mind. Include any details that will help us help you.</p>
+        </div>
+        <label class="field">
+          <span class="field-label">Your email</span>
+          <input id="contact-email" class="input-select" type="email" autocomplete="email" placeholder="you@example.com">
+        </label>
+        <label class="field">
+          <span class="field-label">Reason</span>
+          <select id="contact-reason" class="input-select">
+            <option value="general">General question</option>
+            <option value="bug">Bug report</option>
+            <option value="account">Account issue</option>
+            <option value="billing">Billing / plan (Boost, Max)</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">Message</span>
+          <textarea id="contact-message" class="input-select" rows="6" placeholder="How can we help?"></textarea>
+        </label>
+        <div class="standalone-actions">
+          <button id="btn-contact-submit" class="btn btn-primary" type="button">Send message</button>
+        </div>
+        <p class="account-status" id="contact-status" aria-live="polite" role="status"></p>
+      </div>
+    </section>
+
+<section role="main" id="page-anticheat-report" class="page-panel" hidden>
+      <div class="card panel-wide page-card report-page-card">
+        <div class="page-card-head"><span class="eyebrow">Fair play analysis</span><h1>Your game report.</h1><p>Engine statistics provide context for a player’s moves. They are a guide, not proof of cheating.</p></div>
+        <div class="anticheat-report-meta" id="anticheat-report-meta">
+          <span class="anticheat-status" id="anticheat-report-status" aria-live="polite" role="status">Loading report…</span>
+          <span class="anticheat-report-job" id="anticheat-report-job"></span>
+        </div>
+        <div class="anticheat-results" id="anticheat-report-results"></div>
+        <div class="anticheat-report-expiry" id="anticheat-report-expiry"></div>
+      </div>
+    </section>
+
+<section role="main" id="page-privacy" class="page-panel" hidden>
+      <div class="card panel-wide page-card legal-page-card">
+        <div class="page-card-head"><span class="eyebrow">Service terms</span>
+          <h1>Privacy Policy</h1>
+          <p class="legal-updated">Last updated: 18 July 2026</p>
+        </div>
+        <article class="legal-body">
+          <p>This policy explains what Sing Chess collects and why. We keep it simple: we only store what we need to run the service, and we don't sell your data.</p>
+
+          <h2>What we store</h2>
+          <ul>
+            <li><strong>Account data.</strong> Your email and a Firebase user ID if you sign up. Passwords are handled by Firebase; we never see them.</li>
+            <li><strong>Games and reviews.</strong> PGNs you paste or import, plus any reviews you save to your account.</li>
+            <li><strong>Training data.</strong> Your puzzle rating, solve history, coach chat history (if saved), and coach-game results.</li>
+            <li><strong>Preferences.</strong> Board theme, piece set, engine settings, and similar options. These live in your browser by default and sync to your account when you're signed in.</li>
+            <li><strong>Technical data.</strong> IP address and browser type for rate limits and security. We also keep anonymous counts like total games reviewed.</li>
+          </ul>
+
+          <h2>Where your data lives</h2>
+          <p>Account data is stored in Google Firebase (Authentication and Realtime Database). Local preferences stay in your browser unless you sign in.</p>
+
+          <h2>Cookies and local storage</h2>
+          <p>We don't use advertising or tracking cookies. Firebase may set an authentication cookie or local storage entry to keep you signed in. To help detect multi-accounting and abuse, we set a single device-identifier cookie and store a hash of your IP address; raw IP addresses are not kept. You can clear all stored data from Settings → Clear data or through your browser.</p>
+
+          <h2>Third parties</h2>
+          <ul>
+            <li><strong>Firebase</strong> — sign-in and database.</li>
+            <li><strong>lichess.org and chess.com</strong> — only when you import your public games by username.</li>
+            <li><strong>Google reCAPTCHA</strong> — bot detection on the signup and contact forms. Google processes the request per their <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">privacy policy</a> and <a href="https://policies.google.com/terms" target="_blank" rel="noopener noreferrer">terms</a>.</li>
+          </ul>
+          <p>We don't sell or share your personal data for advertising.</p>
+
+          <h2>Public profiles</h2>
+          <p>If you choose a username, a public profile appears at <code>mastermind.singdevelopments.com/profile/&lt;username&gt;</code>. It shows your username, plan flair, puzzle rating, and puzzle stats. Your email, games, and usage stats stay private. You can hide your profile by contacting us.</p>
+
+          <h2>Messages</h2>
+          <p>When you use the contact form, we keep your email and message so we can reply. If you're signed in, we also store your user ID. Only site admins can see these.</p>
+
+          <h2>Your choices</h2>
+          <p>You can use most of the site without an account. To delete your account and all associated data, contact us.</p>
+
+          <h2>Contact</h2>
+          <p>Questions about privacy? Use the contact form or email the address on the home page.</p>
+        </article>
+        <div class="standalone-actions">
+          <a class="btn btn-primary" href="/" data-route="/index">Back to home</a>
+          <a class="btn btn-secondary" href="/terms" data-route="/terms">Terms of Service</a>
+        </div>
+      </div>
+    </section>
+
+<section role="main" id="page-terms" class="page-panel" hidden>
+      <div class="card panel-wide page-card legal-page-card">
+        <div class="page-card-head"><span class="eyebrow">Clear rules. A better community.</span>
+          <h1>Terms of Service</h1>
+          <p class="legal-updated">Last updated: 18 July 2026</p>
+        </div>
+        <article class="legal-body">
+          <p>By using Sing Chess, you agree to these terms. If you don't agree, please don't use the service.</p>
+
+          <h2>Your account</h2>
+          <p>Keep your login details safe. You're responsible for activity under your account. You must be at least 13 to sign up, or have a guardian's permission. You may create and use only one account. Creating multiple accounts, sharing accounts, or using another person's account is not allowed. We may use technical information such as a hashed IP address and a device identifier to detect violations.</p>
+
+          <h2>Acceptable use</h2>
+          <p>Use Sing Chess for your own chess training and analysis. Don't try to break, overload, or scrape the service. Don't automate, script, or otherwise abuse review, anti-cheat, or coach limits. Activity that appears designed to extract value beyond normal personal use may result in account closure. Don't use the review or anti-cheat tools to harass or falsely accuse other players. Engine stats are a guide, not proof of cheating. Don't upload someone else's games without their permission.</p>
+
+          <h2>Your content</h2>
+          <p>You own the games and PGNs you upload. By saving them to your account, you let us store and process them so you can view them later.</p>
+
+          <h2>Analysis and ratings</h2>
+          <p>Reviews, accuracy scores, and classifications come from Stockfish at fixed depths. They're helpful estimates, not final judgments of a move or player.</p>
+
+          <h2>Paid plans</h2>
+          <p>Free, Boost, and Max plans are available. Paid plans add features like more server reviews and anti-cheat games. Prices and perks may change. Refunds are handled case by case — contact us with billing questions.</p>
+
+          <h2>Availability</h2>
+          <p>The service is provided as-is. We may change, limit, or remove features at any time. We're not liable for indirect damages from using the site.</p>
+
+          <h2>Changes</h2>
+          <p>We may update these terms. The date at the top shows the current version. Continued use means you accept the updates.</p>
+
+          <h2>Contact</h2>
+          <p>Questions? Use the contact form or email the address on the home page.</p>
+        </article>
+        <div class="standalone-actions">
+          <a class="btn btn-primary" href="/" data-route="/index">Back to home</a>
+          <a class="btn btn-secondary" href="/privacy" data-route="/privacy">Privacy Policy</a>
+        </div>
+      </div>
+    </section>
+
+<section role="main" id="page-coach" class="page-panel coach-page" hidden>
+      <div class="coach-chat-shell" id="coach-chat-card">
+        <aside class="coach-sidebar" id="coach-sidebar" aria-label="Chat history">
+          <button type="button" class="btn btn-primary coach-new-chat-btn" id="btn-coach-new-chat">
+            <span class="material-symbols-outlined btn-symbol" aria-hidden="true">add_comment</span>
+            <span>New chat</span>
+          </button>
+          <p class="coach-history-label">Your conversations</p><div class="coach-sidebar-list" id="coach-sidebar-list"></div>
+        </aside>
+        <div class="coach-chat-main card page-card">
+          <div class="coach-card-header">
+            <div class="coach-identity">
+              <div class="coach-avatar" aria-hidden="true">
+                <img src="/assets/icon.png" alt="">
+              </div>
+              <div>
+                <h1>Chess Coach <span class="beta-badge">Beta</span></h1>
+                <span class="coach-coming-soon" id="coach-chat-subtitle" aria-live="polite" role="status">AI coach</span>
+              </div>
+            </div>
+            <div class="coach-chat-header-actions">
+              <button type="button" class="btn btn-secondary coach-icon-btn" id="btn-coach-sidebar-toggle" title="Chat history" aria-label="Toggle chat history" aria-controls="coach-sidebar" aria-expanded="true">
+                <span class="material-symbols-outlined" aria-hidden="true">history</span>
+              </button>
+              
+              <button type="button" class="btn btn-secondary coach-play-btn" id="btn-coach-play-bot" title="Play a game against the Stockfish bot">
+                <span class="material-symbols-outlined" aria-hidden="true">sports_esports</span>
+                <span class="btn-label">Play the bot</span>
+              </button>
+            </div>
+          </div>
+          <div class="coach-chat-locked" id="coach-chat-locked" hidden>
+            <span class="material-symbols-outlined coach-locked-icon" aria-hidden="true">lock</span>
+            <h2>Chess Coach</h2>
+            <p>Ask about openings, positions, or training goals. The coach uses Stockfish to check positions. Sign in to get started.</p>
+            <a class="btn btn-primary" href="/login" data-route="/login">Sign in</a>
+            <a class="btn btn-secondary" href="/signup?src=coach" data-route="/signup">Create account</a>
+          </div>
+          <div class="coach-usage-bar" id="coach-usage-bar" hidden aria-live="polite" role="status">
+            <div class="coach-usage-track"><div class="coach-usage-fill"></div></div>
+            <span class="coach-usage-text"></span>
+          </div>
+          <p class="coach-boundary-note">Keep chats respectful and focused on chess. Repeated misuse may be reported for review.</p>
+          <div class="coach-chat-body" id="coach-chat-body" hidden>
+            <div class="coach-chat-messages coach-markdown" id="coach-chat-messages" role="log" aria-live="polite" aria-label="Coach conversation"></div>
+            <div class="coach-typing" id="coach-typing" role="status" aria-live="polite" hidden>
+              <span class="material-symbols-outlined coach-typing-icon" aria-hidden="true">progress_activity</span>
+              <span class="coach-typing-text" id="coach-typing-text">Coach is thinking<span class="coach-typing-dots" id="coach-typing-dots" aria-hidden="true"></span></span>
+            </div>
+          </div>
+          <form class="coach-chat-input" id="coach-chat-form">
+            <textarea id="coach-chat-textarea" class="coach-chat-textarea" aria-label="Message the coach" placeholder="Ask about a position, opening, or your next goal…" rows="1" autocomplete="off"></textarea>
+            <button type="submit" id="btn-coach-send" class="btn btn-primary coach-send-btn" aria-label="Send message">
+              <span class="material-symbols-outlined btn-symbol" aria-hidden="true">send</span>
+            </button>
+            <button type="button" id="btn-coach-stop" class="btn btn-secondary coach-stop-btn" aria-label="Stop response" hidden>
+              <span class="material-symbols-outlined btn-symbol" aria-hidden="true">stop_circle</span>
+            </button>
+          </form>
+        </div>
+      </div>
+    </section>

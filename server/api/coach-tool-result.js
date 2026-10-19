@@ -2,7 +2,7 @@
 // the browser via this.engine.evaluate). Resolves the parked SSE stream in
 // coach-chat.js so the LLM conversation can continue.
 
-const { requireUser, json } = require('./_lib/user-service');
+const { requireFeature, json } = require('./_lib/user-service');
 const coachChat = require('./coach-chat');
 
 exports.handler = async (event) => {
@@ -12,7 +12,7 @@ exports.handler = async (event) => {
     // Auth: the resolver must be the SAME user who owns the pending call.
     // resolveToolCall binds callId -> uid, so a signed-in user can only resolve
     // their OWN coach tool calls (no cross-user poisoning/quota theft).
-    const user = await requireUser({ headers: event.headers || {} });
+    const user = await requireFeature({ headers: event.headers || {} }, 'coach');
 
     let body = {};
     try { body = typeof event.body === 'string' ? JSON.parse(event.body || '{}') : (event.body || {}); }

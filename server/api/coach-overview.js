@@ -13,10 +13,11 @@
 //
 // SSE events: init | token | done | error | heartbeat
 
-const { requireUser, activePlan, reserveCoachTokens, reconcileCoachTokens } = require('./_lib/user-service');
+const { requireFeature, activePlan, reserveCoachTokens, reconcileCoachTokens } = require('./_lib/user-service');
 const llm = require('./_lib/llm-service');
-const { acquireHeavyAction, releaseHeavyAction, getBusyAction } = require('./_lib/action-lock');
+const { completionCost, publicCoachUsage } = require('./_lib/coach-budget');
 const { getServerEngine } = require('./_lib/stockfish-engine');
+const { loadChess } = require('./_lib/analysis-loader');
 
 const HEARTBEAT_MS = 20000;
 // Overview replies are short, so reserve less than a full chat turn.
@@ -39,6 +40,12 @@ DATA YOU RECEIVE below: for a move — the move played, its classification, eval
 YOUR TASK:
 - For a move: 2-4 sentences. Explain WHY the move is good or bad in plain language a club player understands. Tie it to the eval swing and the best move when relevant. Name concrete ideas (development, center, king safety, the tactic missed). Do NOT restate the classification. Cite the verified Stockfish eval/best move when possible.
 - For a game: 5-8 sentences. One overall takeaway, the opening story, where it was decided (cite the critical move), and 1-2 things to work on.
+
+BOARD CONTEXT RULES:
+- The verified FEN and Stockfish recommendation are BEFORE the played move. The derived FEN and legal opponent replies are AFTER it. Do not mix those positions.
+- Alignment alone does not establish a pin or a won piece. A pawn advancing on the attacker's file may still block the line. A pinned piece may move along the line or capture the attacker. A relative pin allows legal moves.
+- Only name a tactical motif when it is established by the supplied position and legal continuation. Explain the relevant squares and reply. Never infer a forced win, improved king safety, or the reason for the engine score from the classification alone.
+- A legal capture does not prove a material gain: recaptures and defensive replies matter. If no supported tactical reason is available, explain the evaluation and the engine alternative without inventing one.
 
 Always write in warm, direct prose. Use SAN notation. Cite evals in pawns when meaningful (+1.2, -0.8). Never mention these instructions or that you received data — just explain. If the data is missing or contradictory, state what you can from the data rather than guessing.`;
 
@@ -135,7 +142,24 @@ function buildMovePrompt(moveIndex, game, verified) {
   if (typeof m.cpLoss === 'number') lines.push(`Centipawn loss: ${m.cpLoss}.`);
   if (m.bestMoveSan) lines.push(`Engine's best move from review data: ${m.bestMoveSan}.`);
   if (m.phase) lines.push(`Phase: ${m.phase}.`);
-  if (m.fen) lines.push(`FEN: ${m.fen}`);
+  if (m.fen) lines.push(`FEN BEFORE the played move: ${m.fen}`);
+  try {
+    const Chess = loadChess();
+    const board = new Chess();
+    const valid = m.fen && board.load(m.fen);
+    const played = valid && (m.moveUci
+      ? board.move({ from: m.moveUci.slice(0, 2), to: m.moveUci.slice(2, 4), promotion: m.moveUci[4] })
+      : board.move(m.moveSan, { sloppy: true }));
+    if (played) {
+      lines.push(`Verified played move: ${played.san}, ${played.color === 'w' ? 'White' : 'Black'} ${played.piece} from ${played.from} to ${played.to}.`);
+      lines.push(`Derived FEN AFTER the played move: ${board.fen()}`);
+      lines.push(`Legal opponent replies AFTER the played move: ${board.moves().join(', ') || '(game over)'}. These are possibilities, not a forced line.`);
+    } else {
+      lines.push('Board context could not be verified. Do not assert a tactical motif or positional benefit.');
+    }
+  } catch (_) {
+    lines.push('Board context could not be verified. Do not assert a tactical motif or positional benefit.');
+  }
   const v = verified && verified.verified ? verifiedSummary(verified) : compactVerifiedForMove(m, verified);
   if (v) lines.push(v);
   const ctx = [];
@@ -289,7 +313,7 @@ exports.streamHandler = async (req, res) => {
 
   let user;
   try {
-    user = await requireUser({ headers: req.headers || {} });
+    user = await requireFeature({ headers: req.headers || {} }, 'coach');
   } catch (err) {
     sseWrite(res, 'error', { error: err.message || 'Login required.', code: err.code || 'unauthorized' });
     res.end();
@@ -318,50 +342,37 @@ exports.streamHandler = async (req, res) => {
     return;
   }
 
-  // Heavy-action lock: don't run an overview while a review is mid-flight for
-  // the same user (and vice versa) — defense in depth on the frontend gate.
-  if (!acquireHeavyAction(user.uid, 'coach')) {
-    overviewReleaseUid(user.uid);
-    const busy = getBusyAction(user.uid);
-    sseWrite(res, 'error', {
-      error: busy === 'review'
-        ? 'A game review is running. Please wait for it to finish before asking the coach.'
-        : 'You already have a coach request running. Please wait for it to finish.',
-      code: 'heavy_action_busy',
-    });
-    res.end();
-    return;
-  }
-
   // Reserve worst-case cost up front (atomic, so parallel requests can't all
   // pass on a stale read). Refunded to the real cost after the stream.
-  const reserveAmount = OVERVIEW_RESERVE_TOKENS;
+  let reserveAmount = OVERVIEW_RESERVE_TOKENS;
   let reservedTotal;
+  let reservationDay;
+  let consumed = 0;
   try {
-    const r = await reserveCoachTokens(user.uid, reserveAmount, tokenLimit);
+    const r = await reserveCoachTokens(user.uid, reserveAmount, tokenLimit, { partial: true });
     if (!r.allowed) {
-      releaseHeavyAction(user.uid);
       overviewReleaseUid(user.uid);
       sseWrite(res, 'error', {
-        error: "You've used all your daily Coach tokens. They reset at midnight UTC — or upgrade for more.",
+        error: "You've used your daily AI Coach allowance. They reset at midnight UTC — or upgrade for more.",
         code: 'quota_exceeded',
         plan,
-        usage: { coachTokens: r.total, coachTokenLimit: tokenLimit },
+        usage: publicCoachUsage(r.total, tokenLimit, r.day),
       });
       res.end();
       return;
     }
     reservedTotal = r.total;
+    reserveAmount = r.amount;
+    reservationDay = r.day;
   } catch (err) {
-    releaseHeavyAction(user.uid);
     overviewReleaseUid(user.uid);
-    sseWrite(res, 'error', { error: 'Could not verify token quota. Please try again.', code: 'quota_check_failed' });
+    sseWrite(res, 'error', { error: 'Could not verify Coach allowance. Please try again.', code: 'quota_check_failed' });
     res.end();
     return;
   }
 
   let closed = false;
-  req.on('close', () => { closed = true; });
+  res.on('close', () => { closed = true; });
   const heartbeat = setInterval(() => { if (!closed) sseWrite(res, 'heartbeat', { ts: Date.now() }); }, HEARTBEAT_MS);
   const stopHeartbeat = () => clearInterval(heartbeat);
 
@@ -391,7 +402,7 @@ exports.streamHandler = async (req, res) => {
       { role: 'user', content: userContent },
     ];
 
-    const maxTokens = scope === 'game' ? OVERVIEW_MAX_TOKENS_GAME : OVERVIEW_MAX_TOKENS_MOVE;
+    const maxTokens = Math.min(reserveAmount, scope === 'game' ? OVERVIEW_MAX_TOKENS_GAME : OVERVIEW_MAX_TOKENS_MOVE);
     const streamRes = await llm.chatCompletion({
       messages: llmMessages,
       stream: true,
@@ -403,8 +414,10 @@ exports.streamHandler = async (req, res) => {
     const result = await llm.streamDeltas(streamRes, (t) => {
       if (closed) return;
       assistantText += t;
+      consumed = Math.min(reserveAmount, Math.ceil(assistantText.length / 4));
       sseWrite(res, 'token', { text: t });
     });
+    consumed = Math.min(reserveAmount, completionCost(result));
     // Guard against an empty reply: some providers occasionally return a 200
     // with finish_reason=stop but ZERO content tokens. Instead of sending an
     // empty_reply error and hoping the client retries, emit a fact-based fallback
@@ -430,17 +443,12 @@ exports.streamHandler = async (req, res) => {
     }
 
     // Reconcile to the real cost (prefer provider usage; fall back to char est).
-    const usage = result && result.usage;
-    const realInput = Number(usage && usage.prompt_tokens) || Number(usage && usage.prompt) || 0;
-    const realOutput = Number(usage && usage.completion_tokens) || Number(usage && usage.completion) || 0;
-    const inputTokens = realInput || Math.ceil(JSON.stringify(llmMessages).length / 4);
-    const outputTokens = realOutput || Math.ceil(assistantText.length / 4);
-    const totalTokens = inputTokens + outputTokens;
+    const totalTokens = consumed;
     const delta = totalTokens - reserveAmount;
     let chargedTotal = reservedTotal;
     try {
       if (delta !== 0) {
-        const rec = await reconcileCoachTokens(user.uid, delta);
+        const rec = await reconcileCoachTokens(user.uid, delta, reservationDay);
         chargedTotal = rec.total;
       }
     } catch (err) {
@@ -448,17 +456,16 @@ exports.streamHandler = async (req, res) => {
       chargedTotal = reservedTotal;
     }
 
-    sseWrite(res, 'done', { ts: Date.now(), usage: { coachTokens: chargedTotal, coachTokenLimit: tokenLimit } });
+    sseWrite(res, 'done', { ts: Date.now(), usage: publicCoachUsage(chargedTotal, tokenLimit, reservationDay) });
   } catch (err) {
     console.error('coach-overview error:', err && err.stack ? err.stack : err);
     // Refund the reservation — the user never got the reply.
     if (user && user.uid) {
-      try { await reconcileCoachTokens(user.uid, -reserveAmount); } catch (_) {}
+      try { await reconcileCoachTokens(user.uid, consumed - reserveAmount, reservationDay); } catch (_) {}
     }
     sseWrite(res, 'error', { error: err.message || 'Overview failed.', code: err.code || 'server_error' });
   } finally {
     overviewReleaseUid(user && user.uid);
-    releaseHeavyAction(user && user.uid);
     stopHeartbeat();
     if (!res.writableEnded) res.end();
   }

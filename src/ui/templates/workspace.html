@@ -1,0 +1,613 @@
+    <main class="main-content" id="workspace" aria-label="Chess workspace">
+<div class="workspace-heading"><div><span class="eyebrow">YOUR CHESS WORKSPACE</span><h1 id="workspace-title">Game review</h1><p id="workspace-description">Explore the position. Understand every move.</p></div><span class="workspace-shortcut"><kbd>&larr;</kbd><kbd>&rarr;</kbd> Navigate moves</span></div>
+      <div class="board-section">
+        <div class="player-info player-top" id="player-top">
+          <span class="player-identity">
+            <span class="player-avatar" aria-hidden="true"><img src="/assets/pieces/cburnett/bK.svg" alt=""></span><span class="player-dot" data-color="black"></span>
+            <span class="player-name">Black</span>
+            <span class="player-rating" id="player-top-rating"></span>
+          </span>
+          <span class="player-clock" id="player-top-clock"></span>
+          <span class="player-captured" id="captured-top"></span>
+        </div>
+        <div class="board-stage">
+<div class="eval-bar-container">
+        <div class="eval-bar" id="eval-bar" role="img" aria-label="Position evaluation">
+          <div class="eval-bar-black" id="eval-bar-black"></div>
+          <div class="eval-bar-white" id="eval-bar-white"></div>
+        </div>
+        <div class="eval-score" id="eval-score">0.0</div>
+      </div>
+        <div class="board-wrapper">
+          <div class="board-coordinates-file" id="coords-file"></div>
+          <div class="board-coordinates-rank" id="coords-rank"></div>
+          <div id="chess-board" class="chess-board"></div>
+          <div class="board-skeleton-overlay" id="board-skeleton-overlay" style="display:none">
+            <div class="board-skeleton-spinner"></div>
+            <span class="board-skeleton-label" id="board-skeleton-label">Loading...</span>
+          </div>
+          <div class="move-classification-badge" id="move-badge" style="display:none">
+            <span class="badge-icon" id="badge-icon"></span>
+            <span class="badge-text" id="badge-text"></span>
+          </div>
+        </div>
+        </div>
+        <div class="player-info player-bottom" id="player-bottom">
+          <span class="player-identity">
+            <span class="player-avatar" aria-hidden="true"><img src="/assets/pieces/cburnett/wK.svg" alt=""></span><span class="player-dot" data-color="white"></span>
+            <span class="player-name">White</span>
+            <span class="player-rating" id="player-bottom-rating"></span>
+          </span>
+          <span class="player-clock" id="player-bottom-clock"></span>
+          <span class="player-captured" id="captured-bottom"></span>
+        </div>
+
+        <div class="board-controls">
+          <div class="board-controls-side">
+            <button id="btn-import-game" class="btn-control btn-icon-only" title="Import a game" aria-label="Import a game">
+              <span class="material-symbols-outlined btn-symbol">upload</span>
+              <span class="btn-label">Import</span>
+            </button>
+            <button id="btn-flip" class="btn-control btn-icon-only" title="Flip Board" aria-label="Flip Board">
+              <span class="material-symbols-outlined btn-symbol">swap_horiz</span>
+              <span class="btn-label">Flip</span>
+            </button>
+            <button id="btn-export" class="btn-control btn-icon-only" title="Export FEN / PGN" aria-label="Export FEN or PGN">
+              <span class="material-symbols-outlined btn-symbol">download</span>
+              <span class="btn-label">Export</span>
+            </button>
+            <button id="btn-reset" class="btn-control btn-icon-only" title="Reset Board" aria-label="Reset Board">
+              <span class="material-symbols-outlined btn-symbol">restart_alt</span>
+              <span class="btn-label">Reset</span>
+            </button>
+          </div>
+          <div class="board-controls-nav">
+            <button id="btn-first" class="btn-control" title="First Move" aria-label="First Move">
+              <span class="material-symbols-outlined btn-symbol">first_page</span>
+              <span class="btn-label">Start</span>
+            </button>
+            <button id="btn-prev" class="btn-control" title="Previous Move" aria-label="Previous Move">
+              <span class="material-symbols-outlined btn-symbol">chevron_left</span>
+              <span class="btn-label">Prev</span>
+            </button>
+            <button id="btn-next" class="btn-control" title="Next Move" aria-label="Next Move">
+              <span class="material-symbols-outlined btn-symbol">chevron_right</span>
+              <span class="btn-label">Next</span>
+            </button>
+            <button id="btn-last" class="btn-control" title="Last Move" aria-label="Last Move">
+              <span class="material-symbols-outlined btn-symbol">last_page</span>
+              <span class="btn-label">End</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="analysis-shell analysis-panel">
+<nav class="analysis-tabs" id="analysis-tabs" role="tablist" aria-label="Analysis panels"><button type="button" class="analysis-tab active" id="analysis-tab-feedback" data-panel="feedback" role="tab" aria-selected="true" aria-controls="live-eval">Overview</button><button type="button" class="analysis-tab" id="analysis-tab-moves" data-panel="moves" role="tab" aria-selected="false" aria-controls="move-list-container">Moves</button><button type="button" class="analysis-tab" id="analysis-tab-graph" data-panel="graph" role="tab" aria-selected="false" aria-controls="eval-graph-card">Evaluation</button></nav>
+        <div class="live-eval card panel-wide" id="live-eval" role="tabpanel" tabindex="0" aria-labelledby="analysis-tab-feedback" hidden>
+          <div class="card-header">
+	            <h3>Move Feedback</h3>
+            <div class="feedback-meta">
+              <span class="current-move-indicator" id="current-move-indicator">Current: Start</span>
+              <span class="live-eval-status" id="live-eval-status">
+                <span class="live-status-dot spinning"></span>
+                <span>Waiting</span>
+              </span>
+            </div>
+          </div>
+          <div class="live-eval-grid">
+            <div class="live-eval-score" id="live-eval-score">--</div>
+            <div class="live-eval-copy">
+              <div class="live-eval-line" id="live-eval-line" aria-live="polite">Make a move to see the engine response.</div>
+              <div class="live-eval-meta" id="live-eval-meta"></div>
+            </div>
+          </div>
+          <div class="move-insights feedback-insights" id="move-insights">
+            <p class="insight-empty" id="insight-empty" role="status">Select a reviewed move to see its explanation.</p>
+            <div class="insight-gate" id="insight-gate" hidden>
+              <div class="insight-gate-teaser">
+                <span class="insight-move" id="insight-gate-move"></span>
+                <span class="insight-class" id="insight-gate-class"></span>
+                <span class="insight-gate-lock-icon">🔒</span>
+              </div>
+              <p class="insight-gate-copy">Create a free account to see move-by-move coaching, including loss, threats, and engine lines.</p>
+              <div class="insight-gate-actions">
+                <a class="btn btn-primary btn-small" href="/signup?src=review" data-route="/signup">Create account</a>
+              </div>
+            </div>
+            <div class="insight-content" id="insight-content" style="display:none">
+              <div class="insight-top">
+                <span class="insight-move" id="insight-move"></span>
+                <span class="insight-class" id="insight-class"></span>
+              </div>
+              <div class="insight-class-desc" id="insight-class-desc"></div>
+              <div class="insight-row">
+                <span>CP Loss</span>
+                <strong id="insight-cploss">0</strong>
+              </div>
+              <div class="insight-row">
+                <span>Eval Swing</span>
+                <strong id="insight-swing">0.0</strong>
+              </div>
+              <div class="insight-row">
+                <span>Best Move</span>
+                <strong id="insight-bestmove">--</strong>
+              </div>
+              <div class="insight-row">
+                <span>Phase</span>
+                <strong id="insight-phase">--</strong>
+              </div>
+              <div class="insight-row insight-row-stack">
+                <span>Plan Tags</span>
+                <div class="insight-tags" id="insight-plan-tags"></div>
+              </div>
+              <div class="insight-row insight-row-stack" id="insight-threat-row" hidden>
+                <span>Threat</span>
+                <strong id="insight-threat">--</strong>
+              </div>
+              <div class="insight-row insight-row-stack" id="insight-endgame-row" hidden>
+                <span>Endgame</span>
+                <strong id="insight-endgame">--</strong>
+              </div>
+              <div class="insight-coach" id="insight-coach"></div>
+              <p class="explanation-help">Underlined moves and squares are interactive. Hover, focus, or tap to preview. Move between references to follow a line; leave the explanation or press Esc to return.</p>
+              <p id="explanation-preview-status" class="explanation-preview-status" role="status" aria-live="polite"></p>
+              <div class="tactical-coach-panel" id="tactical-coach-panel" hidden></div>
+              <div class="insight-actions">
+                <button id="btn-line-explorer" class="btn btn-secondary btn-small" disabled>
+                  <span class="btn-content">
+                    <span class="material-symbols-outlined btn-symbol">arrow_forward</span>
+                    <span class="btn-label">Explore Best Move</span>
+                  </span>
+                </button>
+                <button id="btn-insight-coach" class="btn btn-secondary btn-small">
+                  <span class="btn-content">
+                    <span class="material-symbols-outlined btn-symbol">psychology</span>
+                    <span class="btn-label">Ask Coach <span class="beta-badge">Beta</span></span>
+                  </span>
+                </button>
+                <button id="btn-return-explorer" class="btn btn-secondary btn-small" hidden>
+                  <span class="btn-content">
+                    <span class="material-symbols-outlined btn-symbol">keyboard_return</span>
+                    <span class="btn-label">Back to Main Line</span>
+                  </span>
+                </button>
+              </div>
+              <div class="insight-coach-result" id="insight-coach-result" hidden></div>
+              <div class="insight-alternatives" id="insight-alternatives"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="server-boost-toggle panel-wide" id="server-boost-toggle">
+          <div class="server-strength-select">
+            <span class="field-label">Server Review Strength</span>
+            <div class="chip-row" id="strength-chips" role="radiogroup" aria-label="Server review strength">
+              <label class="chip-label">
+                <input type="radio" name="server-strength" value="fast">
+                <span class="chip">Fast</span>
+              </label>
+              <label class="chip-label">
+                <input type="radio" name="server-strength" value="normal" checked>
+                <span class="chip">Normal</span>
+              </label>
+              <label class="chip-label">
+                <input type="radio" name="server-strength" value="strong">
+                <span class="chip">Strong</span>
+              </label>
+            </div>
+            <p class="server-strength-note" id="server-strength-note">Normal review analyzes every move, deepening the search as the game progresses.</p>
+          </div>
+        </div>
+
+        <section class="boost-page card panel-wide" id="boost-panel" hidden>
+          <div class="boost-hero">
+            <div>
+              <span class="boost-pill">Boost</span>
+              <h2>More server power for review and anticheat</h2>
+              <p>Boost removes daily server limits, adds stronger Stockfish 18 server review, and adds the Boost profile theme.</p>
+            </div>
+            <button id="btn-boost-account" class="btn btn-primary" type="button">
+              <span class="btn-content">
+                <span class="material-symbols-outlined btn-symbol">account_circle</span>
+                <span class="btn-label">Open Account</span>
+              </span>
+            </button>
+          </div>
+          <div class="boost-features">
+            <div><strong>Unlimited</strong><span>Server game reviews</span></div>
+            <div><strong>Unlimited</strong><span>Server anticheat runs</span></div>
+            <div><strong>Stockfish 18</strong><span>Stronger server review depth 14</span></div>
+          </div>
+        </section>
+
+        <button id="btn-review" class="btn btn-review panel-wide" disabled>
+          <span class="review-progress-bar" id="review-progress" aria-hidden="true"><span class="review-progress-fill" id="progress-fill"></span></span>
+          <span class="btn-content">
+            <span class="material-symbols-outlined btn-symbol">analytics</span>
+            <span id="review-btn-text" class="btn-label">Start Review</span>
+          </span>
+          <span class="review-progress-step" id="review-progress-step" hidden></span>
+          <span class="review-progress-pct" id="review-progress-pct" hidden></span>
+        </button>
+        <button id="btn-stop-review" class="btn btn-secondary btn-small panel-wide" style="display:none">
+          <span class="btn-content">
+            <span class="material-symbols-outlined btn-symbol">stop</span>
+            <span class="btn-label">Stop Review</span>
+          </span>
+        </button>
+
+        <div class="move-list-container card panel-wide" id="move-list-container" role="tabpanel" tabindex="0" aria-labelledby="analysis-tab-moves">
+          <h3>Moves</h3>
+          <div class="move-list" id="move-list">
+            <div class="move-list-empty">Your moves will appear here. Import a game or make your first move on the board.</div>
+          </div>
+        </div>
+
+        <div class="eval-graph-card card panel-wide" id="eval-graph-card" role="tabpanel" tabindex="0" aria-labelledby="analysis-tab-graph">
+	          <h3>Position evaluation</h3><p class="graph-hint">Engine evaluation across your game. Select a move to explore.</p>
+          <canvas role="img" aria-label="Game evaluation graph" id="eval-graph" width="320" height="120"></canvas>
+        </div>
+
+        <div class="analysis-overview card panel-wide">
+          <div class="opening-info card panel-compact" id="opening-info" style="display:none">
+            <div class="opening-header">
+              <span class="material-symbols-outlined opening-icon">menu_book</span>
+              <span class="opening-label">Opening</span>
+              <span class="opening-name" id="opening-name"></span>
+            </div>
+            <div class="opening-stats" id="opening-stats" hidden></div>
+            <div class="opening-controls" id="opening-controls" hidden>
+              <div class="opening-source-toggle" role="group" aria-label="Opening explorer source">
+                <button type="button" class="opening-source-btn" data-source="masters">Masters</button>
+                <button type="button" class="opening-source-btn" data-source="lichess">Lichess</button>
+              </div>
+              <div class="opening-filters" id="opening-filters" hidden>
+                <div class="opening-filter-group">
+                  <span class="opening-filter-label">Speed</span>
+                  <div class="opening-chips" data-filter="speeds">
+                    <button type="button" class="opening-chip" data-val="bullet">Bullet</button>
+                    <button type="button" class="opening-chip" data-val="blitz">Blitz</button>
+                    <button type="button" class="opening-chip" data-val="rapid">Rapid</button>
+                    <button type="button" class="opening-chip" data-val="classical">Classical</button>
+                  </div>
+                </div>
+                <div class="opening-filter-group">
+                  <span class="opening-filter-label">Rating</span>
+                  <div class="opening-chips" data-filter="ratings">
+                    <button type="button" class="opening-chip" data-val="1600">1600+</button>
+                    <button type="button" class="opening-chip" data-val="1800">1800+</button>
+                    <button type="button" class="opening-chip" data-val="2000">2000+</button>
+                    <button type="button" class="opening-chip" data-val="2200">2200+</button>
+                    <button type="button" class="opening-chip" data-val="2500">2500+</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="game-status card panel-compact" id="game-status" style="display:none">
+            <div class="card-header">
+              <h3 id="game-status-title">Game End</h3>
+              <span class="game-status-reason" id="game-status-reason"></span>
+            </div>
+            <p class="game-status-details" id="game-status-details"></p>
+          </div>
+
+          <div class="coach-card card panel-wide" id="coach-card" hidden>            <div class="coach-card-header">
+              <div class="coach-identity">
+                <div class="coach-avatar" aria-hidden="true">
+                  <img src="/assets/icon.png" alt="">
+                </div>
+                <div>
+                  <h3>Coach</h3>
+                  <span class="coach-coming-soon">Live coach</span>
+                </div>
+              </div>
+              <span class="coach-state" id="coach-state">Ready</span>
+            </div>
+            <p class="coach-dialog" id="coach-dialog">Make your first move.</p>
+            <div class="coach-controls">
+              <label class="field coach-elo-field">
+                <span class="field-label">ELO</span>
+                <input id="coach-elo" class="input-select" type="number" min="100" max="2800" step="50" value="1200">
+              </label>
+              <input id="coach-skill" type="hidden" value="intermediate">
+              <input id="coach-color" type="hidden" value="w">
+              <button id="btn-coach-start" class="btn btn-primary coach-action">
+                <span class="btn-content">
+                  <span class="material-symbols-outlined btn-symbol">sports_esports</span>
+                  <span class="btn-label">Start Coach</span>
+                </span>
+              </button>
+              <button id="btn-coach-takeback" class="btn btn-secondary coach-action" disabled>
+                <span class="btn-content">
+                  <span class="material-symbols-outlined btn-symbol">undo</span>
+                  <span class="btn-label">Take Back</span>
+                </span>
+              </button>
+              <button id="btn-coach-hint" class="btn btn-secondary coach-action" disabled>
+                <span class="btn-content">
+                  <span class="material-symbols-outlined btn-symbol">lightbulb</span>
+                  <span class="btn-label">Hint</span>
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div class="puzzle-card card panel-wide" id="puzzle-card" hidden>
+            <div class="puzzle-card-header">
+              <div>
+                <h3>Puzzles</h3>
+                <span class="puzzle-source" id="puzzle-source">Lichess training</span>
+              </div>
+              <div class="puzzle-rating-pill">
+                <span>Rating</span>
+                <strong id="puzzle-user-rating">1500</strong>
+              </div>
+            </div>
+            <div class="puzzle-status" id="puzzle-status" aria-live="polite">Free puzzle — no account needed. Sign up to track your rating.</div>
+            <div class="puzzle-meta-grid">
+              <div class="puzzle-meta">
+                <span>Target</span>
+                <strong id="puzzle-target-rating">1500</strong>
+              </div>
+              <div class="puzzle-meta puzzle-streak-meta">
+                <span>Streak</span>
+                <strong id="puzzle-streak">0</strong>
+              </div>
+              <div class="puzzle-meta">
+                <span>Score</span>
+                <strong id="puzzle-score">0 / 0</strong>
+              </div>
+              <div class="puzzle-meta puzzle-goal-meta">
+                <span>Daily goal</span>
+                <strong id="puzzle-daily-goal">0 / 5</strong>
+              </div>
+            </div>
+            <div class="puzzle-tags" id="puzzle-tags"></div>
+            <div class="puzzle-controls">
+              <button id="btn-puzzle-next" class="btn btn-primary puzzle-action puzzle-action-primary">
+                <span class="btn-content">
+                  <span class="material-symbols-outlined btn-symbol">navigate_next</span>
+                  <span class="btn-label">Next Puzzle</span>
+                </span>
+              </button>
+              <div class="puzzle-controls-secondary">
+                <button id="btn-puzzle-daily" class="btn btn-secondary puzzle-action">
+                  <span class="btn-content">
+                    <span class="material-symbols-outlined btn-symbol">today</span>
+                    <span class="btn-label">Daily</span>
+                  </span>
+                </button>
+                <button id="btn-puzzle-retry" class="btn btn-secondary puzzle-action" disabled>
+                  <span class="btn-content">
+                    <span class="material-symbols-outlined btn-symbol">replay</span>
+                    <span class="btn-label">Retry</span>
+                  </span>
+                </button>
+                <button id="btn-puzzle-hint" class="btn btn-secondary puzzle-action" disabled>
+                  <span class="btn-content">
+                    <span class="material-symbols-outlined btn-symbol">lightbulb</span>
+                    <span class="btn-label">Hint</span>
+                  </span>
+                </button>
+                <button id="btn-puzzle-review" class="btn btn-secondary puzzle-action" disabled>
+                  <span class="btn-content">
+                    <span class="material-symbols-outlined btn-symbol">analytics</span>
+                    <span class="btn-label">Review Puzzle</span>
+                  </span>
+                </button>
+              </div>
+              <details class="puzzle-filters">
+                <summary>Filters (theme &amp; difficulty)</summary>
+                <div class="puzzle-filters-grid">
+                  <label class="field">
+                    <span class="field-label">Theme</span>
+                    <select id="puzzle-theme" class="input-select">
+                      <option value="mix">Mixed</option>
+                      <option value="fork">Forks</option>
+                      <option value="pin">Pins</option>
+                      <option value="skewer">Skewers</option>
+                      <option value="mate">Checkmates</option>
+                      <option value="endgame">Endgames</option>
+                      <option value="defensiveMove">Defense</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">Difficulty</span>
+                    <select id="puzzle-difficulty" class="input-select">
+                      <option value="auto">Auto (matches your rating)</option>
+                      <option value="easiest">Easiest</option>
+                      <option value="easier">Easier</option>
+                      <option value="normal">Normal</option>
+                      <option value="harder">Harder</option>
+                      <option value="hardest">Hardest</option>
+                    </select>
+                  </label>
+                </div>
+              </details>
+              <div class="puzzle-level-row" role="radiogroup" aria-label="Skill level">
+                <label class="puzzle-level-chip">
+                  <input type="radio" name="puzzle-level" value="1000">
+                  <span>Beginner</span>
+                  <small>1000</small>
+                </label>
+                <label class="puzzle-level-chip">
+                  <input type="radio" name="puzzle-level" value="1500" checked>
+                  <span>Intermediate</span>
+                  <small>1500</small>
+                </label>
+                <label class="puzzle-level-chip">
+                  <input type="radio" name="puzzle-level" value="1900">
+                  <span>Advanced</span>
+                  <small>1900</small>
+                </label>
+                <label class="puzzle-level-chip">
+                  <input type="radio" name="puzzle-level" value="2200">
+                  <span>Expert</span>
+                  <small>2200</small>
+                </label>
+              </div>
+              <div class="puzzle-level-embed" id="puzzle-level-embed">
+                <div class="puzzle-level-embed-preview" id="puzzle-level-embed-preview" aria-label="Sample position"></div>
+                <div class="puzzle-level-embed-meta">
+                  <strong id="puzzle-level-embed-title">Try it</strong>
+                  <span id="puzzle-level-embed-sub">A short puzzle at this level — give it a go before you commit.</span>
+                  <button id="btn-puzzle-level-try" class="btn btn-secondary" type="button">
+                    <span class="btn-content">
+                      <span class="material-symbols-outlined btn-symbol">play_arrow</span>
+                      <span class="btn-label">Try it</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="puzzle-success-overlay" id="puzzle-success-overlay" hidden aria-hidden="true">
+              <div class="puzzle-success-check">
+                <span class="material-symbols-outlined">check_circle</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="anticheat-card card panel-wide" id="anticheat-card" hidden>
+            <div class="anticheat-card-header">
+              <div>
+                <h3>Anticheat</h3>
+                <span class="anticheat-source">Server-only analysis of accuracy, time use, and suspicious patterns</span>
+              </div>
+              <span class="anticheat-risk-pill" id="anticheat-risk-pill">Ready</span>
+            </div>
+            <details class="anticheat-warning anticheat-warning-collapsible">
+              <summary>Boost &amp; Max feature — each game counts against your weekly budget. <span class="anticheat-warning-hint">Details</span></summary>
+              <p><strong>Server-side cheat detection.</strong> Anticheat is a Boost (25 games/week) and Max (100 games/week) feature. Each game you scan counts against your weekly budget, which resets Monday. Don't close this tab while checking.</p>
+            </details>
+            <div class="anticheat-usage-bar" id="anticheat-usage-bar"></div>
+            <div class="anticheat-sources" role="group" aria-label="Anticheat source">
+              <button type="button" class="anticheat-source-card" data-source="pgn" aria-pressed="true">
+                <span class="anticheat-source-icon" aria-hidden="true">
+                  <span class="material-symbols-outlined">content_paste</span>
+                </span>
+                <span class="anticheat-source-meta">
+                  <strong>Paste PGN</strong>
+                  <small>Paste one or several games</small>
+                </span>
+              </button>
+              <button type="button" class="anticheat-source-card" data-source="lichess" aria-pressed="false">
+                <span class="anticheat-source-meta">
+                  <strong>Lichess username</strong>
+                  <small>Pull their last games</small>
+                </span>
+              </button>
+              <button type="button" class="anticheat-source-card" data-source="chesscom" aria-pressed="false">
+                <span class="anticheat-source-meta">
+                  <strong>Chess.com username</strong>
+                  <small>Pull their last games</small>
+                </span>
+              </button>
+            </div>
+            <!-- Hidden inputs retained so the existing _runAnticheatOnServer payload
+                 builder (which reads elAnticheatSource / Username / Limit / Pgn) keeps
+                 working without further changes. Values are populated by the
+                 SweetAlert popup when the user clicks a source card. -->
+            <input type="hidden" id="anticheat-source" value="pgn">
+            <input type="hidden" id="anticheat-username" value="">
+            <input type="hidden" id="anticheat-limit" value="10">
+            <textarea id="anticheat-pgn" class="anticheat-pgn" hidden aria-label="One PGN or several PGNs" placeholder="Paste one PGN or several PGNs here..." rows="8"></textarea>
+            <div class="anticheat-status" id="anticheat-status" aria-live="polite">Pick a source above to start a review.</div>
+            <div class="anticheat-results" id="anticheat-results"></div>
+          </div>
+
+          <!-- Saved reviews list — every past + currently-running report the
+               user has started. Loaded lazily by _loadAnticheatReports. -->
+          <div class="anticheat-saved card panel-wide" id="anticheat-saved" hidden>
+            <div class="anticheat-saved-header">
+              <h3>Saved reviews</h3>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-anticheat-refresh" title="Refresh list">
+                <span class="material-symbols-outlined">refresh</span> Refresh
+              </button>
+            </div>
+            <div class="anticheat-saved-list" id="anticheat-saved-list">
+              <div class="anticheat-saved-empty">Loading saved reviews…</div>
+            </div>
+          </div>
+        </div>
+
+	        <div class="review-summary card panel-wide" id="review-summary" style="display:none" aria-live="polite">
+          <h3>Game Review</h3>
+          <div class="summary-grid">
+            <div class="summary-col">
+              <h4>White</h4>
+              <div class="accuracy-ring" id="accuracy-white">
+                <svg viewBox="0 0 100 100">
+                  <circle cx="50" cy="50" r="45" class="ring-bg"/>
+                  <circle cx="50" cy="50" r="45" class="ring-fill" id="ring-white"/>
+                </svg>
+                <span class="accuracy-value" id="accuracy-white-val">--</span>
+              </div>
+              <div class="summary-counts" id="summary-white"></div>
+            </div>
+            <div class="summary-col">
+              <h4>Black</h4>
+              <div class="accuracy-ring" id="accuracy-black">
+                <svg viewBox="0 0 100 100">
+                  <circle cx="50" cy="50" r="45" class="ring-bg"/>
+                  <circle cx="50" cy="50" r="45" class="ring-fill" id="ring-black"/>
+                </svg>
+                <span class="accuracy-value" id="accuracy-black-val">--</span>
+              </div>
+              <div class="summary-counts" id="summary-black"></div>
+            </div>
+          </div>
+          <div class="summary-metrics">
+            <div class="summary-metric-card">
+              <span class="metric-label">White CAPS</span>
+              <span class="metric-value" id="caps-white-val">--</span>
+            </div>
+            <div class="summary-metric-card">
+              <span class="metric-label">Black CAPS</span>
+              <span class="metric-value" id="caps-black-val">--</span>
+            </div>
+            <div class="summary-metric-card">
+              <span class="metric-label">White ACPL</span>
+              <span class="metric-value" id="acpl-white-val">--</span>
+            </div>
+            <div class="summary-metric-card">
+              <span class="metric-label">Black ACPL</span>
+              <span class="metric-value" id="acpl-black-val">--</span>
+            </div>
+            <div class="summary-metric-card summary-metric-rating">
+              <span class="metric-label">White Game Rating</span>
+              <span class="metric-value" id="rating-white-val">--</span>
+            </div>
+            <div class="summary-metric-card summary-metric-rating">
+              <span class="metric-label">Black Game Rating</span>
+              <span class="metric-value" id="rating-black-val">--</span>
+            </div>
+          </div>
+          <div class="phase-breakdown" id="phase-breakdown"></div>
+          <div class="summary-coach">
+            <button id="btn-game-coach" class="btn btn-secondary btn-small" type="button">
+              <span class="btn-content">
+                <span class="material-symbols-outlined btn-symbol">psychology</span>
+                <span class="btn-label">Coach Overview <span class="beta-badge">Beta</span></span>
+              </span>
+            </button>
+            <div class="insight-coach-result" id="game-coach-result" hidden></div>
+          </div>
+        </div>
+
+        <div class="engine-info card panel-compact" id="engine-info" hidden>
+          <div class="engine-status" id="engine-status" aria-live="polite">Engine: Loading...</div>
+          <div class="engine-line" id="engine-line"></div>
+          <div class="engine-load-progress" id="engine-load-progress">
+            <div class="engine-load-progress-fill" id="engine-load-progress-fill"></div>
+          </div>
+        </div>
+
+	        <div class="critical-moments card panel-compact" id="critical-moments" style="display:none">
+          <h3>Critical Moments</h3>
+          <div class="critical-list" id="critical-list"></div>
+        </div>
+      </div>
+    </main>

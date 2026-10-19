@@ -19,6 +19,7 @@ const analyzeFn = require('./api/analyze.js');
 const anticheatFn = require('./api/anticheat.js');
 const getPuzzleFn = require('./api/get-puzzle.js');
 const recentGamesFn = require('./api/recent-games.js');
+const linkedChessFn = require('./api/linked-chess.js');
 const recordPuzzleAttemptFn = require('./api/record-puzzle-attempt.js');
 const puzzleSolveFn = require('./api/puzzle-solve.js');
 const usersMeFn = require('./api/users-me.js');
@@ -32,6 +33,7 @@ const adminBanUserFn = require('./api/admin-ban-user.js');
 const usersMeStreamFn = require('./api/users-me-stream.js');
 const banStatusFn = require('./api/ban-status.js');
 const adminDashboardFn = require('./api/admin-dashboard.js');
+const adminAccessControlFn = require('./api/admin-access-control.js');
 const siteVisitFn = require('./api/site-visit.js');
 const coachChatFn = require('./api/coach-chat.js');
 const coachOverviewFn = require('./api/coach-overview.js');
@@ -39,6 +41,7 @@ const coachToolResultFn = require('./api/coach-tool-result.js');
 const openingExplorerFn = require('./api/opening-explorer.js');
 const adminAbuseReportFn = require('./api/admin-abuse-report.js');
 const notificationsFn = require('./api/notifications.js');
+const playFn = require('./api/play.js');
 
 function generateDeviceId() {
   const bytes = require('crypto').randomBytes(16);
@@ -181,7 +184,7 @@ function _maybePruneRateBuckets(now) {
 morgan.token('url-redacted', (req) => {
   const url = req.originalUrl || req.url || '';
   if (!url.includes('?')) return url;
-  return url.replace(/([?&])(token|idToken|key|secret|access_token|refresh_token)=([^&]*)/gi,
+  return url.replace(/([?&])(token|idToken|key|secret|access_token|refresh_token|code|state)=([^&]*)/gi,
     '$1$2=REDACTED');
 });
 app.use(morgan(':method :url-redacted :status :res[content-length] - :response-time ms'));
@@ -196,6 +199,7 @@ app.use((req, res, next) => {
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   // Strict Transport Security (1 year)
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   return next();
@@ -205,7 +209,7 @@ app.use((req, res, next) => {
   if (req.path.startsWith('/api/')) {
     applyCors(req, res);
     if (!originAllowed(req.headers.origin, req.headers.host)) {
-      return res.status(403).json({ error: 'Origin is not allowed.' });
+      return res.status(403).json({ error: 'Origin is not allowed.', code: 'origin_not_allowed' });
     }
   }
   return next();
@@ -295,6 +299,8 @@ const writeLimit = makeRateLimiter({ windowMs: 60 * 1000, max: 45, label: 'write
 const coachLimit = makeRateLimiter({ windowMs: 60 * 1000, max: 120, label: 'coach' });
 
 app.use('/api', gentleApiLimit);
+app.use('/api/play', playFn.router);
+app.use(['/api/analyze', '/api/anticheat', '/api/coach', '/api/opening-explorer'], playFn.fairPlayMiddleware());
 app.post('/api/analyze', analysisLimit, wrapHandler(analyzeFn));
 app.post('/api/analyze/stream', analysisLimit, analyzeFn.streamHandler);
 app.post('/api/anticheat', analysisLimit, wrapHandler(anticheatFn));
@@ -313,6 +319,10 @@ app.post('/api/auth/ban-status', writeLimit, wrapHandler(banStatusFn));
 app.get('/api/users/me', wrapHandler(usersMeFn));
 app.get('/api/profile/:username', profileFn.expressHandler);
 app.get('/api/profile', wrapHandler(profileFn));
+app.get('/api/linked-chess', wrapHandler(linkedChessFn));
+app.post('/api/linked-chess', wrapHandler(linkedChessFn));
+app.get('/api/max-auto-review', wrapHandler(require('./api/max-auto-review')));
+app.post('/api/max-auto-review', wrapHandler(require('./api/max-auto-review')));
 app.post('/api/users/me', writeLimit, wrapHandler(usersMeFn));
 app.get('/api/users/me/stream', usersMeStreamFn.streamHandler);
 app.post('/api/coach/chat', coachLimit, coachChatFn.streamHandler);
@@ -327,6 +337,8 @@ app.post('/api/contact', writeLimit, wrapHandler(contactFn));
 app.post('/api/signup-verify', writeLimit, wrapHandler(signupVerifyFn));
 app.post('/api/site/visit', writeLimit, wrapHandler(siteVisitFn));
 app.get('/api/admin/dashboard', wrapHandler(adminDashboardFn));
+app.get('/api/admin/profile', wrapHandler(require('./api/admin-profile')));
+app.post('/api/admin/access-control', writeLimit, wrapHandler(adminAccessControlFn));
 app.post('/api/admin/dashboard', writeLimit, wrapHandler(adminDashboardFn));
 app.post('/api/report-abuse', writeLimit, wrapHandler(adminAbuseReportFn));
 app.get('/api/admin/abuse', wrapHandler(adminAbuseReportFn));
@@ -464,6 +476,7 @@ app.use((err, req, res, _next) => {
 });
 
 app.listen(PORT, () => {
+  require('./api/_lib/max-auto-review').startScheduler();
   const mode = serveStatic ? 'web/API' : 'API';
   console.log(`${mode} server listening at http://localhost:${PORT}`);
   // ── Warm up Firebase connections BEFORE the first real request ──────
@@ -475,13 +488,22 @@ app.listen(PORT, () => {
   setImmediate(() => {
     try {
       require('./api/_lib/firebase-stats').getPublicStats()
-        .then(() => console.log('[warmup] Firebase REST ready'))
-        .catch((err) => console.warn('[warmup] Firebase REST skipped:', err.message));
+        .then(() => console.log('[warmup] SQL public counters ready'))
+        .catch((err) => console.warn('[warmup] Public counter recovery deferred:', err.message));
       const { initAdmin } = require('./api/_lib/user-service');
-      initAdmin();
-      initAdmin().db.ref('.info/serverTimeOffset').once('value')
-        .then(() => console.log('[warmup] Firebase RTDB ready'))
-        .catch((err) => console.warn('[warmup] Firebase RTDB skipped:', err.message));
+      const { db } = initAdmin();
+      console.log('[warmup] SQL database ready; Firebase backup queue enabled');
+      // ── Periodic Firebase → SQL anti-entropy sync ────────────────────
+      // The lazy per-path hydrate only covers never-seen paths; subtrees
+      // that other writers added to Firebase after the initial import
+      // (legacy functions, console edits, pre-cutover backend) otherwise
+      // never arrive, surfacing as "missing data" in the app. One shared
+      // recovery pass runs on boot and every 10 minutes; local writes win.
+      if (db?.syncFromBackup) {
+        const recover = require('./api/_lib/backup-recovery').createBackupRecovery(db);
+        setImmediate(() => recover().catch(() => {}));
+        setInterval(() => recover().catch(() => {}), 10 * 60 * 1000).unref();
+      }
     } catch (err) {
       console.warn('[warmup] Firebase not configured yet:', err.message);
     }

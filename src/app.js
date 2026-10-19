@@ -1,4 +1,6 @@
 // Main Application - Chess Game Review
+import { friendlyAuthError, validEmail } from './auth-errors.js';
+import { BoardSounds } from './board-sounds.js';
 class ChessReviewApp {
   constructor() {
     this.board = new ChessBoard('chess-board');
@@ -183,6 +185,7 @@ class ChessReviewApp {
     this.board.onMove = (from, to) => this._handleBoardMove(from, to);
 	    this.board.onFlip = () => {
 	      this._syncPlayerNameplates();
+          this._updateClockDisplays();
     this._applyAppearanceSettings();
 	      this._updateEvalBar(this.currentEvalScore);
 	      this._refreshMoveBadgePosition();
@@ -191,21 +194,11 @@ class ChessReviewApp {
     this.elEvalGraph = document.getElementById('eval-graph');
     this.evalGraphCtx = this.elEvalGraph.getContext('2d');
 
-    this.soundFiles = {
-      start: '/sounds/start.mp3',
-      move: '/sounds/move.mp3',
-      capture: '/sounds/capture.mp3',
-      castle: '/sounds/castle.mp3',
-      check: '/sounds/check.mp3',
-      promote: '/sounds/promote.mp3',
-      end: '/sounds/end.mp3',
-	    };
-	    this.soundPool = {};
-	    this.soundPoolIndex = {};
-	    this.soundPreloadPromise = null;
+    this.boardSounds = new BoardSounds();
 	    this._preloadSounds().catch(() => {});
 
 	    this._bindElements();
+    window.PlayFairPlay?.attachApp(this);
 		    this._initEngineControls();
 		    this._loadAppearanceSettingsIntoUi();
 		    this._applyLocalPuzzleProfile();
@@ -242,11 +235,97 @@ class ChessReviewApp {
 			    window.addEventListener('focus', refreshPlanAndUsage);
 		  }
 
+		  _onboardingSavedUsernames() {
+		    const clean = (value) => String(value || '').trim();
+		    return {
+		      lichess: clean(document.getElementById('onboard-lichess-username')?.value),
+		      chesscom: clean(document.getElementById('onboard-chesscom-username')?.value),
+		    };
+		  }
+
   // ── Heavy-action mutual-exclusion lock ─────────────────────────────────
   // Review and coach chat are long-running, CPU/network-heavy operations. We
   // block starting a second one while another is in progress and show a popup.
   // Basic API calls (puzzles, imports, account updates, etc.) are intentionally
   // NOT gated by this lock.
+  _applyPlayFairPlay({ blocked, activeGames = [], reason } = {}) {
+    const wasBlocked = this._playFairPlayBlocked;
+    this._playFairPlayBlocked = !!blocked;
+    document.body.classList.toggle('play-fairplay-blocked', !!blocked);
+    const notice = document.getElementById('play-fairplay-notice');
+    if (notice) {
+      notice.hidden = !blocked;
+      const text = notice.querySelector('[data-fairplay-text]');
+      if (text) text.textContent = activeGames.length
+        ? 'Your online game is in progress. Analysis and coaching will return when it ends.'
+        : 'Checking your online games. Analysis and coaching are paused until Play reconnects.';
+    }
+    if (blocked) {
+      this.liveEvalToken += 1; this.liveDepthToken += 1;
+      this._coachOverviewToken = (this._coachOverviewToken || 0) + 1;
+      this.engine?.interrupt?.();
+      this._reviewAbortController?.abort();
+      this._coachOverviewController?.abort();
+      this.coachChat?.abortController?.abort();
+      window.CoachChat?.stop();
+      this._stopReviewPlayback();
+      this._exitBestMovePreview();
+      if (this.coachMode) { this.coachMode.active = false; this.coachMode.thinking = false; }
+      if (this.clockState?.active) this._resetClockState();
+      this.board?.clearBestMoveArrow();
+      this.board?.clearCoachAnnotations?.();
+      this.board?.setHighlights([]);
+      this.board?.clearLoading();
+      window.MoveExplanationUI?.clear();
+      this._resetCoachHint();
+    }
+    // Keep this idempotent: verification may complete while a different route
+    // is rendering. Existing games, cached reviews and saved chats stay intact.
+    this._syncActionButtons();
+    if (wasBlocked !== !!blocked && this.elMoveList) this._renderMoveList();
+    if (!blocked && wasBlocked && this.engine?.ready && !this.isAnalyzing
+      && document.body.dataset.mode === 'review' && !document.body.classList.contains('menu-active')
+      && !document.body.classList.contains('in-app-route')) {
+      void this._requestLiveEvaluation('Analyzing current position...');
+    }
+  }
+
+  async openPlayReview({ pgn, gameId, orientation = 'white' } = {}) {
+    if (typeof pgn !== 'string' || !pgn.trim()) throw new Error('The completed game has no PGN.');
+    const parsed = new Chess();
+    if (!parsed.load_pgn(this._normalizePgnText(pgn), { sloppy: true })) {
+      throw new Error('The completed game PGN could not be read.');
+    }
+    const headers = parsed.header();
+    if (!['1-0', '0-1', '1/2-1/2'].includes(headers.Result)
+      && !['aborted', 'noStart'].includes(headers.Termination)) {
+      throw new Error('Review becomes available after the game has finished.');
+    }
+    // The fetched PGN is sufficient for future review: no provider token or
+    // ongoing Play connection is passed into the established review system.
+    this._navigateTo('/review', { skipImport: true, disableRestore: true });
+    this._importUsername = null;
+    this._loadPgnText(pgn, { ...(gameId ? { Site: `https://lichess.org/${gameId}` } : {}) });
+    this._setBoardOrientationForColor(['black', 'b'].includes(orientation) ? 'b' : 'w');
+    this._hidePgnModal();
+    this._goToMove(-1);
+    if (window.PlayFairPlay && !(await window.PlayFairPlay.verify())) return false;
+    if (!this.gameMoves.length) return true;
+    // A finished game opens immediately even if Stockfish is still loading.
+    // Server review is already supported; browser review waits for the same
+    // engine-ready path as a normal imported game.
+    if (this.authState?.user && this.engineSettings.analysisLocation === 'server') {
+      await this._startReview();
+    } else if (this.engine?.ready) {
+      await this._startReview();
+    } else {
+      this._pendingPlayReview = { gameId, moves: this.gameMoves.join(' '), initialFen: this.initialFen };
+      this._updateLiveEvalPanel({ busy: false, score: null,
+        line: 'Game loaded. Review will start when Stockfish is ready.', meta: '' });
+    }
+    return true;
+  }
+
   _isBusyWithHeavyAction() {
     return this.busyAction === 'review' || this.busyAction === 'coach';
   }
@@ -294,8 +373,10 @@ class ChessReviewApp {
 	this.elHeaderAccountIcon = document.getElementById('header-account-icon');
 	this.elHeaderAccountLabel = document.getElementById('header-account-label');
     this.elAppleNav = document.getElementById('apple-nav');
+    this.elSidebar = document.getElementById('sc-sidebar');
     this.elAppleNavToggle = document.getElementById('apple-nav-toggle');
-    this.elNavScrim = document.getElementById('nav-scrim');
+    this.elNavScrim = document.getElementById('sc-scrim') || document.getElementById('nav-scrim');
+    this.elSidebarClose = document.getElementById('sidebar-close');
     this.elBtnBackMenu = document.getElementById('btn-back-menu');
     // The engine-choice modal was removed (it was wired but never displayed;
     // the recommended module is applied silently). elEngineChoiceModal is kept
@@ -356,6 +437,7 @@ class ChessReviewApp {
     this.elBtnSaveAppearanceSettings = document.getElementById('btn-save-appearance-settings');
     this.elEngineSettingsStatus = document.getElementById('engine-settings-status');
     this.elAppearanceSettingsStatus = document.getElementById('appearance-settings-status');
+    this.elColorTheme = document.querySelector('input[name="settings-color-theme"]:checked');
     this.elBoardTheme = document.querySelector('input[name="settings-board-theme"]:checked');
     this.elPieceTheme = document.querySelector('input[name="settings-piece-theme"]:checked');
     this.elArrowColor = document.getElementById('settings-arrow-color');
@@ -388,6 +470,8 @@ class ChessReviewApp {
     this.elBadgeText = document.getElementById('badge-text');
     this.elPlayerTop = document.getElementById('player-top');
     this.elPlayerBottom = document.getElementById('player-bottom');
+    this.elCapturedTop = document.getElementById('captured-top');
+    this.elCapturedBottom = document.getElementById('captured-bottom');
 	this.elPlayerTopClock = document.getElementById('player-top-clock');
 	this.elPlayerBottomClock = document.getElementById('player-bottom-clock');
 	this.elPlayerTopRating = document.getElementById('player-top-rating');
@@ -594,6 +678,7 @@ class ChessReviewApp {
 		      document.getElementById('onboard-step-1'),
 		      document.getElementById('onboard-step-2'),
 		      document.getElementById('onboard-step-3'),
+		      document.getElementById('onboard-step-4'),
 		    ];
 		    this.elOnboardBoardTheme = document.querySelector('input[name="onboard-board-theme"]');
 		    this.elOnboardPieceTheme = document.querySelector('input[name="onboard-piece-theme"]');
@@ -629,6 +714,7 @@ class ChessReviewApp {
 		    // update the bell badge.
 		    this._notifState = { lastSeenIds: new Set(), lastPollAt: 0, pollTimer: null };
 		    // SPA route panels
+        this.elPlayPage = document.getElementById('play-page');
 		    this.elBoostPagePanel = document.getElementById('page-boost');
 		    this.elAuthPagePanel = document.getElementById('page-auth');
 		    this.elNotFoundPanel = document.getElementById('page-404');
@@ -890,7 +976,7 @@ class ChessReviewApp {
     this.engineSettings = { ...this.engineSettings, ...settings };
     this._persistEngineSettings();
     if (this.elEngineSettingsStatus) {
-      this.elEngineSettingsStatus.textContent = 'Engine settings saved!';
+      this.elEngineSettingsStatus.textContent = 'Engine settings saved.';
       this.elEngineSettingsStatus.className = 'account-status success';
     }
     this._syncServerStrongToggle();
@@ -914,8 +1000,11 @@ class ChessReviewApp {
       || this.elBoardTheme?.value || 'classic';
     const pieceTheme = document.querySelector('input[name="settings-piece-theme"]:checked')?.value
       || this.elPieceTheme?.value || 'cburnett';
+    const colorTheme = document.querySelector('input[name="settings-color-theme"]:checked')?.value
+      || this.elColorTheme?.value || 'system';
     const animSpeedEl = document.querySelector('input[name="settings-anim-speed"]:checked');
     const settings = {
+      colorTheme,
       boardTheme,
       pieceTheme,
       arrowColor: this.elArrowColor?.value || '#d88a1d',
@@ -929,7 +1018,7 @@ class ChessReviewApp {
       localStorage.setItem('sidastuff.appearanceSettings', JSON.stringify(settings));
     } catch (_) { /* storage unavailable — apply in-memory only */ }
     if (this.elAppearanceSettingsStatus) {
-      this.elAppearanceSettingsStatus.textContent = 'Appearance settings saved!';
+      this.elAppearanceSettingsStatus.textContent = 'Appearance settings saved.';
       this.elAppearanceSettingsStatus.className = 'account-status success';
     }
     this._applyAppearanceSettings(settings);
@@ -953,6 +1042,7 @@ class ChessReviewApp {
     };
     checkRadio('settings-board-theme', saved.boardTheme);
     checkRadio('settings-piece-theme', saved.pieceTheme);
+    checkRadio('settings-color-theme', saved.colorTheme || 'system');
     if (this.elArrowColor && saved.arrowColor) this.elArrowColor.value = saved.arrowColor;
     if (this.elHighlightColor && saved.highlightColor) this.elHighlightColor.value = saved.highlightColor;
     if (this.elPieceAnimations && typeof saved.pieceAnimations === 'boolean') {
@@ -986,6 +1076,10 @@ class ChessReviewApp {
         return s ? JSON.parse(s) : {};
       } catch (_) { return {}; }
     })();
+
+    const colorTheme = ['system', 'light', 'dark'].includes(saved.colorTheme) ? saved.colorTheme : 'system';
+    if (colorTheme === 'system') document.body.removeAttribute('data-color-theme');
+    else document.body.dataset.colorTheme = colorTheme;
 
     // Apply board theme. NOTE: the class-based theme is largely superseded by
     // the body[data-board-theme] dataset that board.js + the CSS vars use, but
@@ -1142,6 +1236,7 @@ class ChessReviewApp {
 		  }
 
 		  _navigateTo(path, options = {}) {
+    window.MoveExplanationUI?.clear();
 		    const route = this._normalizeRoute(path || '/index');
 		    const target = this._routeUrl(route);
 		    const current = this._normalizeRoute(window.location.pathname || '/index');
@@ -1178,7 +1273,7 @@ _installLinkInterceptor() {
 			  const route = this._normalizeRoute(url.pathname);
 			  const knownRoutes = [
 			    '/index', '/login', '/signup', '/account', '/settings', '/auth',
-			    '/plans', '/boost', '/review', '/coach', '/puzzles', '/anticheat',
+			    '/plans', '/boost', '/play', '/play/callback', '/review', '/coach', '/puzzles', '/anticheat',
 			    '/privacy', '/terms', '/contact',
 			  ];
 			  if (!knownRoutes.includes(route) && !route.startsWith('/profile/') && !route.startsWith('/anticheat/report/')) return;
@@ -1188,6 +1283,7 @@ _installLinkInterceptor() {
 		  }
 
 		  _hideRoutePages() {
+        if (this.elPlayPage) this.elPlayPage.hidden = true;
 		    if (this.elLoginPage) this.elLoginPage.hidden = true;
 		    if (this.elSignupPage) this.elSignupPage.hidden = true;
 		    if (this.elAccountPage) this.elAccountPage.hidden = true;
@@ -1210,6 +1306,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    let currentPath = this._normalizeRoute(window.location.pathname || '/') || '/index';
 		    // Report sub-pages keep their parent's nav item highlighted.
 		    if (currentPath.startsWith('/anticheat/report/')) currentPath = '/anticheat';
+        if (currentPath === '/play/callback') currentPath = '/play';
 		    navLinks.forEach((link) => {
 		      const href = link.getAttribute('href');
 		      link.classList.remove('active');
@@ -1223,23 +1320,53 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	  // Mobile nav drawer open/close helpers. Toggle the scrim, body scroll-lock,
 	  // and the hamburger ↔ close icon.
 	  _setMobileNavOpen(open) {
-	    if (!this.elAppleNav) return;
-	    this.elAppleNav.classList.toggle('open', !!open);
-	    this.elAppleNavToggle?.setAttribute('aria-expanded', String(!!open));
-	    document.body.classList.toggle('nav-open', !!open);
-	    if (this.elNavScrim) this.elNavScrim.hidden = !open;
-	    const icon = this.elAppleNavToggle?.querySelector('.material-symbols-outlined');
-	    if (icon) icon.textContent = open ? 'close' : 'menu';
+	    if (!this.elSidebar) return;
+        const mobile = window.matchMedia('(max-width: 1024px)').matches;
+        const nextOpen = mobile && !!open;
+        const wasOpen = !!this._mobileNavOpen;
+        if (nextOpen && !wasOpen) this._mobileNavLastFocus = document.activeElement;
+        this._mobileNavOpen = nextOpen;
+        this.elSidebar.classList.toggle('is-open', nextOpen);
+        this.elAppleNavToggle?.setAttribute('aria-expanded', String(nextOpen));
+        this.elAppleNavToggle?.setAttribute('aria-controls', 'sc-sidebar');
+        document.body.classList.toggle('sc-sidebar-open', nextOpen);
+        document.body.classList.toggle('nav-open', nextOpen);
+        if (this.elNavScrim) {
+          this.elNavScrim.hidden = !nextOpen;
+          this.elNavScrim.classList.toggle('is-open', nextOpen);
+        }
+        this.elSidebar.inert = mobile && !nextOpen;
+        if (mobile && !nextOpen) this.elSidebar.setAttribute('aria-hidden', 'true');
+        else this.elSidebar.removeAttribute('aria-hidden');
+        if (nextOpen) {
+          this.elSidebar.setAttribute('role', 'dialog');
+          this.elSidebar.setAttribute('aria-modal', 'true');
+        } else {
+          this.elSidebar.removeAttribute('role');
+          this.elSidebar.removeAttribute('aria-modal');
+        }
+        const icon = this.elAppleNavToggle?.querySelector('.material-symbols-outlined');
+        if (icon) icon.textContent = nextOpen ? 'close' : 'menu';
+        if (nextOpen && !wasOpen) {
+          const first = this.elSidebarClose || this.elSidebar.querySelector('a[href], button');
+          first?.focus();
+        } else if (!nextOpen && wasOpen) {
+          const opener = this._mobileNavLastFocus || this.elAppleNavToggle;
+          this._mobileNavLastFocus = null;
+          if (opener?.isConnected && opener.getClientRects().length) opener.focus();
+        }
 	  }
 
 	  _closeMobileNav() {
-	    if (this.elAppleNav?.classList.contains('open')) this._setMobileNavOpen(false);
+	    if (this._mobileNavOpen) this._setMobileNavOpen(false);
 	  }
 
 		  _showRoutePage(name) {
 		    this._hideRoutePages();
 		    if (this.elMainContent) this.elMainContent.hidden = false;
-		    if (name === 'login' && this.elLoginPage) {
+        if (name === 'play' && this.elPlayPage) {
+          this.elPlayPage.hidden = false;
+		    } else if (name === 'login' && this.elLoginPage) {
 		      this.elLoginPage.hidden = false;
 		    } else if (name === 'signup' && this.elSignupPage) {
 		      this.elSignupPage.hidden = false;
@@ -1284,7 +1411,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
     // of the new content. Skip the very first render (app on-load) so focus
     // isn't yanked before interaction.
     if (this._hasShownInitialRoute) {
-      const target = document.querySelector(`#page-${name}`);
+      const target = document.querySelector(name === 'play' ? '#play-page' : `#page-${name}`);
       const pageEl = (target && !target.hidden) ? target : null;
       if (pageEl && pageEl.querySelector) {
         const h1 = pageEl.querySelector('h1');
@@ -1298,9 +1425,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		  }
 
 	  // ── Onboarding wizard (multi-step signup) ─────────────────────────
-	  // 3 steps: appearance → skill → email/password. The progress bar starts
-	  // visibly underway (40% on step 1, 70% on step 2) so the user feels they've
-	  // already begun — research shows a head-start measurably boosts completion.
+	  // Four steps: appearance, skill, integrations, and account creation.
 	  _initOnboarding() {
 	    // Reset to step 1 whenever the signup route is (re)shown.
 	    this.onboardingStep = 1;
@@ -1344,11 +1469,14 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 
 	    document.getElementById('btn-onboard-next-1')?.addEventListener('click', () => this._setOnboardingStep(2));
 	    document.getElementById('btn-onboard-next-2')?.addEventListener('click', () => this._setOnboardingStep(3));
+	    document.getElementById('btn-onboard-next-3')?.addEventListener('click', () => this._setOnboardingStep(4));
 	    document.getElementById('btn-onboard-back-2')?.addEventListener('click', () => this._setOnboardingStep(1));
 	    document.getElementById('btn-onboard-back-3')?.addEventListener('click', () => this._setOnboardingStep(2));
+	    document.getElementById('btn-onboard-back-4')?.addEventListener('click', () => this._setOnboardingStep(3));
 	    // "Skip" jumps straight to account creation, keeping whatever defaults are selected.
-	    document.getElementById('btn-onboard-skip-1')?.addEventListener('click', () => this._setOnboardingStep(3));
-	    document.getElementById('btn-onboard-skip-2')?.addEventListener('click', () => this._setOnboardingStep(3));
+	    document.getElementById('btn-onboard-skip-1')?.addEventListener('click', () => this._setOnboardingStep(4));
+	    document.getElementById('btn-onboard-skip-2')?.addEventListener('click', () => this._setOnboardingStep(4));
+	    document.getElementById('btn-onboard-skip-3')?.addEventListener('click', () => this._setOnboardingStep(4));
 
 	    // Render the preview once with current (default) settings.
 	    this._renderBoardPreview('onboard-board-preview');
@@ -1360,6 +1488,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    return {
 	      boardTheme: checkedBoard?.value || this.elOnboardBoardTheme?.value || 'classic',
 	      pieceTheme: checkedPiece?.value || this.elOnboardPieceTheme?.value || 'cburnett',
+	      colorTheme: 'system',
 	      arrowColor: '#d88a1d',
 	      highlightColor: '#d22626',
 	      pieceAnimations: true,
@@ -1371,10 +1500,9 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    this.onboardingStep = n;
 	    const steps = this.elOnboardSteps || [];
 	    steps.forEach((el, idx) => { if (el) el.hidden = (idx + 1) !== n; });
-	    // Step 1 paints 40% (visibly underway), step 2 paints 70%, step 3 = done.
-	    const pct = n === 1 ? 40 : n === 2 ? 70 : 100;
+	    const pct = n === 1 ? 25 : n === 2 ? 50 : n === 3 ? 75 : 100;
 	    if (this.elOnboardProgressFill) this.elOnboardProgressFill.style.width = `${pct}%`;
-	    if (this.elOnboardStepLabel) this.elOnboardStepLabel.textContent = `Step ${n} of 3`;
+	    if (this.elOnboardStepLabel) this.elOnboardStepLabel.textContent = `Step ${n} of 4`;
 	    // Focus the first input of the newly shown step for keyboard users.
 	    const stepEl = steps[n - 1];
 	    if (stepEl) {
@@ -1419,6 +1547,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	          adjustStyle: this.coachMode.adjustStyle || 'better',
 	        },
 	        appearanceSettings: this._onboardingAppearance(),
+	        savedUsernames: this._onboardingSavedUsernames(),
 	        onboardingComplete: true,
 	      });
 	    } catch (_err) {
@@ -1582,6 +1711,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    const status = this.elLoginStatus;
 	    const set = (m, c) => { if (status) { status.textContent = m; status.className = `account-status ${c}`; } };
 	    if (!email) { set('Enter your email above first, then tap "Forgot password".', 'error'); this.elLoginEmail?.focus(); return; }
+        if (!validEmail(email)) { set(this._friendlyAuthError({ code: 'auth/invalid-email' }), 'error'); this.elLoginEmail?.focus(); return; }
 	    if (!firebase?.auth) { set('Reset is unavailable right now.', 'error'); return; }
 	    set('Sending reset email…', '');
 	    try {
@@ -1683,10 +1813,11 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    // Coach tokens (AI chat): Free 5k / Boost 20k / Max 100k per day.
 	    const ctLimit = Number(usage.coachTokenLimit) || Number(limits.coachTokensPerDay) || 0;
 	    if (!ctLimit) {
-	      bars.push(this._usageBarHtml('Coach tokens', 'Unavailable', 0, 0, 'day', { upgrade: true }));
+	      bars.push(this._usageBarHtml('AI Coach', 'Unavailable', 0, 0, 'day', { upgrade: true }));
 	    } else {
 	      const ctUsed = Math.max(0, Number(usage.coachTokens) || 0);
-	      bars.push(this._usageBarHtml('Coach tokens', `${ctUsed.toLocaleString()} / ${ctLimit.toLocaleString()}`, ctUsed, ctLimit, 'day'));
+	      const percent = usage.coachUsagePercent !== undefined ? Math.max(0, Math.min(100, Number(usage.coachUsagePercent) || 0)) : Math.min(100, Math.floor(ctUsed / ctLimit * 100));
+	      bars.push(this._usageBarHtml('AI Coach', `${percent}% used today`, percent, 100, 'day', { coach: true }));
 	    }
 	    host.innerHTML = bars.join('');
 	  }
@@ -1698,7 +1829,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    const tone = pct >= 100 ? 'full' : pct >= 75 ? 'high' : 'ok';
 	    const note = opts.upgrade
 	      ? `<a class="usage-bar-upgrade" href="/plans" data-route="/plans">Upgrade</a>`
-	      : `resets ${period === 'week' ? 'Monday' : 'in ~24h'}`;
+	      : `resets ${period === 'week' ? 'Monday' : (opts.coach ? 'at midnight UTC' : 'in ~24h')}`;
 	    return `<div class="usage-bar">
 	      <div class="usage-bar-top"><span>${this._escapeHtml(label)}</span><strong>${this._escapeHtml(String(summary))}</strong></div>
 	      <div class="usage-bar-track ${tone}"><div class="usage-bar-fill" style="width:${opts.upgrade ? 0 : pct}%"></div></div>
@@ -1768,6 +1899,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    if (!firebase?.auth) return this._setSpaAccountStatus('Firebase auth is unavailable.', 'error');
 		    const email = (this.elSpaResetEmail?.value || '').trim();
 		    if (!email) return this._setSpaAccountStatus('Enter your email first.', 'error');
+        if (!validEmail(email)) return this._setSpaAccountStatus(this._friendlyAuthError({ code: 'auth/invalid-email' }), 'error');
 		    this._showLoadingOverlay('Sending reset email...');
 		    try {
 		      await firebase.auth().sendPasswordResetEmail(email);
@@ -1780,7 +1912,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
       console.warn('Could not set Firebase auth persistence:', err);
     }
 } catch (err) {
-		      this._setSpaAccountStatus(err?.message || 'Unable to send reset email.', 'error');
+		      this._setSpaAccountStatus(this._friendlyAuthError(err), 'error');
 		    } finally {
 		      this._hideLoadingOverlay();
 		    }
@@ -1796,7 +1928,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      await firebase.auth().sendPasswordResetEmail(email);
 		      this._setSpaAccountStatus(`Password reset email sent to ${email}.`, 'success');
 		    } catch (err) {
-		      this._setSpaAccountStatus(err?.message || 'Unable to send reset email.', 'error');
+		      this._setSpaAccountStatus(this._friendlyAuthError(err), 'error');
 		    } finally {
 		      this._hideLoadingOverlay();
 		    }
@@ -1815,7 +1947,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      this._setSpaAccountStatus('Password updated. You may now sign in.', 'success');
 		      setTimeout(() => this._navigateTo('/login'), 1500);
 		    } catch (err) {
-		      this._setSpaAccountStatus(err?.message || 'Unable to update password.', 'error');
+		      this._setSpaAccountStatus(this._friendlyAuthError(err), 'error');
 		    } finally {
 		      this._hideLoadingOverlay();
 		    }
@@ -1918,6 +2050,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	      const data = await res.json().catch(() => ({}));
 	      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
 	      set(`Granted ${data.plan || plan} for ${days} day${days === 1 ? '' : 's'}.`, 'success');
+          window.AdminProfileUI?.refresh(email);
 	    } catch (err) { set(err.message || 'Failed.', 'error'); }
 	  }
 
@@ -1936,6 +2069,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	      const data = await res.json().catch(() => ({}));
 	      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
 	      set('Subscription removed (now Free).', 'success');
+          window.AdminProfileUI?.refresh(email);
 	    } catch (err) { set(err.message || 'Failed.', 'error'); }
 	  }
 
@@ -1958,6 +2092,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	      const data = await res.json().catch(() => ({}));
 	      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
 	      set(ban ? 'Account banned.' : 'Account unbanned.', 'success');
+          window.AdminProfileUI?.refresh(email);
 	    } catch (err) { set(err.message || 'Ban action failed.', 'error'); }
 	  }
 
@@ -2242,6 +2377,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    // in depth, not a security boundary.
 		    const isAdmin = !!this.authState?.isAdmin;
 		    const adminElementIds = [
+		      'admin-profile-panel',
 		      'spa-admin-boost-panel', // Plans & subscriptions — account/settings page
 		      'admin-boost-panel',     // Gift Boost — account modal
 		      'admin-ban-panel',       // Ban / Unban Player
@@ -2252,6 +2388,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      const el = document.getElementById(id);
 		      if (el) el.hidden = !isAdmin;
 		    });
+		    window.AdminProfileUI?.onAuth(this);
 		    // Support messages are NOT auto-loaded — the list would refetch on
 		    // every auth tick / re-render (this method runs frequently), spamming
 		    // the server. The admin loads them on demand with the Refresh button.
@@ -2353,6 +2490,8 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		  _applyRoute(path, options = {}) {
 		    this._closeMobileNav();
 		    const route = this._normalizeRoute(path || '/index');
+        if (route !== '/play' && route !== '/play/callback') document.body.classList.remove('play-focus-mode');
+        window.dispatchEvent(new CustomEvent('app:route', { detail: { route } }));
 		    if (!options.skipHistory) {
 		      const target = this._routeUrl(route);
 		      const current = this._normalizeRoute(window.location.pathname || '/index');
@@ -2465,6 +2604,19 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      return;
 		    }
 
+        if (route === '/play' || route === '/play/callback') {
+          this.autoPlaying = false;
+          this.liveEvalToken += 1; this.liveDepthToken += 1;
+          this.engine?.interrupt?.();
+          this._stopReviewPlayback();
+          if (this.clockState?.active) this._resetClockState();
+          this._enterInAppLayout();
+          this._showRoutePage('play');
+          document.title = 'Play | Sing Chess';
+          this._updateNavActiveState();
+          window.dispatchEvent(new CustomEvent('play:route', { detail: { route } }));
+          return;
+        }
 		    if (route === '/puzzles') {
 		      this._hideRoutePages();
 		      this._hideSettingsModal();
@@ -2582,7 +2734,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
     if (typeof route === 'string' && route.startsWith('/profile/')) return true;
     return [
       '/index', '/', '/login', '/signup', '/account', '/settings', '/auth',
-      '/plans', '/boost', '/review', '/coach', '/puzzles', '/anticheat', '/404',
+      '/plans', '/boost', '/play', '/play/callback', '/review', '/coach', '/puzzles', '/anticheat', '/404',
       '/incompatible-browser', '/privacy', '/terms', '/contact',
     ].includes(route);
   }
@@ -2701,12 +2853,14 @@ return window.firebase;
 		  _initAuth() {
 		    const firebase = this._ensureFirebase();
 		    if (!firebase?.auth) {
+          this.authState.initialized = true;
+          void window.PlayFairPlay?.onAuth();
 	      this._setAccountStatus('Firebase auth did not load. Account features are unavailable.', 'error');
 	      this._syncAccountUi();
 	      return;
 	    }
 
-		    this.authState.dbReady = !!firebase.database;
+		    this.authState.dbReady = true; // Profile persistence uses the server API.
 		    this._showLoadingOverlay('Loading profile...');
 		    const authInitFallback = setTimeout(() => {
 		      if (!this.authState.initialized) this._hideLoadingOverlay();
@@ -2725,6 +2879,8 @@ return window.firebase;
                 this._applyProfileToPuzzleMode(this.authState.profile);
               }
               this.authState.initialized = true;
+              void window.PlayFairPlay?.onAuth();
+              window.dispatchEvent(new CustomEvent('play:auth', { detail: { user: user || null } }));
               // Part 3: the /account page rendered before auth resolved with
               // authState.user = null; re-render it now that we know the real
               // state so a signed-in user never sees the "Sign In" panel.
@@ -2765,6 +2921,7 @@ return window.firebase;
 			      this._refreshPuzzleForCurrentUser();
 			      this._loadSavedUsernames();
 			      this._renderSavedUsernameBar();
+			      this._refreshLinkedChessData();
 			      // The home screen may have rendered before auth resolved (direct
 			      // load), so savedUsernames was still empty and the quick-load
 			      // section stayed hidden. Re-render it now that we have the real
@@ -2774,14 +2931,12 @@ return window.firebase;
 		    });
 		  }
 
+		  async _refreshLinkedChessData() {
+        return window.LinkedChessHub?.refresh();
+      }
+
 			  _friendlyAuthError(err) {
-		    const code = String(err?.code || '');
-		    if (['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found'].includes(code)) {
-		      return 'Email or password is incorrect.';
-		    }
-		    if (code === 'auth/email-already-in-use') return 'An account already exists for that email.';
-		    if (code === 'auth/too-many-requests') return 'Too many attempts. Try again later.';
-			    return err?.message || 'Authentication failed.';
+		    return friendlyAuthError(err);
 			  }
 
 			  _banMessage(reason = '') {
@@ -2805,7 +2960,7 @@ return window.firebase;
 			    }
 			  }
 
-			  async _loadUserProfile(user) {
+			  async _loadUserProfile(user, { strict = false } = {}) {
 		    const fallback = {
 		      uid: user.uid,
 		      username: user.displayName || (user.email ? user.email.split('@')[0] : 'Player'),
@@ -2828,6 +2983,7 @@ return window.firebase;
 				        const result = await response.json().catch(() => null);
 				        const error = new Error(result?.reason ? this._banMessage(result.reason) : (result?.error || `Account API responded with ${response.status}`));
 				        error.statusCode = response.status;
+				        error.code = result?.code;
 				        error.reason = result?.reason || '';
 				        throw error;
 				      }
@@ -2869,10 +3025,12 @@ return window.firebase;
 			      this.authState.usage = {};
 			      this.authState.limits = {};
 			      this.authState.isAdmin = false;
-			      if (err?.statusCode === 403) {
+			      if (err?.statusCode === 403 && err.code === 'account_closed') {
 			        await this._handleBannedSession(err.reason || '', err.message);
 			      }
-			      return fallback;
+              if (strict) throw err;
+              this._setAccountStatus(this._friendlyAuthError(err), 'error');
+			      return null;
 			    }
 			  }
 
@@ -2885,10 +3043,10 @@ return window.firebase;
 			    });
 			    if (!response.ok) {
 			      const result = await response.json().catch(() => null);
-			      if (response.status === 403) {
+			      if (response.status === 403 && result?.code === 'account_closed') {
 			        await this._handleBannedSession(result?.reason || '', result?.error);
 			      }
-			      throw new Error(result?.reason ? this._banMessage(result.reason) : (result?.error || `Account API responded with ${response.status}`));
+			      throw Object.assign(new Error(result?.reason ? this._banMessage(result.reason) : (result?.error || `Account API responded with ${response.status}`)), { code: result?.code, statusCode: response.status });
 			    }
 		    const me = await response.json();
 		    this.authState.me = me;
@@ -3175,12 +3333,15 @@ return window.firebase;
 	    const label = source === 'chesscom' ? 'Chess.com' : 'Lichess';
 	    return `
 	      <div class="saved-username-chip" data-source="${source}">
-	        <span class="saved-username-label">Quick load ${label}</span>
+	        <span class="saved-username-copy">
+	          <span class="saved-username-label">${label}</span>
+	          <span class="saved-username-name">${this._escapeHtml(username)}</span>
+	        </span>
 	        <button type="button" class="saved-username-load-btn" data-source="${source}" title="Load ${label} games for ${this._escapeHtml(username)}">
 	          <span class="material-symbols-outlined">download</span>
 	          <span class="btn-label">Load</span>
 	        </button>
-	        <button type="button" class="saved-username-unlink-btn" data-source="${source}" title="Unlink ${label}">
+	        <button type="button" class="saved-username-unlink-btn" data-source="${source}" title="Remove saved ${label} username" aria-label="Remove saved ${label} username">
 	          <span class="material-symbols-outlined">close</span>
 	        </button>
 	      </div>`;
@@ -3287,7 +3448,7 @@ return window.firebase;
         this._renderLinkUsernameRow();
         this._showPopup({
           icon: 'success',
-          title: 'Username saved!',
+          title: 'Username saved',
           text: `${source === 'chesscom' ? 'Chess.com' : 'Lichess'} username saved for one-click imports.`,
         });
       }).catch(() => {
@@ -3339,6 +3500,7 @@ return window.firebase;
 	  }
 
   async _quickLoadSavedUsername(source) {
+    if (window.LinkedChessHub?.hasGames(source)) return window.LinkedChessHub.showGames(source);
     const s = this.authState.savedUsernames || {};
     const username = s[source];
     if (!username) return;
@@ -3424,6 +3586,7 @@ return window.firebase;
 			  _rememberLocalPuzzleAttempt(_puzzleId) {}
 
 _syncAccountUi() {
+        window.dispatchEvent(new Event('linked-auth'));
 		    const user = this.authState.user;
 		    const profile = this.authState.profile || {};
 		    const signedIn = !!user;
@@ -3752,32 +3915,62 @@ _syncAccountUi() {
 	  }
 
 	  async _saveNotificationSettings() {
+        if (this._savingNotificationSettings) return;
+        const user = this.authState.user;
+        if (!user) {
+          if (this.elNotifySettingsStatus) {
+            this.elNotifySettingsStatus.textContent = 'Sign in to save notification preferences.';
+            this.elNotifySettingsStatus.className = 'account-status error';
+          }
+          return;
+        }
 	    const anticheatComplete = this.elSettingsNotifyAnticheat?.checked !== false;
-	    const browserPush = !!this.elSettingsNotifyPush?.checked;
+        let browserPush = !!this.elSettingsNotifyPush?.checked;
+        this._savingNotificationSettings = true;
+        if (this.elBtnSaveNotifySettings) this.elBtnSaveNotifySettings.disabled = true;
 	    if (this.elNotifySettingsStatus) {
 	      this.elNotifySettingsStatus.textContent = 'Saving…';
 	      this.elNotifySettingsStatus.className = 'account-status';
 	    }
 	    try {
-	      const res = await apiFetch('/api/settings/notification-settings', {
+          // Permission must be requested from this user gesture. A saved
+          // preference alone does not grant browser notification permission.
+          if (browserPush && 'Notification' in window && Notification.permission === 'default') {
+            await Notification.requestPermission();
+          }
+          const browserPushGranted = 'Notification' in window && Notification.permission === 'granted';
+          const pushUnavailable = browserPush && !browserPushGranted;
+          browserPush = browserPush && browserPushGranted;
+          const notificationSettings = { anticheatComplete, browserPush, browserPushGranted };
+          const headers = await this._authHeaders({ 'Content-Type': 'application/json' });
+          if (this.authState.user?.uid !== user.uid) return;
+	      const res = await apiFetch('/api/users/me', {
 	        method: 'POST',
-	        headers: await this._authHeaders({ 'Content-Type': 'application/json' }),
-	        body: JSON.stringify({ anticheatComplete, browserPush }),
+	        headers,
+	        body: JSON.stringify({ profile: { notificationSettings } }),
 	      });
-	      if (!res.ok) throw new Error('Could not save.');
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || 'Could not save notification preferences. Please try again.');
+          if (this.authState.user?.uid !== user.uid) return;
+	      // Use the server's saved values rather than claiming an unsaved
+          // permission was granted. Keep unrelated profile fields intact.
+          this.authState.profile ||= {};
+          this.authState.profile.notificationSettings = data.profile?.notificationSettings || notificationSettings;
+          this._loadNotificationSettingsIntoUi();
 	      if (this.elNotifySettingsStatus) {
-	        this.elNotifySettingsStatus.textContent = 'Saved.';
+	        this.elNotifySettingsStatus.textContent = pushUnavailable
+              ? 'Preferences saved. Browser notifications are unavailable or blocked; enable them in your browser site settings.'
+              : 'Saved.';
 	        this.elNotifySettingsStatus.className = 'account-status ok';
 	      }
-	      // Reflect on the profile immediately.
-	      if (this.authState.profile) {
-	        this.authState.profile.notificationSettings = { anticheatComplete, browserPush, browserPushGranted: !!browserPush };
-	      }
 	    } catch (err) {
-	      if (this.elNotifySettingsStatus) {
+	      if (this.elNotifySettingsStatus && this.authState.user?.uid === user.uid) {
 	        this.elNotifySettingsStatus.textContent = err.message || 'Could not save.';
 	        this.elNotifySettingsStatus.className = 'account-status error';
 	      }
+        } finally {
+          this._savingNotificationSettings = false;
+          if (this.elBtnSaveNotifySettings) this.elBtnSaveNotifySettings.disabled = false;
 	    }
 	  }
 
@@ -4201,6 +4394,12 @@ if (this.elAnticheatReportStatus) {
 	      throw new Error(message);
 	    }
 	    // Username is required at signup (it's a progress step). Validate format
+        if (!validEmail(email)) {
+          const error = Object.assign(new Error(this._friendlyAuthError({ code: 'auth/invalid-email' })), { code: 'auth/invalid-email' });
+          if (fields?.statusEl) { fields.statusEl.textContent = error.message; fields.statusEl.className = 'account-status error'; }
+          else this._setAccountStatus(error.message, 'error');
+          throw error;
+        }
 	    // so the public profile is usable immediately.
 	    if (this.authMode === 'signup' && username && !/^[a-zA-Z0-9._-]{3,40}$/.test(username)) {
 	      const message = 'Username must be 3–40 characters: letters, numbers, . _ - only.';
@@ -4266,6 +4465,7 @@ if (this.elAnticheatReportStatus) {
 	            adjustStyle: this.coachMode.adjustStyle || 'better',
 	          },
 	          appearanceSettings: this._onboardingAppearance(),
+	          savedUsernames: this._onboardingSavedUsernames(),
 	          onboardingComplete: true,
 	        });
 	      } else {
@@ -4308,7 +4508,7 @@ if (this.elAnticheatReportStatus) {
 	      const credential = await firebase.auth().signInWithPopup(provider);
 	      const user = credential.user;
 	      this.authState.user = user;
-	      const existing = await this._loadUserProfile(user);
+	      const existing = await this._loadUserProfile(user, { strict: true });
 	      const username = existing.username || user.displayName || (user.email ? user.email.split('@')[0] : 'Player');
 	      await this._saveUserProfile({
 	        ...existing,
@@ -4323,6 +4523,7 @@ if (this.elAnticheatReportStatus) {
 		          adjustStyle: this.coachMode.adjustStyle || 'better',
 		        },
 		        appearanceSettings: existing.appearanceSettings || this._onboardingAppearance(),
+		        savedUsernames: existing.savedUsernames || this._onboardingSavedUsernames(),
 		        onboardingComplete: true,
 	      });
 	      this._setAccountStatus('Signed in with Google.', 'success');
@@ -4333,7 +4534,7 @@ if (this.elAnticheatReportStatus) {
 		      if (String(err?.code || '') === 'auth/user-disabled') {
 		        this._setAccountStatus(this._banMessage(await this._lookupBanReason(err?.email || '')), 'error');
 		      } else {
-		        this._setAccountStatus(err.message || 'Google sign-in failed.', 'error');
+		        this._setAccountStatus(this._friendlyAuthError(err), 'error');
 		      }
 		    }
 		  }
@@ -4443,7 +4644,7 @@ if (this.elAnticheatReportStatus) {
 		    this._syncBoostPageVisibility();
 		    this._syncServerStrongToggle();
 this._syncAnticheatForm();
-	    this._syncActionButtons();
+				        this._syncActionButtons();
 	    // Pull fresh quota + render the weekly anticheat usage bar.
 	    this._refreshUsageBeforeAction().finally(() => this._renderAnticheatUsageBar());
 	    // Load the saved-reviews list (every past & currently-running report).
@@ -4545,6 +4746,7 @@ this._syncAnticheatForm();
 	    let progressHtml = '';
 	    if (r.status === 'running') {
 	      icon = '<span class="material-symbols-outlined anticheat-saved-icon anticheat-saved-icon-running">schedule</span>';
+          badge = '<span class="anticheat-badge running"><span class="spinner"></span> In progress</span>';
 	      // Live progress — gamesAnalyzed/total are persisted incrementally by
 	      // the background job (fall back to an indeterminate bar otherwise).
 	      const doneN = Number(r.gamesAnalyzed) || 0;
@@ -4723,15 +4925,33 @@ this.elBtnImport.addEventListener('click', () => this._navigateTo('/review', { d
 			    this.elBtnAccount?.addEventListener('click', () => this._navigateTo('/account', { disableRestore: true }));
 		    this.elBtnSettings.addEventListener('click', () => this._navigateTo('/settings', { disableRestore: true }));
 		    this.elAppleNavToggle?.addEventListener('click', () => {
-		      if (!this.elAppleNav) return;
-		      const open = this.elAppleNav.classList.toggle('open');
-		      this._setMobileNavOpen(open);
+		      this._setMobileNavOpen(!this._mobileNavOpen);
 		    });
+            this.elSidebarClose?.addEventListener('click', () => this._closeMobileNav());
+            window.openSidebar = () => this._setMobileNavOpen(true);
+            const sidebarViewport = window.matchMedia('(max-width: 1024px)');
+            sidebarViewport.addEventListener('change', () => this._setMobileNavOpen(false));
+            this._setMobileNavOpen(false);
 		    // Close the mobile drawer when the scrim is tapped.
 		    this.elNavScrim?.addEventListener('click', () => this._closeMobileNav());
-		    // Esc closes the drawer.
+            // The mobile drawer traps focus and restores the opener on close.
 		    document.addEventListener('keydown', (e) => {
-		      if (e.key === 'Escape' && this.elAppleNav?.classList.contains('open')) this._closeMobileNav();
+              if (!this._mobileNavOpen || !this.elSidebar) return;
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                this._closeMobileNav();
+              } else if (e.key === 'Tab') {
+                const controls = Array.from(this.elSidebar.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+                  .filter((control) => control.getClientRects().length && !control.closest('[hidden]'));
+                const first = controls[0];
+                const last = controls[controls.length - 1];
+                if (!first) return;
+                if (!this.elSidebar.contains(document.activeElement) || (!e.shiftKey && document.activeElement === last)) {
+                  e.preventDefault(); first.focus();
+                } else if (e.shiftKey && document.activeElement === first) {
+                  e.preventDefault(); last.focus();
+                }
+              }
 		    });
 	    this.elPageToSignup?.addEventListener('click', () => this._navigateTo('/signup'));
 	    this.elPageToLogin?.addEventListener('click', () => this._navigateTo('/login'));
@@ -4801,6 +5021,11 @@ this.elBtnImport.addEventListener('click', () => this._navigateTo('/review', { d
       radio.addEventListener('change', () => {
         document.body.dataset.pieceTheme = radio.value;
         this._renderBoardPreview?.();
+      });
+      document.querySelectorAll('input[name="settings-color-theme"]').forEach((radio) => {
+        radio.addEventListener('change', () => {
+          this._applyAppearanceSettings({ colorTheme: radio.value });
+        });
       });
     });
 	    this.elHeaderBrandLink?.addEventListener('click', () => this._navigateTo('/index', { disableRestore: true }));
@@ -4897,6 +5122,8 @@ if (this.elBtnAnticheatRefresh) {
     this.elBtnLast.addEventListener('click', () => this._goToMove(this.gameMoves.length - 1));
 
     document.addEventListener('keydown', (e) => {
+      if (e.defaultPrevented || document.body.classList.contains('modal-open') || document.body.classList.contains('nav-open')) return;
+      if (document.body.classList.contains('menu-active') || document.body.classList.contains('in-app-route')) return;
       if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
       switch (e.key) {
         case 'ArrowLeft':
@@ -4944,6 +5171,7 @@ if (this.elBtnAnticheatRefresh) {
 		  }
 
 	  _activateGameLayout() {
+        this._hideRoutePages();
 	    document.body.classList.remove('menu-active');
 	    document.body.classList.remove('in-app-route');
 	    if (this.elMainMenu) this.elMainMenu.hidden = true;
@@ -5228,6 +5456,7 @@ if (this.elBtnAnticheatRefresh) {
       return;
     }
     this._setImportToolStatus(scope, 'Loading game…', 'loading');
+    if (scope === 'home') this._navigateTo('/review', { skipImport: true });
     const modalTool = this._getImportTool('modal');
     const modalPgnInput = modalTool?.querySelector('.import-pgn-input');
     if (modalPgnInput) modalPgnInput.value = pgn;
@@ -5249,6 +5478,7 @@ if (this.elBtnAnticheatRefresh) {
       return;
     }
     this._setImportToolStatus(scope, 'Loading games…', 'loading');
+    if (scope === 'home') this._navigateTo('/review', { skipImport: true });
     this._enterReviewMode();
     this._showPgnModal();
     this._loadGamesByUsername(source, username, limit)
@@ -5405,6 +5635,13 @@ if (this.elBtnAnticheatRefresh) {
 	      }
     }
 
+    if (initialized && this._pendingPlayReview) {
+      const pending = this._pendingPlayReview;
+      this._pendingPlayReview = null;
+      if (window.location.pathname === '/review' && pending.moves === this.gameMoves.join(' ')
+        && pending.initialFen === this.initialFen) void this._startReview();
+    }
+
     return initialized;
   }
 
@@ -5525,54 +5762,19 @@ if (this.elBtnAnticheatRefresh) {
 		  }
 
   _preloadSounds(onProgress) {
-	    if (this.soundPreloadPromise) return this.soundPreloadPromise;
-	    const entries = Object.entries(this.soundFiles);
-	    const total = entries.length * 3;
-	    let complete = 0;
-	    const report = () => {
-	      complete += 1;
-	      if (onProgress) onProgress(total ? complete / total : 1);
-	    };
-
-	    this.soundPreloadPromise = Promise.all(entries.flatMap(([name, file]) => {
-	      const pool = [0, 1, 2].map(() => {
-	        const audio = new Audio(file);
-	        audio.preload = 'auto';
-	        return audio;
-	      });
-	      this.soundPool[name] = pool;
-	      this.soundPoolIndex[name] = 0;
-	      return pool.map((audio) => new Promise((resolve) => {
-	      let settled = false;
-	      let timer = null;
-	      const done = () => {
-        if (settled) return;
-        settled = true;
-        if (timer) clearTimeout(timer);
-	        audio.removeEventListener('canplaythrough', done);
-	        audio.removeEventListener('loadeddata', done);
-	        audio.removeEventListener('error', done);
-	        report();
-	        resolve();
-	      };
-      audio.addEventListener('canplaythrough', done, { once: true });
-      audio.addEventListener('loadeddata', done, { once: true });
-	      audio.addEventListener('error', done, { once: true });
-	      timer = setTimeout(done, 2500);
-	      audio.load();
-	      }));
-	    })).then(() => true);
-
-    return this.soundPreloadPromise;
+    // Synthesized effects need no downloads or audio preload delay.
+    onProgress?.(1);
+    return Promise.resolve(true);
   }
 
 		  _syncActionButtons() {
+			const fairPlayBlocked = !!window.PlayFairPlay?.isBlocked();
 			const engineReady = !!this.engine?.ready;
 			const serverReview = this.engineSettings.analysisLocation === 'server';
 			// Guests always run reviews in the browser (server review needs a UID),
 			// so they need the browser engine regardless of analysisLocation.
 			const needsBrowserEngine = !serverReview || !this.authState?.user;
-    const heavyBusy = this._isBusyWithHeavyAction();
+    const heavyBusy = fairPlayBlocked || this._isBusyWithHeavyAction();
 		    this.elBtnReview.disabled = heavyBusy || this.isAnalyzing || this.gameMoves.length === 0 || (needsBrowserEngine && !engineReady);
 		    if (this.elBtnExport) this.elBtnExport.disabled = this.gameMoves.length === 0;
 	    if (this.elBtnCoachStart) this.elBtnCoachStart.disabled = heavyBusy || this.isAnalyzing || !engineReady;
@@ -5594,7 +5796,7 @@ if (this.elBtnAnticheatRefresh) {
       this.elBtnPuzzleRetry.disabled = !canRetry;
 		    }
 	    if (this.elBtnPuzzleHint) {
-	      this.elBtnPuzzleHint.disabled = this.isAnalyzing
+      this.elBtnPuzzleHint.disabled = fairPlayBlocked || this.isAnalyzing
 		        || this.puzzleMode.loading
 		        || !this.puzzleMode.current
 		        || this.puzzleMode.solved
@@ -6751,6 +6953,7 @@ _showPuzzleSuccessOverlay() {
 	  }
 
 	  _showPuzzleHint() {
+        if (window.PlayFairPlay?.isBlocked()) return;
 	    if (!this.puzzleMode.active || this.puzzleMode.loading || this.puzzleMode.solved) return;
 	    const expected = this.puzzleMode.solution[this.puzzleMode.step] || '';
 	    if (expected.length < 4) return;
@@ -7023,7 +7226,102 @@ _showPuzzleSuccessOverlay() {
 	    const bottomDot = this.elPlayerBottom.querySelector('.player-dot');
 	    if (topDot) topDot.dataset.color = topColor === 'w' ? 'white' : 'black';
 	    if (bottomDot) bottomDot.dataset.color = bottomColor === 'w' ? 'white' : 'black';
+        const topAvatar = this.elPlayerTop.querySelector('.player-avatar img');
+        const bottomAvatar = this.elPlayerBottom.querySelector('.player-avatar img');
+        if (topAvatar) topAvatar.src = getPieceSvgUri(topColor + 'K');
+        if (bottomAvatar) bottomAvatar.src = getPieceSvgUri(bottomColor + 'K');
+        this._syncCapturedPieces();
 	  }
+
+  _capturedMaterialForPosition() {
+    const captured = { w: [], b: [] };
+    const material = { w: 0, b: 0 };
+    const values = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+    const line = this.bestMovePreview?.savedActiveLine || this.activeLine;
+    let prefix = [];
+
+    // Variations and best-move previews are constructed from a mid-game FEN.
+    // Reconstruct their prefix so earlier captures remain visible. Starting
+    // from initialFen also avoids inventing captures in imported positions.
+    if (line?.kind === 'sub') {
+      prefix = this.gameMoves.slice(0, line.parentIndex + 1);
+      if (this.bestMovePreview) {
+        const sub = this.subLines.get(line.parentIndex)?.[line.subIndex];
+        prefix.push(...(sub?.moves || []).slice(0, line.moveIndex));
+      }
+    } else if (this.bestMovePreview) {
+      prefix = this.gameMoves.slice(0, Math.max(0, this.bestMovePreview.savedIndex));
+    }
+    let moves = [];
+    if (prefix.length) {
+      const replay = new Chess(this.initialFen);
+      for (const san of prefix) {
+        if (!replay.move(san, { sloppy: true })) break;
+      }
+      moves = replay.history({ verbose: true });
+    }
+    moves.push(...this.chess.history({ verbose: true }));
+    for (const move of moves) {
+      if (move.captured && captured[move.color]) captured[move.color].push(move.captured);
+    }
+    for (const rank of this.chess.board()) {
+      for (const piece of rank) {
+        if (piece) material[piece.color] += values[piece.type] || 0;
+      }
+    }
+    for (const color of ['w', 'b']) {
+      captured[color].sort((a, b) => values[b] - values[a]);
+    }
+    return { captured, material };
+  }
+
+  _syncCapturedPieces() {
+    if (!this.elCapturedTop && !this.elCapturedBottom) return;
+    const { captured, material } = this._capturedMaterialForPosition();
+    const names = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen' };
+    const glyphs = { p: '\u265F', n: '\u265E', b: '\u265D', r: '\u265C', q: '\u265B' };
+    const render = (container, color) => {
+      if (!container) return;
+      const opponent = color === 'w' ? 'b' : 'w';
+      const advantage = Math.max(0, material[color] - material[opponent]);
+      container.replaceChildren();
+      for (const type of captured[color]) {
+        if (typeof window.getPieceSvgUri === 'function') {
+          const piece = document.createElement('img');
+          piece.className = 'captured-piece';
+          piece.src = window.getPieceSvgUri(opponent + type.toUpperCase());
+          piece.alt = '';
+          piece.width = 20;
+          piece.height = 20;
+          container.appendChild(piece);
+        } else {
+          const piece = document.createElement('span');
+          piece.className = 'captured-piece';
+          piece.textContent = glyphs[type] || '';
+          piece.setAttribute('aria-hidden', 'true');
+          container.appendChild(piece);
+        }
+      }
+      if (advantage) {
+        const score = document.createElement('span');
+        score.className = 'material-advantage';
+        score.textContent = `+${advantage}`;
+        score.setAttribute('aria-hidden', 'true');
+        container.appendChild(score);
+      }
+      const counts = captured[color].reduce((result, type) => {
+        result[type] = (result[type] || 0) + 1;
+        return result;
+      }, {});
+      const description = Object.entries(counts).map(([type, count]) => `${count} ${names[type]}${count > 1 ? 's' : ''}`).join(', ');
+      const label = `${color === 'w' ? 'White' : 'Black'}: ${description ? 'captured ' + description : 'no captures'}${advantage ? `; material advantage ${advantage}` : ''}`;
+      container.setAttribute('role', 'img');
+      container.setAttribute('aria-label', label);
+      container.title = label;
+    };
+    render(this.elCapturedTop, this.board.flipped ? 'w' : 'b');
+    render(this.elCapturedBottom, this.board.flipped ? 'b' : 'w');
+  }
 
 	  _currentMoveLabel(index = this.currentMoveIndex) {
 	    if (index < 0 || !this.gameMoves[index]) return 'Start';
@@ -7122,7 +7420,7 @@ _showPuzzleSuccessOverlay() {
 			const humanLost = this.coachMode.humanColor === losingColor;
 			const message = humanLost
 				? 'You lost on time.'
-				: 'Coach lost on time. You win!';
+				: 'Coach lost on time. You win.';
 			this.coachMode.thinking = false;
 			this.board.interactive = false;
 			this.board.clearBestMoveArrow();
@@ -7243,6 +7541,7 @@ _showPuzzleSuccessOverlay() {
   }
 
   async _startCoachGame(options = {}) {
+    if (window.PlayFairPlay && !(await window.PlayFairPlay.verify())) return;
 	    if (!this.engine?.ready || this.isAnalyzing) return;
 	    const humanColor = options.humanColor || this.elCoachColor?.value || 'w';
 	    const elo = clamp(parseInt(options.elo ?? this.elCoachElo?.value ?? '1200', 10) || 1200, 100, 2800);
@@ -7393,6 +7692,7 @@ _showPuzzleSuccessOverlay() {
 		  }
 
 		  _moveHighlightsForResult(result, index = result?.moveIndex) {
+        if (window.PlayFairPlay?.isBlocked()) return [];
 		    if (!result || !result.moveUci || result.moveUci.length < 4) return [];
 		    const isCoachMove = result.isCoachMove || this._isCoachMoveIndex(index);
 		    if (isCoachMove) {
@@ -7520,11 +7820,11 @@ _showPuzzleSuccessOverlay() {
 		    return { move: this._moveObjToUci(move), cp: 0, pvUci: '', pvSan: '', depth: 0 };
 		  }
 
-	  _lineDropForSide(best, candidate, isWhiteToMove) {
+	  _lineDropForSide(best, candidate, _isWhiteToMove) {
 	    if (!best || !candidate) return 0;
-	    return isWhiteToMove
-	      ? Math.max(0, best.cp - candidate.cp)
-	      : Math.max(0, candidate.cp - best.cp);
+	    // Coach lines retain Stockfish's side-to-move perspective for either
+	    // color. A positive gap always means the candidate is worse for the mover.
+	    return Math.max(0, best.cp - candidate.cp);
 	  }
 
 		  _chooseCoachLine(lines, isWhiteToMove) {
@@ -7582,6 +7882,7 @@ _showPuzzleSuccessOverlay() {
 		  }
 
   async _makeCoachMove() {
+    if (window.PlayFairPlay && !(await window.PlayFairPlay.verify())) return;
     if (!this.coachMode.active || !this.engine?.ready || this.chess.game_over()) return;
     if (this.chess.turn() === this.coachMode.humanColor) return;
 
@@ -7701,7 +8002,7 @@ _showPuzzleSuccessOverlay() {
 		    // gets a one-line nudge so the coach doesn't chatter on every move.
 		    if (['BLUNDER', 'MISTAKE', 'MISS', 'INACCURACY'].includes(key)) {
 		      const reply = result.opponentBestMoveSan || result.opponentBestMove || '';
-		      const baseText = (result.coachText || '').trim();
+		      const baseText = this.analyzer.explainResult(result).trim();
 		      const mentionsReply = !reply || baseText.includes(reply);
 		      // Assemble the feedback as one natural paragraph instead of
 		      // stapling label-like sentences together. Lead with the coach's
@@ -7720,7 +8021,10 @@ _showPuzzleSuccessOverlay() {
 		      if (adjustNote) feedback += adjustNote;
 		      this._setCoachDialog(feedback, key);
 		      this._renderMoveInsights(result);
-		      if (this.elInsightCoach) this.elInsightCoach.textContent = feedback;
+		      if (this.elInsightCoach) {
+          if (window.MoveExplanationUI) window.MoveExplanationUI.render(this.elInsightCoach, feedback, result);
+          else this.elInsightCoach.textContent = feedback;
+        }
 		      if (result.opponentBestMove) this.board.setBestMoveArrow(result.opponentBestMove, { color: '#CA3431' });
 		      this.coachMode.lastAdviceMoveIndex = result.moveIndex;
 		    } else if (key === 'BRILLIANT') {
@@ -7772,6 +8076,7 @@ _showPuzzleSuccessOverlay() {
   }
 
   async _handleCoachHint() {
+        if (window.PlayFairPlay && !(await window.PlayFairPlay.verify())) return;
     if (!this.coachMode.active || this.coachMode.thinking || !this.engine?.ready || !this._isCoachHumanTurn()) return;
 
     const fen = this.chess.fen();
@@ -8010,6 +8315,7 @@ _showPuzzleSuccessOverlay() {
 		  }
 
 		  async _startAnticheatCheck() {
+        if (window.PlayFairPlay && !(await window.PlayFairPlay.verify())) return;
 		    if (!this.authState.user) {
 		      // Anticheat is server-only (no browser fallback), so it genuinely
 		      // needs an account. Explain WHY before bouncing — never a silent
@@ -8377,6 +8683,7 @@ _showPuzzleSuccessOverlay() {
   }
 
   _loadPgnText(pgnText, headers = {}) {
+    window.MoveExplanationUI?.clear();
     const chess = new Chess();
     const normalized = this._normalizePgnText(pgnText);
     const parsedHeaders = this._readPgnHeaders(normalized);
@@ -8435,6 +8742,9 @@ _showPuzzleSuccessOverlay() {
   _normalizePgnText(text) {
     return String(text || '')
       .replace(/\r\n?/g, '\n')
+      // chess.js 0.10 emits only one newline before a zero-move result. PGN
+      // requires a blank line after the tags, including for aborted games.
+      .replace(/(\]\n)(?=(?:1-0|0-1|1\/2-1\/2|\*)\s*$)/, '$1\n')
       .replace(/\u00a0/g, ' ')
       .replace(/[“”]/g, '"')
       .replace(/[‘’]/g, "'")
@@ -8902,6 +9212,8 @@ _showPuzzleSuccessOverlay() {
     bestMoveSan,
     opponentBestMove = '',
     opponentBestMoveSan = '',
+    opponentPvSan = '',
+    opponentPv = '',
     depth,
     isCoachMove = false,
   }) {
@@ -9023,8 +9335,10 @@ _showPuzzleSuccessOverlay() {
       bestMoveSan,
       opponentBestMove,
       opponentBestMoveSan,
-      bestMovePv: '',
-      bestMovePvSan: '',
+      bestMovePv: lines[0]?.pvUci || '',
+      bestMovePvSan: lines[0]?.pvSan || '',
+      opponentPvSan,
+      opponentPv,
       alternatives,
       depth,
       fen: fenBefore,
@@ -9059,13 +9373,15 @@ _showPuzzleSuccessOverlay() {
         priorOpponentMoveSan,
         priorOpponentThreat,
         mateThreat,
-        opponentPvSan: '',
+        opponentPvSan,
+        bestMovePvSan: lines[0]?.pvSan || '',
         fenBefore,
         fenAfter,
       }),
     };
 
-    this.liveMoveResults[moveIndex] = result;
+    // Store only after the caller has checked its request token and position.
+    // A cancelled search must not overwrite a cached move from another game.
     return result;
   }
 
@@ -9157,6 +9473,7 @@ _showPuzzleSuccessOverlay() {
    * so the feedback keeps sharpening until the user navigates away.
    */
   async _deepenLiveEvaluation(baseContext, initialDepth) {
+    if (window.PlayFairPlay?.isBlocked()) return;
     if (baseContext?.isCoachMove) return;
     if (this.isAnalyzing) return;                           // a full review is running
     if (!this.engine?.ready) return;
@@ -9212,6 +9529,7 @@ _showPuzzleSuccessOverlay() {
         const liveResult = await this._analyzeMoveAtDepth(baseContext, depth, reviewProfile.multiPv, reviewProfile.timeoutMs);
         if (token !== this.liveDepthToken) return;
         if (this.currentMoveIndex !== moveIndex) return;
+        if (this.chess.fen() !== baseContext.fenAfter) return;
         if (!liveResult || liveResult.isCoachMove) return;
         if (this.isAnalyzing) return;
 
@@ -9283,6 +9601,13 @@ _showPuzzleSuccessOverlay() {
     return { multi, depthReached, requestedDepth: depth };
   }
 
+  _orderWhiteAbsoluteLines(lines, isWhiteToMove) {
+    // Review lines have already been converted to White's perspective.
+    // Black prefers the LOWEST White evaluation; core engine lines instead
+    // retain the side-to-move perspective and use _orderLinesForSide.
+    return lines.slice().sort((a, b) => isWhiteToMove ? b.cp - a.cp : a.cp - b.cp);
+  }
+
   async _verifyPositionEval(fen, baseCp, baseDepth, isWhiteToMove, timeoutMs) {
     const verifyDepth = Math.min(baseDepth + 4, 20);
     if (verifyDepth <= baseDepth) return null;
@@ -9306,7 +9631,7 @@ _showPuzzleSuccessOverlay() {
       // Only override when the deeper search meaningfully disagrees — a small
       // wobble is normal depth noise; a big swing means a missed tactic.
       if (Math.abs(cp - baseCp) < 150) return null;
-      return { cp, bestMove, depth: line.depth || verifyDepth };
+      return { cp, bestMove, depth: line.depth || verifyDepth, pvUci: line.pv || '', pvSan: this.analyzer._lineToSan(fen, line.pv || '', 10) };
     } catch (_) {
       return null; // verification is best-effort
     }
@@ -9336,7 +9661,7 @@ _showPuzzleSuccessOverlay() {
       })
       .filter((line) => !!line.move);
 
-    const orderedLines = this.analyzer._orderLinesForSide(lines, isWhiteToMoveBefore);
+    const orderedLines = this._orderWhiteAbsoluteLines(lines, isWhiteToMoveBefore);
     const best = orderedLines[0] || { cp: 0, move: '' };
     let bestMove = best.move || '';
     let bestMoveSan = bestMove ? this.analyzer.uciToSan(prevFen, bestMove) : '--';
@@ -9363,8 +9688,8 @@ _showPuzzleSuccessOverlay() {
           ...orderedLines[0],
           cp: verifiedBefore.cp,
           move: bestMove,
-          pvUci: verifiedBefore.bestMove,
-          pvSan: this.analyzer._lineToSan(prevFen, verifiedBefore.bestMove, 8),
+          pvUci: verifiedBefore.pvUci,
+          pvSan: verifiedBefore.pvSan,
           depth: verifiedBefore.depth || depth,
         };
       }
@@ -9389,12 +9714,16 @@ _showPuzzleSuccessOverlay() {
             nextFen
           ),
           move: mv,
+          pvUci: line.pv || '',
+          pvSan: this.analyzer._lineToSan(nextFen, line.pv || '', 10),
           depth: line.depth || 0,
         };
       })
       .filter((line) => !!line.move);
-    const orderedNext = this.analyzer._orderLinesForSide(nextLines, isWhiteToMoveAfter);
+    const orderedNext = this._orderWhiteAbsoluteLines(nextLines, isWhiteToMoveAfter);
     const nextBest = orderedNext[0] || null;
+    let opponentPvSan = nextBest?.pvSan || '';
+    let opponentPv = nextBest?.pvUci || '';
     scoreAfter = nextBest && typeof nextBest.cp === 'number' && Number.isFinite(nextBest.cp)
       ? nextBest.cp
       : bestScore;
@@ -9412,6 +9741,8 @@ _showPuzzleSuccessOverlay() {
       scoreAfter = verifiedAfter.cp;
       afterDepth = verifiedAfter.depth || afterDepth;
       if (verifiedAfter.bestMove) opponentBestMove = verifiedAfter.bestMove;
+      opponentPvSan = verifiedAfter.pvSan || '';
+      opponentPv = verifiedAfter.pvUci || '';
     }
 
     return this._buildLiveMoveResult({
@@ -9426,12 +9757,15 @@ _showPuzzleSuccessOverlay() {
       bestMoveSan,
       opponentBestMove,
       opponentBestMoveSan: opponentBestMove ? this.analyzer.uciToSan(nextFen, opponentBestMove) : '',
+      opponentPvSan,
+      opponentPv,
       depth: afterDepth,
       isCoachMove: !!context.isCoachMove,
     });
   }
 
 	  async _requestLiveEvaluation(message = 'Analyzing current position...', context = null) {
+        if (window.PlayFairPlay && !(await window.PlayFairPlay.verify())) return;
 	    if (this.puzzleMode.active) {
 	      this.board.clearBestMoveArrow();
 	      this.board.clearLoading();
@@ -9477,7 +9811,8 @@ _showPuzzleSuccessOverlay() {
     try {
       if (context?.fenBefore && context?.moveObj) {
         const liveResult = await this._analyzeMoveAtDepth(context, depth, reviewProfile.multiPv, Math.max(6000, reviewProfile.timeoutMs));
-        if (token !== this.liveEvalToken) return;
+        if (token !== this.liveEvalToken || this.chess.fen() !== fen) return;
+        this.liveMoveResults[liveResult.moveIndex] = liveResult;
 
         if (!liveResult.isCoachMove) {
           this._applyBestMoveArrow(liveResult);
@@ -9511,7 +9846,7 @@ _showPuzzleSuccessOverlay() {
       }
 
       const result = await this.engine.evaluate(fen, depth, Math.max(6000, reviewProfile.timeoutMs));
-      if (token !== this.liveEvalToken) return;
+      if (token !== this.liveEvalToken || this.chess.fen() !== fen) return;
 
       const isWhiteToMove = fen.split(' ')[1] === 'w';
       const cp = this.analyzer.whiteAbsCp(
@@ -9540,7 +9875,7 @@ _showPuzzleSuccessOverlay() {
       this._updateGameStatus();
       return result;
 	    } catch (err) {
-	      if (token !== this.liveEvalToken) return;
+	      if (token !== this.liveEvalToken || this.chess.fen() !== fen) return;
 	      if (context?.isCoachMove) {
 	        await this._recoverLiveEngineFailure(err, { silent: true });
 	        return;
@@ -9635,6 +9970,7 @@ _showPuzzleSuccessOverlay() {
   }
 
   _loadGame(moves, headers = {}) {
+    this._pendingPlayReview = null;
     const loadingCoachGame = headers.Event === 'Coach';
     if (!loadingCoachGame && this.coachMode.active) {
       this.coachMode.active = false;
@@ -9866,6 +10202,7 @@ _saveGameState() {
 	  }
 
 	  _goToMove(index) {
+    window.MoveExplanationUI?.clear();
     if (index < -1) index = -1;
     if (index >= this.gameMoves.length) index = this.gameMoves.length - 1;
     // Navigation buttons/keys operate on the main line. If the cursor is
@@ -9880,6 +10217,7 @@ _saveGameState() {
     }
     if (index === this.currentMoveIndex) return;
 
+    this.liveEvalToken += 1;
     this.currentMoveIndex = index;
     this.chess = new Chess(this.initialFen);
 
@@ -9902,7 +10240,8 @@ _saveGameState() {
     this.board.animateNextUpdate();
     this._updateBoard();
 
-	    const result = this.analysisResults?.[index] || this.liveMoveResults?.[index];
+	    const result = !window.PlayFairPlay?.isBlocked()
+      && (this.analysisResults?.[index] || this.liveMoveResults?.[index]);
 	    const feedbackResult = result?.isCoachMove
 	      ? (this.analysisResults?.[index - 1] || this.liveMoveResults?.[index - 1])
 	      : result;
@@ -10014,7 +10353,11 @@ _saveGameState() {
     const ctx = this.evalGraphCtx;
     const w = this.elEvalGraph.width;
     const h = this.elEvalGraph.height;
+    const theme = window.getComputedStyle(this.elEvalGraph);
+    const token = (name, fallback) => theme.getPropertyValue(name).trim() || fallback;
     ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = token('--bg-panel', '#202321');
+    ctx.fillRect(0, 0, w, h);
 
     const series = (this.analysisResults && this.analysisResults.length > 0)
       ? this.analysisResults.map((entry) => entry.evalAfter)
@@ -10036,14 +10379,14 @@ _saveGameState() {
       max += 1;
     }
 
-    ctx.strokeStyle = '#d1cabd';
+    ctx.strokeStyle = token('--border-color', '#363b37');
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(0, h / 2);
     ctx.lineTo(w, h / 2);
     ctx.stroke();
 
-    ctx.strokeStyle = '#111111';
+    ctx.strokeStyle = token('--accent', '#a6c77a');
     ctx.lineWidth = 2;
     ctx.beginPath();
 
@@ -10065,7 +10408,7 @@ _saveGameState() {
       const x = this.analysisResults.length === 1
         ? w
         : (this.currentMoveIndex / (this.analysisResults.length - 1)) * w;
-      ctx.strokeStyle = '#7a746a';
+      ctx.strokeStyle = token('--text-muted', '#929a91');
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(x, 0);
@@ -10078,7 +10421,7 @@ _saveGameState() {
       const idx = this.liveEvalHistory.length - 1;
       const denom = Math.max(1, this.liveEvalHistory.length - 1);
       const x = (idx / denom) * w;
-      ctx.strokeStyle = '#7a746a';
+      ctx.strokeStyle = token('--text-muted', '#929a91');
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(x, 0);
@@ -10087,18 +10430,9 @@ _saveGameState() {
     }
   }
 
-	  _playNamedSound(name) {
-	    const pool = this.soundPool[name];
-	    if (!Array.isArray(pool) || !pool.length) return;
-	    const index = this.soundPoolIndex[name] || 0;
-	    const audio = pool[index % pool.length];
-	    this.soundPoolIndex[name] = (index + 1) % pool.length;
-	    try {
-	      audio.pause();
-	      audio.currentTime = 0;
-	    } catch (_err) {}
-	    audio.play().catch(() => {});
-	  }
+  _playNamedSound(name) {
+    this.boardSounds.play(name === 'promote' ? 'promotion' : name);
+  }
 
   _playMoveSound(moveObj, index) {
     if (!moveObj) return;
@@ -10144,7 +10478,9 @@ _saveGameState() {
   }
 
   _updateBoard() {
+    window.MoveExplanationUI?.clear();
     this.board.setPositionFromFen(this.chess.fen());
+    this._syncCapturedPieces();
     // Mark the checked king's square so the board highlights it red (WCAG: not
     // colour-only — it sits on a distinct ring, and the move list announces it).
     if (this.chess && typeof this.chess.in_check === 'function' && this.chess.in_check()) {
@@ -10408,7 +10744,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
       text.textContent = moveSan;
       moveSpan.appendChild(text);
 
-      const result = sub.results && sub.results[mIdx];
+      const result = !window.PlayFairPlay?.isBlocked() && sub.results && sub.results[mIdx];
       if (result && result.evalAfter !== undefined) {
         const evalEl = document.createElement('span');
         evalEl.className = 'sub-line-move-eval';
@@ -10459,7 +10795,8 @@ _showMoveBadge(classification, targetSquare, options = {}) {
 	    cell.tabIndex = 0;
 	    cell.setAttribute('aria-label', `Go to move ${moveSan}`);
 
-	    const result = this.analysisResults?.[index] || this.liveMoveResults?.[index];
+	    const result = !window.PlayFairPlay?.isBlocked()
+      && (this.analysisResults?.[index] || this.liveMoveResults?.[index]);
 
 	    const shownMoveBadges = new Set(['BRILLIANT', 'GREAT', 'MISS', 'MISTAKE', 'INACCURACY', 'BLUNDER']);
 	    const classificationKey = result?.classificationKey || this.analyzer.getClassificationKey(result?.classification);
@@ -10691,6 +11028,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
 		  }
 		
 			  async _startReview() {
+    if (window.PlayFairPlay && !(await window.PlayFairPlay.verify())) return;
     if (!this._canStartHeavyAction('review', 'Game Review')) return;
 		const serverReview = this.engineSettings.analysisLocation === 'server';
 	    if (this.isAnalyzing || this.gameMoves.length === 0 || (!serverReview && !this.engine?.ready)) return;
@@ -10825,6 +11163,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
 			        );
 	      }
 
+              if (window.PlayFairPlay?.isBlocked()) return;
 				      // Refresh the opening card so book classification is applied to the
 				      // now-populated analysis results. The async Lichess lookup will
 				      // call _showOpeningInfo → _applyOpeningToResults when it resolves.
@@ -10838,6 +11177,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
 	      this._saveGameState();
 	    } catch (err) {
 	      console.error('Analysis error:', err);
+          if (window.PlayFairPlay?.isBlocked()) return;
 	      this._showPopup({
 	        icon: 'error',
 	        title: 'Analysis failed',
@@ -10852,6 +11192,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
 			      this.elReviewBtnText.textContent = this.analysisResults ? 'Re-analyze Game' : 'Start Review';
 		      if (this.elProgressBar) this.elProgressBar.style.display = 'none';
 		      if (this.elReviewProgressPct) this.elReviewProgressPct.hidden = true;
+		      if (this.elReviewProgressStep) this.elReviewProgressStep.hidden = true;
 		      if (!this.analysisResults) {
 		        this._clearReviewExtras();
 		        this.elReviewSummary.style.display = 'none';
@@ -11396,6 +11737,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
   // main-line name. try/finally GUARANTEES the loading spinner is cleared even
   // if the fetch hangs (paired with the bounded timeout in the fetch).
   async _refreshOpeningCard() {
+    if (window.PlayFairPlay?.isBlocked()) return;
     const OPENING_PLY = 16;
     const moves = this.gameMoves || [];
     if (!moves.length) { this._showOpeningInfo(null); return; }
@@ -11622,8 +11964,12 @@ _showMoveBadge(classification, targetSquare, options = {}) {
   }
 
 	  _resetInsightPanel() {
+    window.MoveExplanationUI?.clear();
 	    if (this.elMoveInsights) this.elMoveInsights.hidden = !this.explorerReturnState;
-	    if (this.elInsightEmpty) this.elInsightEmpty.style.display = 'block';
+	    if (this.elInsightEmpty) {
+        this.elInsightEmpty.style.display = 'block';
+        this.elInsightEmpty.textContent = 'Select a reviewed move to see its explanation.';
+      }
     this.elInsightContent.style.display = 'none';
     this.elInsightMove.textContent = '';
     this.elInsightClass.textContent = '';
@@ -11660,12 +12006,24 @@ _showMoveBadge(classification, targetSquare, options = {}) {
   }
 
   _renderMoveInsights(result) {
+    window.MoveExplanationUI?.clear();
     if (!result) {
       this._resetInsightPanel();
       return;
     }
 
     if (result.isCoachMove) {
+      return;
+    }
+
+    if (!this.analyzer.matchesExplanationPosition(result, this.chess.fen())) {
+      this._resetInsightPanel();
+      if (this.elMoveInsights) this.elMoveInsights.hidden = false;
+      if (this.elInsightEmpty) {
+        this.elInsightEmpty.style.display = 'block';
+        this.elInsightEmpty.textContent = 'Saved analysis does not match this position. Run a fresh review.';
+      }
+      if (this.elMoveBadge) this.elMoveBadge.style.display = 'none';
       return;
     }
 
@@ -11713,7 +12071,30 @@ _showMoveBadge(classification, targetSquare, options = {}) {
     this.elInsightSwing.textContent = this.analyzer.formatSwing(result.swing || 0);
     this.elInsightBestMove.textContent = result.bestMoveSan || '--';
     this.elInsightPhase.textContent = result.phase || '--';
-    this.elInsightCoach.textContent = result.coachText || '';
+    // Concrete terminal threats override stale saved grades in the position
+    // panel. Keep persisted engine scores and aggregate review data intact.
+    const contextBoard = new Chess();
+    const contextValid = contextBoard.load(result.fenBefore || result.fen || '')
+      && contextBoard.move(result.moveSan || result.move);
+    const immediateMate = contextValid && this.analyzer._immediateMateMove(contextBoard.fen());
+    if (immediateMate) {
+      this.elInsightClass.textContent = 'Mate in 1';
+      this.elInsightClass.style.background = MoveClassification.BLUNDER.color;
+      if (this.elInsightClassDesc) this.elInsightClassDesc.textContent = `The opponent can deliver checkmate with ${immediateMate.san}.`;
+      this.elInsightCpLoss.textContent = '—';
+      this.elInsightSwing.textContent = '—';
+      this.elLiveEvalScore.textContent = 'M1';
+      this.elLiveEvalLine.textContent = `${result.moveSan || result.move} allows ${immediateMate.san}`;
+      this.elMoveBadge.style.display = 'none';
+      this._updateEvalBar(result.isWhite ? -9990 : 9990);
+    }
+    const nextResult = this.analysisResults?.[result.moveIndex + 1];
+    const explanationResult = { ...result,
+      opponentPvSan: result.opponentPvSan || (nextResult?.fen === result.fenAfter ? nextResult.bestMovePvSan : ''),
+    };
+    const explanationText = this.analyzer.explainResult(explanationResult);
+    if (window.MoveExplanationUI) window.MoveExplanationUI.render(this.elInsightCoach, explanationText, explanationResult);
+    else this.elInsightCoach.textContent = explanationText;
     if (this.elInsightPlanTags) {
       const tags = result.planTags || [];
       this.elInsightPlanTags.innerHTML = tags.length
@@ -11769,6 +12150,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
 	  // the list, the board, "Back to Main Line") exits the preview. This does
 	  // NOT enter explore-line mode or modify the move list.
 	  _exploreLineFromCurrentMove() {
+        if (window.PlayFairPlay?.isBlocked()) return;
 	    const index = Number(this.elBtnLineExplorer?.dataset.moveIndex ?? this.currentMoveIndex);
 	    // Prefer the insight result stored at render time — works for sub-line
 	    // moves whose result isn't in analysisResults/liveMoveResults.
@@ -11867,6 +12249,9 @@ _showMoveBadge(classification, targetSquare, options = {}) {
       bestMoveSan: result.bestMoveSan,
       phase: result.phase,
       fen: result.fen,
+      fenAfter: result.fenAfter,
+      moveUci: result.moveUci,
+      bestMove: result.bestMove,
     };
   }
 
@@ -11894,6 +12279,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
   // Shared driver: show skeleton in `target`, stream tokens, render + Chat-more.
   // `scope` is 'move' | 'game'; `extra` carries moveIndex for move scope.
   async _streamCoachOverview(target, scope, extra = {}, _retryCount = 0) {
+    if (window.PlayFairPlay && !(await window.PlayFairPlay.verify())) return;
     if (!target) return;
     const token = (this._coachOverviewToken = (this._coachOverviewToken || 0) + 1);
     // Abort any in-flight overview request (per-element controller).
@@ -12051,12 +12437,12 @@ _showMoveBadge(classification, targetSquare, options = {}) {
   // Quota/error display. quota_exceeded gets a SweetAlert2 popup (per spec).
   _showCoachQuotaOrError(target, message) {
     if (target) target.innerHTML = `<div class="coach-overview-error">${this._escapeHtml(message || 'Coach is unavailable.')}</div>`;
-    if (/token|quota/i.test(message || '')) {
+    if (/allowance|quota|token/i.test(message || '')) {
       try {
         window.Swal?.fire({
           icon: 'warning',
-          title: 'Out of Coach tokens',
-          text: message || "You've used all your daily Coach tokens. They reset at midnight UTC — or upgrade for more.",
+          title: 'Daily Coach allowance used',
+          text: message || "You've used your daily AI Coach allowance. They reset at midnight UTC — or upgrade for more.",
           confirmButtonText: 'OK',
         });
       } catch (_) {}
@@ -12273,7 +12659,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
         cp, move: mv, pvUci: line.pv || '', pvSan: this.analyzer._lineToSan(fenAfter, line.pv || '', 8), depth: line.depth || 0,
       };
     }).filter((l) => !!l.move);
-    lines = this.analyzer._orderLinesForSide ? this.analyzer._orderLinesForSide(lines, isWhiteToMoveAfter) : lines;
+    lines = this._orderWhiteAbsoluteLines(lines, isWhiteToMoveAfter);
     if (!lines.length) {
       const afterRes = await this.engine.evaluate(fenAfter, depth, timeoutMs);
       const cp = this.analyzer.whiteAbsCp(
@@ -12282,7 +12668,8 @@ _showMoveBadge(classification, targetSquare, options = {}) {
       );
       lines.push({ cp, move: afterRes.bestMove || '', pvUci: afterRes.pv || '', pvSan: this.analyzer._lineToSan(fenAfter, afterRes.pv || '', 8), depth: afterRes.depth || 0 });
     }
-    const afterCp = lines[0]?.cp ?? beforeCp;
+    const isCheckmate = new Chess(fenAfter).in_checkmate();
+    const afterCp = isCheckmate ? (isWhitePlaying ? 10000 : -10000) : lines[0]?.cp ?? beforeCp;
 
     // Best line eval of the BEFORE position (what the engine recommended).
     const multiBefore = await this.engine.evaluateMultiPV(fenBefore, depth, multiPv, timeoutMs);
@@ -12297,7 +12684,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
         cp, move: mv, pvUci: line.pv || '', pvSan: this.analyzer._lineToSan(fenBefore, line.pv || '', 8), depth: line.depth || 0,
       };
     }).filter((l) => !!l.move);
-    beforeLines = this.analyzer._orderLinesForSide ? this.analyzer._orderLinesForSide(beforeLines, isWhiteToMoveBefore) : beforeLines;
+    beforeLines = this._orderWhiteAbsoluteLines(beforeLines, isWhiteToMoveBefore);
     const bestLineCp = beforeLines[0]?.cp ?? beforeCp;
     const bestMove = beforeLines[0]?.move || beforeRes.bestMove || '';
     const bestMoveSan = bestMove ? this.analyzer.uciToSan(fenBefore, bestMove) : '--';
@@ -12308,19 +12695,21 @@ _showMoveBadge(classification, targetSquare, options = {}) {
     const playerRating = 1200;
     const expectedLoss = this.analyzer.expectedPointLoss(playerEdgeBefore, playerEdgeAfter, playerRating);
 
-    const fenObj = { parentIndex: -1, isInBook: false };
+    const beforeBoard = new Chess(fenBefore);
+    const sacrifice = this.analyzer.checkSacrifice(beforeBoard, moveObj.san);
     const classification = this.analyzer.classifyMove({
       movePly: moveIndex + 1,
       moveSan: moveObj.san,
       moveUci: playedUci,
       fenBefore,
-      numLegalMoves: 0,
-      isCheckmate: new Chess(fenAfter).in_checkmate(),
-      isPieceSacrifice: false,
+      numLegalMoves: new Chess(fenBefore).moves().length,
+      isCheckmate,
+      isPieceSacrifice: sacrifice.isPieceSacrifice,
       playerEdgeBefore,
       playerEdgeAfter,
       cpLoss,
       isBestMove: playedUci === bestMove,
+      gapToSecond: this.analyzer._gapToSecondWhite(bestLineCp, beforeLines[1]?.cp ?? null, isWhitePlaying),
       scoreBefore: beforeCp,
       scoreAfter: afterCp,
       phase: this.analyzer._phaseFromFen(fenBefore, moveIndex + 1),
@@ -12357,8 +12746,12 @@ _showMoveBadge(classification, targetSquare, options = {}) {
       playerEdgeAfter,
       bestMove,
       bestMoveSan,
-      bestMovePv: '',
+      bestMovePv: beforeLines[0]?.pvUci || beforeRes.pv || '',
       bestMovePvSan: beforeLines[0]?.pvSan || '',
+      opponentPv: lines[0]?.pvUci || '',
+      opponentPvSan: lines[0]?.pvSan || '',
+      opponentBestMove: lines[0]?.move || '',
+      opponentBestMoveSan: lines[0]?.move ? this.analyzer.uciToSan(fenAfter, lines[0].move) : '',
       alternatives,
       depth,
       fen: fenBefore,
@@ -12372,12 +12765,12 @@ _showMoveBadge(classification, targetSquare, options = {}) {
       isCoachMove: false,
       coachText: this.analyzer._coachingText({
         classification, cpLoss, expectedLoss, isBestMove: playedUci === bestMove,
-        bestMoveSan, bestMove, opponentBestMove: '', opponentBestMoveSan: '',
+        bestMoveSan, bestMove, opponentBestMove: lines[0]?.move || '', opponentBestMoveSan: lines[0]?.move ? this.analyzer.uciToSan(fenAfter, lines[0].move) : '',
         moveUci: playedUci, moveSan: moveObj.san, movePly: moveIndex + 1,
         scoreBefore: beforeCp, scoreAfter: afterCp, isWhite: isWhitePlaying,
         playerRating, playerEdgeBefore, playerEdgeAfter, opponentJustBlundered: false,
         priorOpponentMoveSan: '', priorOpponentThreat: false, mateThreat: null,
-        opponentPvSan: '', fenBefore, fenAfter,
+        opponentPvSan: lines[0]?.pvSan || '', bestMovePvSan: beforeLines[0]?.pvSan || '', fenBefore, fenAfter,
       }),
     };
   }
@@ -12534,6 +12927,3 @@ document.addEventListener('DOMContentLoaded', () => {
   // Expose the SPA app to other scripts (e.g. boost.js) so they can navigate in-page.
   window.SidaApp = window.app;
 });
-
-
-

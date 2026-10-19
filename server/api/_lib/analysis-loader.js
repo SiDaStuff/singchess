@@ -29,12 +29,25 @@ function loadAnalyzer() {
     console,
     module: { exports: {} },
     exports: {},
-    window: {},
+    window: { Chess },
   };
   vm.createContext(sandbox);
   vm.runInContext(`${source}\nmodule.exports = { MoveAnalyzer, MoveClassification };`, sandbox, {
     filename: 'chess-core.js',
   });
+  // The teaching pipeline is the same deterministic side-effect module used
+  // by Vite. Load it in this realm so server and browser consume identical
+  // chess rules without importing DOM components or duplicating analysis.
+  const tacticsPath = path.join(path.dirname(analysisPath), 'tactics-coach.js');
+  if (fs.existsSync(tacticsPath)) {
+    vm.runInContext(fs.readFileSync(tacticsPath, 'utf8'), sandbox, { filename: 'tactics-coach.js' });
+    sandbox.module.exports.TacticsCoach = sandbox.window.TacticsCoach;
+    const advancedPath = path.join(path.dirname(analysisPath), 'tactics-advanced.js');
+    if (fs.existsSync(advancedPath)) {
+      vm.runInContext(fs.readFileSync(advancedPath, 'utf8'), sandbox, { filename: 'tactics-advanced.js' });
+      sandbox.module.exports.TacticsAdvanced = sandbox.window.TacticsAdvanced;
+    }
+  }
   return sandbox.module.exports;
 }
 

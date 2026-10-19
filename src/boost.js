@@ -200,12 +200,12 @@
 
     if (plan.plan === 'boost' || plan.plan === 'max') {
       if (elStatusContainer) elStatusContainer.hidden = false;
-      if (elStatusTitle) elStatusTitle.textContent = `${plan.name} is Active!`;
+      if (elStatusTitle) elStatusTitle.textContent = `${plan.name} is active`;
       if (elStatusText) {
         const expiresAt = plan.expiresAt ? new Date(plan.expiresAt).toLocaleDateString() : '';
         elStatusText.textContent = expiresAt
-          ? `Your ${plan.name} features are active until ${expiresAt}. Enjoy!`
-          : `Your ${plan.name} features are ready to go!`;
+          ? `Your ${plan.name} features are active until ${expiresAt}.`
+          : `Your ${plan.name} features are ready.`;
       }
       setStatus('', '');
       return;
@@ -309,4 +309,3 @@
   // Expose for the SPA shell to call when the boost panel becomes visible.
   window.SidaBoost = { render };
 })();
-

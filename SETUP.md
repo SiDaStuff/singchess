@@ -31,7 +31,7 @@ cd chess-review
 npm install
 ```
 
-This installs everything for **both** the frontend (Vite, Tailwind) and the
+This installs everything for **both** the frontend (Vite, the shared CSS design system) and the
 server (express, firebase-admin, chess.js, …). The server's own
 `server/package.json` mirrors its runtime deps so a standalone `server/` deploy
 works too (a normal root install already covers it via hoisting).
@@ -95,12 +95,14 @@ npm run pieces:build   # downloads piece PNGs (chess.com CDN)
 
 ### Puzzle database (optional for dev)
 
-Local puzzles come from a SQLite DB built from the Lichess puzzle dump —
+Local puzzles use indexed tables in the application SQLite database, built from the Lichess puzzle dump —
 **not** in git (multi-GB). Without it, daily/local puzzles show
-*"Local puzzle chunks are not built yet"* (Lichess-random puzzles still work).
+*"The SQL puzzle library has not been imported yet"* (Lichess-random puzzles still work).
 
 ```bash
 npm run puzzles:build
+# Upgrade an existing JSON corpus without downloading/decompressing:
+npm run puzzles:import-chunks
 # Useful knobs:
 PUZZLE_MAX_ROWS=200000 npm run puzzles:build   # cap the import for a quick dev DB
 ```
@@ -264,7 +266,7 @@ production API before `cap sync`.
 | Symptom | Fix |
 |---------|-----|
 | *"Timed out waiting for readyok/uciok"* | Stockfish assets missing → `npm run stockfish:copy`; check `server/vendor/` exists. |
-| *"Local puzzle chunks are not built yet"* | Expected without the DB → `npm run puzzles:build` (or use Lichess-random puzzles). |
+| *"The SQL puzzle library has not been imported yet"* | Expected without the DB → `npm run puzzles:build` (or use Lichess-random puzzles). |
 | WASM MIME error in browser console | nginx should serve `.wasm` as `application/wasm`; Vite dev has a plugin that fixes this locally. |
 | Coach says *"LLM not configured"* | `NVIDIA_API_KEY` missing in root `.env`; restart server after editing. |
 | Reviews stuck at "queued" forever | Another heavy action holds your lock → restart server (`pm2 reload chess-review`); locks are in-process by design. |

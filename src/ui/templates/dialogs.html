@@ -1,0 +1,347 @@
+    <div class="modal-overlay" id="settings-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" aria-hidden="true">
+      <div class="modal modal-settings">
+        <div class="modal-header">
+          <h2 id="settings-modal-title">Engine Settings</h2>
+          <button type="button" class="modal-close material-symbols-outlined" id="settings-close" aria-label="Close">close</button>
+        </div>
+        <div class="modal-body">
+          <div class="engine-form">
+            <label class="field engine-source-field" hidden>
+              <span class="field-label">Source</span>
+              <select id="engine-source" class="input-select">
+                <option value="browser">Browser</option>
+              </select>
+            </label>
+            <div class="field engine-module-field">
+              <span class="field-label">Engine Model</span>
+              <div id="engine-module" class="engine-radio-group"></div>
+            </div>
+            <label class="field">
+              <span class="field-label">Analysis Depth</span>
+              <select id="engine-strength" class="input-select">
+                <option value="depth10">Depth 10</option>
+                <option value="depth14" selected>Depth 14</option>
+                <option value="depth18">Depth 18</option>
+                <option value="depth22">Depth 22</option>
+                <option value="depth26">Depth 26</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">Maximum Time</span>
+              <select id="engine-max-time" class="input-select">
+                <option value="4000">4 seconds</option>
+                <option value="8000">8 seconds</option>
+                <option value="12000" selected>12 seconds</option>
+                <option value="20000">20 seconds</option>
+                <option value="30000">30 seconds</option>
+              </select>
+            </label>
+            </div>
+          <p class="modal-help">Tune the browser engine used for game reviews, bot play, and live analysis.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="pgn-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="pgn-modal-title">
+      <div class="modal modal-import">
+        <div class="modal-header">
+          <div class="import-modal-title">
+            <span class="eyebrow">GAME REVIEW</span>
+            <h2 id="pgn-modal-title">Import a game</h2>
+            <p>Choose a source to bring a game into your review workspace.</p>
+          </div>
+          <button type="button" class="modal-close material-symbols-outlined" id="modal-close" aria-label="Close">close</button>
+        </div>
+        <div class="modal-body import-modal-body">
+          <div id="saved-username-bar" class="saved-username-bar" hidden>
+            <span class="saved-username-bar-label">Quick load:</span>
+            <div id="saved-username-content" class="saved-username-content"></div>
+          </div>
+
+          <!-- Shared import-tool component (matches the home page) -->
+          <div class="import-tool" id="modal-import-tool" data-import-scope="modal">
+            <div class="import-source-heading">
+              <span class="import-source-label">Choose a source</span>
+              <span class="import-source-note">Your game stays in this browser until you save it.</span>
+            </div>
+            <div class="import-tabs" role="tablist" aria-label="Import source">
+              <button type="button" class="import-tab active" data-import-tab="pgn" role="tab" aria-selected="true">
+                <span class="material-symbols-outlined">content_paste</span>
+                <span class="import-tab-copy"><strong>Paste PGN</strong><small>From a file or clipboard</small></span>
+              </button>
+              <button type="button" class="import-tab" data-import-tab="lichess" role="tab" aria-selected="false">
+                <span class="import-tab-logo lichess-logo" aria-hidden="true"></span>
+                <span class="import-tab-copy"><strong>Lichess</strong><small>Load public games</small></span>
+              </button>
+              <button type="button" class="import-tab" data-import-tab="chesscom" role="tab" aria-selected="false">
+                <span class="import-tab-logo chesscom-logo" aria-hidden="true"></span>
+                <span class="import-tab-copy"><strong>Chess.com</strong><small>Load public games</small></span>
+              </button>
+            </div>
+
+            <div class="import-panels">
+              <!-- PGN panel -->
+              <div class="import-panel active" data-import-panel="pgn">
+                <div class="import-panel-heading">
+                  <h3>Paste a PGN</h3>
+                  <p class="import-panel-hint">Paste the moves and game details below.</p>
+                </div>
+                <label class="field" for="pgn-input">Your game (PGN)</label>
+                <textarea id="pgn-input" class="import-pgn-input input-select" placeholder="Paste your PGN here...&#10;&#10;Example:&#10;1. e4 e5 2. Nf3 Nc6 3. Bb5 a6..." rows="7"></textarea>
+                <div class="import-actions">
+                  <button type="button" id="btn-pgn-load" class="btn btn-primary import-load-btn">
+                    <span class="btn-content">
+                      <span class="material-symbols-outlined btn-symbol">play_arrow</span>
+                      <span class="btn-label">Load Game</span>
+                    </span>
+                  </button>
+                  <button type="button" id="btn-pgn-sample" class="btn btn-secondary import-sample-btn">
+                    <span class="btn-content">
+                      <span class="material-symbols-outlined btn-symbol">flash_on</span>
+                      <span class="btn-label">Try sample</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Lichess panel -->
+              <div class="import-panel" data-import-panel="lichess">
+                <div class="import-panel-heading">
+                  <h3>Load from Lichess</h3>
+                  <p class="import-panel-hint">Enter a public username to load recent games.</p>
+                </div>
+                <label class="field">
+                  <span class="field-label">Lichess username</span>
+                  <input id="import-username-lichess" class="input-select import-username" type="text" placeholder="hikaru" data-source="lichess">
+                </label>
+                <div class="import-row">
+                  <label class="field">
+                    <span class="field-label">Games</span>
+                    <select id="import-limit-lichess" class="input-select import-limit">
+                      <option value="10">Last 10</option>
+                      <option value="5">Last 5</option>
+                      <option value="20">Last 20</option>
+                    </select>
+                  </label>
+                  <button type="button" class="btn btn-primary import-load-username-btn" data-source="lichess">
+                    <span class="btn-content">
+                      <span class="material-symbols-outlined btn-symbol">download</span>
+                      <span class="btn-label">Load Games</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Chess.com panel -->
+              <div class="import-panel" data-import-panel="chesscom">
+                <div class="import-panel-heading">
+                  <h3>Load from Chess.com</h3>
+                  <p class="import-panel-hint">Enter a public username to load recent games.</p>
+                </div>
+                <label class="field">
+                  <span class="field-label">Chess.com username</span>
+                  <input id="import-username-chesscom" class="input-select import-username" type="text" placeholder="MagnusCarlsen" data-source="chesscom">
+                </label>
+                <div class="import-row">
+                  <label class="field">
+                    <span class="field-label">Games</span>
+                    <select id="import-limit-chesscom" class="input-select import-limit">
+                      <option value="10">Last 10</option>
+                      <option value="5">Last 5</option>
+                      <option value="20">Last 20</option>
+                    </select>
+                  </label>
+                  <button type="button" class="btn btn-primary import-load-username-btn" data-source="chesscom">
+                    <span class="btn-content">
+                      <span class="material-symbols-outlined btn-symbol">download</span>
+                      <span class="btn-label">Load Games</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="import-status" id="import-status" role="status" aria-live="polite"></div>
+            <div class="import-results" id="import-results"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="account-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="account-modal-title" aria-hidden="true">
+      <div class="modal modal-account">
+        <div class="modal-header">
+          <h2 id="account-modal-title">Account</h2>
+          <button type="button" class="modal-close material-symbols-outlined" id="account-close" aria-label="Close">close</button>
+        </div>
+        <div class="modal-body">
+          <div class="account-signed-out" id="account-signed-out">
+            <div class="account-mode-switch" role="group" aria-label="Account mode">
+              <button id="btn-auth-signin-mode" class="account-mode active" type="button">Sign In</button>
+              <button id="btn-auth-signup-mode" class="account-mode" type="button">Sign Up</button>
+            </div>
+            <label class="field">
+              <span class="field-label">Email</span>
+              <input id="auth-email" class="input-select" type="email" autocomplete="email" placeholder="you@example.com">
+            </label>
+            <label class="field">
+              <span class="field-label">Password</span>
+              <input id="auth-password" class="input-select" type="password" autocomplete="current-password" placeholder="At least 6 characters">
+            </label>
+            <div class="auth-actions">
+              <button id="btn-auth-submit" class="btn btn-primary" type="button">
+                <span class="btn-content">
+                  <span class="material-symbols-outlined btn-symbol">login</span>
+                  <span class="btn-label">Sign In</span>
+                </span>
+              </button>
+              <button id="btn-google-auth" class="btn btn-google" type="button">
+                <span class="btn-content">
+                  <svg class="btn-google-icon" viewBox="0 0 24 24" width="18" height="18" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path fill="#4285F4" d="M23.64 12.205c0-.78-.07-1.53-.2-2.255H12v4.27h6.84c-.295 1.57-1.19 2.9-2.54 3.8v3.15h4.1c2.4-2.205 3.78-5.42 3.78-9.0z"/>
+                    <path fill="#34A853" d="M12 24c3.24 0 5.97-1.075 7.96-2.92l-4.1-3.15c-1.145.77-2.6 1.225-3.86 1.225-2.97 0-5.49-2.005-6.4-4.705H1.37v2.95C3.35 21.94 7.35 24 12 24z"/>
+                    <path fill="#FBBC05" d="M5.6 14.4c-.26-.77-.41-1.585-.41-2.425s.15-1.655.41-2.425V6.6H1.37A11.965 11.965 0 0 0 0 12c0 1.95.45 3.8 1.37 5.4l4.23-3.0z"/>
+                    <path fill="#EA4335" d="M12 4.8c1.76 0 3.35.605 4.6 1.795l3.45-3.45C17.97 1.3 15.24 0 12 0 7.35 0 3.35 2.06 1.37 5.6l4.23 3.0C6.51 6.795 9.03 4.8 12 4.8z"/>
+                    <path fill="none" d="M0 0h24v24H0z"/>
+                  </svg>
+                  <span class="btn-label">Continue with Google</span>
+                </span>
+              </button>
+            </div>
+            <p class="account-status" id="account-status"></p>
+          </div>
+          <div class="account-signed-in" id="account-signed-in" hidden>
+            <div class="account-profile-row">
+              <div class="account-avatar material-symbols-outlined" aria-hidden="true">person</div>
+              <div>
+                <strong id="account-display-name">Player</strong>
+                <span id="account-email-label"></span>
+              </div>
+            </div>
+            <div class="account-stats">
+              <div>
+                <span>Plan</span>
+                <strong id="account-plan">Free</strong>
+              </div>
+              <div>
+                <span>Puzzle rating</span>
+                <strong id="account-puzzle-rating">1500</strong>
+              </div>
+              <div>
+                <span>Solved</span>
+                <strong id="account-puzzles-solved">0</strong>
+              </div>
+              <div>
+                <span>Attempted</span>
+                <strong id="account-puzzles-attempted">0</strong>
+              </div>
+            </div>
+            <p class="account-usage" id="account-usage"></p>
+            <div class="admin-boost-panel" id="admin-boost-panel" hidden>
+              <h3>Gift Boost</h3>
+              <label class="field">
+                <span class="field-label">Email</span>
+                <input id="gift-boost-email" class="input-select" type="email" placeholder="player@example.com">
+              </label>
+              <label class="field">
+                <span class="field-label">Days</span>
+                <input id="gift-boost-days" class="input-select" type="number" min="1" max="366" value="30">
+              </label>
+              <button id="btn-gift-boost" class="btn btn-primary" type="button">
+                <span class="btn-content">
+                  <span class="material-symbols-outlined btn-symbol">redeem</span>
+                  <span class="btn-label">Gift Boost</span>
+                </span>
+              </button>
+              <p class="account-status" id="gift-boost-status"></p>
+            </div>
+            <button id="btn-auth-signout" class="btn btn-secondary" type="button">
+              <span class="btn-content">
+                <span class="material-symbols-outlined btn-symbol">logout</span>
+                <span class="btn-label">Sign Out</span>
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="coach-setup-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="coach-setup-modal-title" aria-hidden="true">
+      <div class="modal modal-coach-setup">
+        <div class="modal-header">
+          <h2 id="coach-setup-modal-title">Play Coach</h2>
+          <button type="button" class="modal-close material-symbols-outlined" id="coach-setup-close" aria-label="Close">close</button>
+        </div>
+        <div class="modal-body">
+          <label class="field">
+            <span class="field-label">Coach ELO</span>
+            <input id="coach-setup-elo" class="input-select" type="number" min="100" max="2800" step="50" value="1200">
+          </label>
+          <div class="coach-setup-grid">
+            <label class="checkbox-row coach-adjust-toggle">
+              <input id="coach-setup-ai-adjust" type="checkbox" checked>
+              <span>AI Adjust</span>
+            </label>
+            <label class="field coach-adjust-style-field">
+              <span class="field-label">Coach Target</span>
+              <select id="coach-setup-adjust-style" class="input-select">
+                <option value="better" selected>Better than player</option>
+                <option value="worse">Worse than player</option>
+              </select>
+            </label>
+          </div>
+          <div class="coach-radio-group" role="radiogroup" aria-label="Play as">
+            <label class="radio-card">
+              <input type="radio" name="coach-setup-color" value="w" checked>
+              <span>White</span>
+            </label>
+            <label class="radio-card">
+              <input type="radio" name="coach-setup-color" value="b">
+              <span>Black</span>
+            </label>
+            <label class="radio-card">
+              <input type="radio" name="coach-setup-color" value="random">
+              <span>Random</span>
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="btn-coach-setup-start" class="btn btn-primary">
+            <span class="btn-content">
+              <span class="material-symbols-outlined btn-symbol">sports_esports</span>
+              <span class="btn-label">Start Coach</span>
+            </span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="promotion-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="promotion-modal-title">
+      <div class="modal modal-promotion">
+        <div class="modal-header">
+          <h2 id="promotion-modal-title">Promote Pawn</h2>
+          <button type="button" class="modal-close material-symbols-outlined" id="promotion-close" aria-label="Close promotion">close</button>
+        </div>
+        <div class="modal-body">
+          <div class="promotion-options" id="promotion-options">
+            <button class="promotion-option" type="button" data-piece="q">
+              <span class="promotion-piece">Q</span>
+              <span>Queen</span>
+            </button>
+            <button class="promotion-option" type="button" data-piece="r">
+              <span class="promotion-piece">R</span>
+              <span>Rook</span>
+            </button>
+            <button class="promotion-option" type="button" data-piece="b">
+              <span class="promotion-piece">B</span>
+              <span>Bishop</span>
+            </button>
+            <button class="promotion-option" type="button" data-piece="n">
+              <span class="promotion-piece">N</span>
+              <span>Knight</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+

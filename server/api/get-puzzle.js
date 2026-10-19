@@ -1,4 +1,5 @@
 const puzzleDb = require('./_lib/puzzle-db');
+const { requireFeature } = require('./_lib/user-service');
 
 function safePuzzleId(id) {
   return String(id || '').replace(/[.#$\[\]/]/g, '_');
@@ -11,7 +12,7 @@ function allowedOrigin(origin) {
   if (origin === 'https://chess.singdevelopments.com') return origin;
   // Backend VM (mastermind) — same-origin API calls.
   if (origin === 'https://mastermind.singdevelopments.com') return origin;
-  if (isDev && origin === 'http://localhost:3000') return origin;
+  if (isDev && /^http:\/\/(localhost|127\.0\.0\.1):(3000|5173|4173)$/.test(origin)) return origin;
   return '';
 }
 
@@ -30,7 +31,7 @@ function dbUnavailableResponse(headers) {
     statusCode: 503,
     headers,
     body: JSON.stringify({
-        error: 'Local puzzle chunks are not built yet. Run npm run puzzles:build on the server.',
+        error: 'The SQL puzzle library has not been imported yet. Run npm run puzzles:build on the server.',
       code: 'puzzle_db_missing',
     }),
   };
@@ -55,6 +56,7 @@ exports.handler = async (event) => {
   }
 
   try {
+    await requireFeature(event, 'puzzles');
     if (!puzzleDb.isReady()) {
       return dbUnavailableResponse(headers);
     }

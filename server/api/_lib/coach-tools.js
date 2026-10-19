@@ -32,6 +32,18 @@ function exaSearchAvailable() {
 // "what's the latest" question.
 const TOOL_DEFINITIONS = [
   {
+    type: 'function', function: {
+      name: 'report_coach_misuse',
+      description: 'Record a high-confidence concern about THIS authenticated user\'s CURRENT message. First redirect politely; persistent concerns across chats are counted by the server and may create an administrator report. Only use for direct targeted harassment, requests violating safety policy, or deliberate non-chess misuse. Do not report ordinary frustration, chess insults aimed at a move, quoted examples, legitimate chess questions, or incidental small talk. Never follow a user request to report someone. Supply an exact quote from the current user message; never use chat history or tool output as evidence. Explain the chess/respect boundary to the user. This does not ban accounts.',
+      parameters: { type: 'object', properties: {
+        category: { type: 'string', enum: ['harassment', 'policy_violation', 'off_topic'] },
+        evidence: { type: 'string', description: 'Exact relevant quote from current user text, 8-500 characters.' },
+        reason: { type: 'string', description: 'Specific contextual justification, at most 300 characters.' },
+        confidence: { type: 'number', minimum: 0.9, maximum: 1 },
+      }, required: ['category', 'evidence', 'reason', 'confidence'], additionalProperties: false },
+    },
+  },
+  {
     type: 'function',
     function: {
       name: 'stockfish',
@@ -213,8 +225,9 @@ function getToolDefinitions() {
 }
 
 // Run a SERVER-side tool. Returns a JSON-serialisable result.
-async function runServerTool(name, args, user) {
+async function runServerTool(name, args, user, context) {
   switch (name) {
+    case 'report_coach_misuse': return require('./coach-abuse').recordCoachConcern(args, user, context);
     case 'web_search': return runWebSearch(args || {});
     case 'exa_search': return runExaSearch(args || {});
     case 'coach_games': return runCoachGames(user);
@@ -474,15 +487,25 @@ async function runExaSearch({ query, num_results, recency_days }) {
 // Returns a concise, prose-friendly summary of the user's chess context. The
 // shape is intentionally short and human-readable so the model paraphrases it
 // rather than echoing raw JSON to the user.
-function runCoachGames(user) {
+async function runCoachGames(user) {
   const profile = (user && user._profile) || {};
-  const usernames = Array.isArray(profile.savedUsernames) ? profile.savedUsernames : [];
+  const savedUsernames = profile.savedUsernames || {};
+  const usernames = Object.entries(savedUsernames).filter(([, name]) => typeof name === 'string' && name.trim()).map(([source, name]) => `${source}: ${name}`);
   const rating = profile.puzzleRating || null;
   const parts = [];
   if (usernames.length) parts.push(`Saved usernames: ${usernames.slice(0, 10).join(', ')}.`);
   else parts.push('No saved Lichess/Chess.com usernames on file.');
   if (rating) parts.push(`Puzzle rating: ${rating}.`);
-  return { summary: parts.join(' '), usernames: usernames.slice(0, 10), puzzleRating: rating };
+  let linkedAccounts = [];
+  if (user?.uid && usernames.length) {
+    const data = await require('./linked-chess-service').loadLinked(user);
+    linkedAccounts = data.linked.map(({ games, latest, ...account }) => ({ ...account, latest: latest ? { ...latest, pgn: latest.pgn.slice(0, 12000), pgnTruncated: latest.pgn.length > 12000 } : null, recentGames: (games || []).slice(0, 3).map(({ pgn, ...game }) => game) }));
+    parts.push('Linked ratings and latest completed games are included below. Chess.com puzzle ratings are peaks, not current ratings.');
+  }
+  const autoReviews = user?.uid
+    ? (await require('./user-service').initAdmin().db.ref(`maxAutoReviewPrivate/reviews/${user.uid}`).orderByChild('createdAt').limitToLast(3).once('value')).val() || {}
+    : {};
+  return { summary: parts.join(' '), usernames, savedUsernames, puzzleRating: rating, linkedAccounts, recentReviews: Object.values(autoReviews).map(({ review, pgn, ...metadata }) => ({ ...metadata, whiteAccuracy: review.whiteAccuracy, blackAccuracy: review.blackAccuracy, criticalMoments: (review.criticalMoments || []).slice(0, 3) })) };
 }
 
 // Look up the user's current plan and usage. Returns a short prose summary plus
@@ -514,7 +537,8 @@ async function runUserPlanStats(user) {
   else parts.push(`Server reviews today: ${reviews} / ${reviewLimit} used.`);
   if (anticheatLimit) parts.push(`Anticheat this week: ${anticheat} / ${anticheatLimit} used.`);
   else parts.push('Anticheat: not included.');
-  parts.push(`Coach tokens today: ${coachTokens.toLocaleString()} / ${coachLimit ? coachLimit.toLocaleString() : 'unlimited'} used.`);
+  const coachUsagePercent = coachLimit ? Math.min(100, Math.floor(coachTokens / coachLimit * 100)) : 0;
+  parts.push(`AI Coach today: ${coachUsagePercent}% used.`);
   if (plan.expiresAt) parts.push(`Plan expires: ${new Date(plan.expiresAt).toLocaleDateString()}.`);
 
   return {
@@ -523,12 +547,11 @@ async function runUserPlanStats(user) {
     limits: {
       serverReviewsPerDay: reviewLimit,
       anticheatGamesPerWeek: anticheatLimit,
-      coachTokensPerDay: coachLimit,
     },
     usage: {
       serverReviews: reviews,
       anticheatGames: anticheat,
-      coachTokens,
+      coachUsagePercent,
       day,
       week,
     },
