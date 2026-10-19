@@ -483,9 +483,11 @@ async function _pushNotification(uid, payload) {
   try {
     const { db } = initAdmin();
     const ref = db.ref(`users/${uid}/notifications`).push();
+    const fallbackTitles = { 'anticheat.done': 'Fair play report ready', 'anticheat.error': 'Fair play report update', auto_review: 'Game review ready' };
+    const rawTitle = String(payload.title || '').trim();
     const notif = {
       type: String(payload.type).slice(0, 60),
-      title: String(payload.title || '').slice(0, 140),
+      title: (rawTitle && rawTitle.toLowerCase() !== 'notification' ? rawTitle : fallbackTitles[payload.type] || 'Account update').slice(0, 140),
       body: String(payload.body || '').slice(0, 500),
       link: String(payload.link || '').slice(0, 200),
       read: false,

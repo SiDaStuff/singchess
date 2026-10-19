@@ -14,12 +14,12 @@ export const PLAY_PIECE_SETS = Object.freeze([
 export const DEFAULT_PLAY_PREFERENCES = Object.freeze({
   boardTheme: 'classic', pieceTheme: 'cburnett', sounds: true, volume: .45,
   animations: true, legalMoves: true, coordinates: true, autoQueen: false,
-  premoves: true, touchConfirm: false, reviewOrientation: 'white',
+  premoves: true, multiPremoves: false, touchConfirm: false, reviewOrientation: 'white',
 });
 const STORAGE_KEY = 'sidastuff.playPreferences';
 export function normalizePlayPreferences(input = {}) {
   const result = { ...DEFAULT_PLAY_PREFERENCES };
-  for (const key of ['sounds', 'animations', 'legalMoves', 'coordinates', 'autoQueen', 'premoves', 'touchConfirm']) {
+  for (const key of ['sounds', 'animations', 'legalMoves', 'coordinates', 'autoQueen', 'premoves', 'multiPremoves', 'touchConfirm']) {
     if (typeof input[key] === 'boolean') result[key] = input[key];
   }
   if (PLAY_BOARD_THEMES.some(theme => theme.value === input.boardTheme)) result.boardTheme = input.boardTheme;
@@ -35,10 +35,11 @@ export function loadPlayPreferences(storage) {
     const appearance = JSON.parse(storage?.getItem('sidastuff.appearanceSettings') || '{}');
     const native = { ...engine, ...appearance };
     const saved = JSON.parse(storage?.getItem(STORAGE_KEY) || '{}');
+    const shared = JSON.parse(storage?.getItem('sidastuff.usability') || '{}');
     // The live board is the same board the rest of the app uses. Appearance is
     // therefore always sourced from the shared appearance settings; Play only
     // owns game-specific controls such as premoves, sounds, and confirmation.
-    return normalizePlayPreferences({ ...saved, boardTheme: native.boardTheme,
+    return normalizePlayPreferences({ ...saved, ...shared, coordinates: typeof shared.coordinates === 'string' ? shared.coordinates !== 'none' : saved.coordinates, boardTheme: native.boardTheme,
       pieceTheme: native.pieceTheme, animations: native.pieceAnimations });
   } catch { return { ...DEFAULT_PLAY_PREFERENCES }; }
 }

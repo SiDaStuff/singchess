@@ -258,7 +258,7 @@ class ChessReviewApp {
       const text = notice.querySelector('[data-fairplay-text]');
       if (text) text.textContent = activeGames.length
         ? 'Your online game is in progress. Analysis and coaching will return when it ends.'
-        : 'Checking your online games. Analysis and coaching are paused until Play reconnects.';
+        : 'Could not verify your Lichess game status. Reconnecting automatically…';
     }
     if (blocked) {
       this.liveEvalToken += 1; this.liveDepthToken += 1;
@@ -1022,7 +1022,8 @@ class ChessReviewApp {
       this.elAppearanceSettingsStatus.className = 'account-status success';
     }
     this._applyAppearanceSettings(settings);
-    this._saveAndReload();
+    for (const board of window.ChessBoard.instances || [this.board]) board?._updatePieces();
+    window.dispatchEvent(new Event('app-settings-saved'));
   }
 
   // Populate the settings-page appearance form with the values currently
@@ -1237,13 +1238,16 @@ class ChessReviewApp {
 
 		  _navigateTo(path, options = {}) {
     window.MoveExplanationUI?.clear();
-		    const route = this._normalizeRoute(path || '/index');
-		    const target = this._routeUrl(route);
+		    const url = new URL(path || '/index', window.location.origin);
+        if (url.origin !== window.location.origin) return;
+		    const route = this._normalizeRoute(url.pathname);
+		    const target = this._routeUrl(route) + url.search + url.hash;
 		    const current = this._normalizeRoute(window.location.pathname || '/index');
 		    // Forward skipImport so callers (the coach's game_review tool) can
 		    // suppress the "Import Games" popup when loading a PGN directly.
 		    const passOpts = { skipHistory: true, disableRestore: options.disableRestore, skipImport: options.skipImport };
 		    if (current === route) {
+          if (window.location.pathname + window.location.search + window.location.hash !== target) window.history.replaceState({}, '', target);
 		      this._applyRoute(route, passOpts);
 		      return;
 		    }
@@ -1278,7 +1282,7 @@ _installLinkInterceptor() {
 			  ];
 			  if (!knownRoutes.includes(route) && !route.startsWith('/profile/') && !route.startsWith('/anticheat/report/')) return;
 			  event.preventDefault();
-			  this._navigateTo(route);
+			  this._navigateTo(url.pathname + url.search + url.hash);
 		    }, true);
 		  }
 
@@ -1427,9 +1431,11 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	  // ── Onboarding wizard (multi-step signup) ─────────────────────────
 	  // Four steps: appearance, skill, integrations, and account creation.
 	  _initOnboarding() {
-	    // Reset to step 1 whenever the signup route is (re)shown.
-	    this.onboardingStep = 1;
-	    this._setOnboardingStep(1);
+        // Contextual account links offer the form directly; customization is
+        // still available. Keep the regular four-step setup for other visits.
+        this._signupQuick = !this.authState.user && new URLSearchParams(window.location.search).get('quick') === '1';
+        this._onboardingCustomized = !this._signupQuick;
+	    this._setOnboardingStep(this._signupQuick ? 4 : 1);
 
 	    // Listener binding is one-time: this runs again on EVERY /signup
 	    // navigation (route handler + startup bind), and each pass used to
@@ -1472,7 +1478,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    document.getElementById('btn-onboard-next-3')?.addEventListener('click', () => this._setOnboardingStep(4));
 	    document.getElementById('btn-onboard-back-2')?.addEventListener('click', () => this._setOnboardingStep(1));
 	    document.getElementById('btn-onboard-back-3')?.addEventListener('click', () => this._setOnboardingStep(2));
-	    document.getElementById('btn-onboard-back-4')?.addEventListener('click', () => this._setOnboardingStep(3));
+	    document.getElementById('btn-onboard-back-4')?.addEventListener('click', () => this._setOnboardingStep(this._signupQuick ? 1 : 3));
 	    // "Skip" jumps straight to account creation, keeping whatever defaults are selected.
 	    document.getElementById('btn-onboard-skip-1')?.addEventListener('click', () => this._setOnboardingStep(4));
 	    document.getElementById('btn-onboard-skip-2')?.addEventListener('click', () => this._setOnboardingStep(4));
@@ -1483,6 +1489,12 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	  }
 
 	  _onboardingAppearance() {
+        if (this._signupQuick && !this._onboardingCustomized) {
+          try {
+            const saved = JSON.parse(localStorage.getItem('sidastuff.appearanceSettings'));
+            if (saved && typeof saved === 'object' && !Array.isArray(saved)) return saved;
+          } catch (_) {}
+        }
 	    const checkedBoard = document.querySelector('input[name="onboard-board-theme"]:checked');
 	    const checkedPiece = document.querySelector('input[name="onboard-piece-theme"]:checked');
 	    return {
@@ -1497,12 +1509,19 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	  }
 
 	  _setOnboardingStep(n) {
+        if (n < 4) this._onboardingCustomized = true;
 	    this.onboardingStep = n;
 	    const steps = this.elOnboardSteps || [];
 	    steps.forEach((el, idx) => { if (el) el.hidden = (idx + 1) !== n; });
 	    const pct = n === 1 ? 25 : n === 2 ? 50 : n === 3 ? 75 : 100;
 	    if (this.elOnboardProgressFill) this.elOnboardProgressFill.style.width = `${pct}%`;
 	    if (this.elOnboardStepLabel) this.elOnboardStepLabel.textContent = `Step ${n} of 4`;
+        const quickForm = this._signupQuick && !this._onboardingCustomized && n === 4;
+        const progress = document.querySelector('.onboard-wizard-progress');
+        if (progress) progress.hidden = quickForm;
+        if (quickForm && this.elOnboardStepLabel) this.elOnboardStepLabel.textContent = 'Create your free account';
+        const back = document.getElementById('btn-onboard-back-4');
+        if (back) back.textContent = this._signupQuick ? 'Personalize your setup' : 'Back';
 	    // Focus the first input of the newly shown step for keyboard users.
 	    const stepEl = steps[n - 1];
 	    if (stepEl) {
@@ -1515,6 +1534,9 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	  // the post-signup _saveUserProfile picks them up. Called right before the
 	  // email/password or Google auth runs.
 	  _persistOnboardingChoices() {
+        // Skipping optional setup retains the rating and board already earned
+        // or chosen while exploring as a guest.
+        if (this._signupQuick && !this._onboardingCustomized) return;
 	    // Appearance (already written live in step 1; ensure it's set even on Skip).
 	    try { localStorage.setItem('sidastuff.appearanceSettings', JSON.stringify(this._onboardingAppearance())); } catch (_) {}
 
@@ -1563,25 +1585,21 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    return ['/login', '/signup', '/account', '/settings', '/plans', '/boost', '/auth', '/404', '/incompatible-browser'].includes(route);
 		  }
 
-  // IKEA effect + onboarding-not-at-0%: when a guest arrives at signup from the
-  // post-review "Save my review" CTA (?src=review), reframe the copy around the
-  // work they JUST did. The review was Step 1; this is Step 2 of 2.
+  // Keep the account benefit relevant to the tool that brought the user here.
   _applySignupContext() {
     const eyebrow = document.getElementById('signup-eyebrow');
     const headline = document.getElementById('signup-headline');
     const subtitle = document.getElementById('signup-subtitle');
     const params = new URLSearchParams(window.location.search);
-    const fromReview = params.get('src') === 'review';
     if (!eyebrow || !headline || !subtitle) return;
-    if (fromReview) {
-      eyebrow.textContent = 'Step 2 of 2 — almost there';
-      headline.textContent = 'Save the review you just ran';
-      subtitle.textContent = 'Create your free account to save this review, track accuracy over time, and pick up where you left off.';
-    } else {
-      eyebrow.textContent = 'Create your free account';
-      headline.textContent = 'Start training stronger chess';
-      subtitle.textContent = 'Sign up with email to save your analysis, unlock coach progress, and track puzzle performance.';
-    }
+    const copy = {
+      review: ['Create an account', 'Get move explanations and synced settings. Browser reviews stay free.'],
+      puzzles: ['Create an account', 'Save your puzzle rating and continue on another device.'],
+      coach: ['Create an account', 'Includes a daily Coach allowance, puzzles, and browser reviews.'],
+      plans: ['Create an account', 'Start free, with daily server review and Coach allowances.'],
+    }[params.get('src')] || ['Create an account', 'Save puzzle progress, sync settings, and get move explanations.'];
+    eyebrow.textContent = 'Free account';
+    headline.textContent = copy[0]; subtitle.textContent = copy[1];
   }
 
   // ── Public profile ────────────────────────────────────────────────
@@ -1961,7 +1979,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    }
 		    const toSignup = document.getElementById('btn-boost-to-signup');
 		    if (toSignup && !toSignup.dataset.spaBound) {
-		      toSignup.addEventListener('click', () => this._navigateTo('/signup'));
+		      toSignup.addEventListener('click', () => this._navigateTo('/signup?src=plans&quick=1'));
 		      toSignup.dataset.spaBound = '1';
 		    }
 		  }
@@ -3185,7 +3203,7 @@ return window.firebase;
 	    const text = freeNoAnticheat
 	      ? 'Server-side cheat detection is included with Boost (25 games/week) and Max (100 games/week).'
 	      : isReview
-	        ? `Your next server review unlocks in ${untilReset} — or go Boost for unlimited reviews right now.`
+	        ? `Your allowance resets in ${untilReset}. You can review in the browser or compare paid plans.`
 	        : `Your weekly anticheat budget resets Monday — or upgrade to Max for 100 games/week.`;
 	    const result = await this._showPopup({
 	      icon: 'warning',
@@ -3756,8 +3774,15 @@ _syncAccountUi() {
 		    }
 	  }
 
+	  _notificationTitle(n = {}) {
+    const supplied = String(n.title || '').trim();
+    if (supplied && supplied.toLowerCase() !== 'notification') return supplied;
+    return ({ 'anticheat.done': 'Fair play report ready', 'anticheat.error': 'Fair play report update',
+      auto_review: 'Game review ready' })[n.type] || (String(n.body || '').trim() ? 'Account update' : 'New account activity');
+  }
+
 	  _renderNotificationItem(n) {
-    const title = this._escapeHtml(n.title || 'Notification');
+    const title = this._escapeHtml(this._notificationTitle(n));
     const body = this._escapeHtml(n.body || '');
     const time = n.createdAt ? this._formatRelativeTime(n.createdAt) : '';
     const cls = n.read ? 'notification-item' : 'notification-item notification-item-unread';
@@ -3883,7 +3908,7 @@ _syncAccountUi() {
 	      // `anticheatComplete` exists today; future types add here).
 	      if (n.type === 'anticheat.done' && settings.anticheatComplete === false) continue;
 	      try {
-	        const sys = new Notification(n.title || 'Notification', {
+	        const sys = new Notification(this._notificationTitle(n), {
 	          body: n.body || '',
 	          tag: (n.type || 'notification') + ':' + (n.reportId || n.id || ''),
 	        });
@@ -5371,11 +5396,9 @@ if (this.elBtnAnticheatRefresh) {
     } catch (_) {}
   }
 
-  // Populate the three home stat cards from /api/public-stats. Each card shows
-  // its own metric; on any failure the cards keep their em-dash placeholder.
+  // Display only counts returned by the service, with their original units.
   async _loadHomeStats() {
     if (!this.elHomeStats) return;
-    const setText = (el, value) => { if (el) el.textContent = value; };
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 4000);
@@ -5384,14 +5407,16 @@ if (this.elBtnAnticheatRefresh) {
       if (!res.ok) throw new Error('stats unavailable');
       const s = (await res.json())?.stats || {};
       this.elHomeStats.dataset.loaded = 'true';
-      const reviews = this._formatPublicStat(Number(s.movesAnalyzed ?? s.gamesAnalyzed) || 0);
-      const puzzles = this._formatPublicStat(Number(s.puzzlesSolved) || 0);
-      const coaches = this._formatPublicStat(Number(s.coachGamesPlayed) || 0);
-      setText(this.elHomeStatReviews, reviews);
-      setText(this.elHomeStatPuzzles, puzzles);
-      setText(this.elHomeStatCoaches, coaches);
+      let visible = false;
+      for (const [node, value] of [[this.elHomeStatReviews, s.movesAnalyzed], [this.elHomeStatPuzzles, s.puzzlesSolved], [this.elHomeStatCoaches, s.coachGamesPlayed]]) {
+        if (!node) continue;
+        const valid = typeof value === 'number' && Number.isFinite(value) && value >= 0;
+        node.closest('.home-stat-card').hidden = !valid;
+        if (valid) { node.textContent = this._formatPublicStat(value); visible = true; }
+      }
+      this.elHomeStats.hidden = !visible;
     } catch (_) {
-      // Leave the em-dash placeholders visible (cards already read "—").
+      this.elHomeStats.hidden = true;
     }
   }
 
@@ -6846,17 +6871,11 @@ _showPuzzleSuccessOverlay() {
 		    this._playMoveSound(move, this.currentMoveIndex);
 		    this.board.clearBestMoveArrow();
 	
-		    const liveResultPromise = this._requestLiveEvaluation(`Analyzing ${move.san}`, {
-		      fenBefore,
-		      fenAfter: this.chess.fen(),
-		      moveObj: move,
-		      moveIndex: this.currentMoveIndex,
-		    });
-		    liveResultPromise.catch(() => {});
+		    // Keep the solution and engine suggestions hidden during an attempt.
 	
 		    if (!isExpected && !checkmateSolved) {
 		      this.puzzleMode.failed = true;
-		      if (this.elLiveEval) this.elLiveEval.hidden = false;
+		      if (this.elLiveEval) this.elLiveEval.hidden = true;
 		      this.board.setHighlights(this._moveHighlightsForSquares(move.from, move.to, {
 		        color: '#F8D7D4',
 		        ringColor: '#CA3431',
@@ -6886,9 +6905,9 @@ _showPuzzleSuccessOverlay() {
 	
 				    if (checkmateSolved || this.puzzleMode.step >= this.puzzleMode.solution.length) {
 				      this.puzzleMode.solved = true;
+				      this._requestLiveEvaluation(`Analyzing ${move.san}`, { fenBefore, fenAfter: this.chess.fen(), moveObj: move, moveIndex: this.currentMoveIndex }).catch(() => {});
 				      if (this.elLiveEval) this.elLiveEval.hidden = false;
 				      const rated = !this.puzzleMode.failed ? await this._recordPuzzleAttempt(true) : false;
-				      this._celebrate();
 				      this._showPuzzleSuccessOverlay();
 				      if (this.puzzleMode.step >= this.puzzleMode.solution.length) this._playNamedSound('end');
 					      this._setPuzzleStatus(checkmateSolved && !isExpected
@@ -7090,30 +7109,6 @@ _showPuzzleSuccessOverlay() {
       target.insertBefore(document.createTextNode(''), target.firstChild || null);
     }
     target.firstChild.nodeValue = String(value);
-			  }
-
-			  _celebrate() {
-			    if (typeof window.confetti !== 'function') return;
-			    window.confetti({
-			      particleCount: 120,
-			      spread: 72,
-			      origin: { y: 0.68 },
-			      colors: ['#f7c631', '#0d8f8b', '#346ea5', '#b88d58', '#ffffff'],
-			    });
-			    window.setTimeout(() => {
-			      window.confetti({
-			        particleCount: 70,
-			        angle: 60,
-			        spread: 58,
-			        origin: { x: 0, y: 0.72 },
-			      });
-			      window.confetti({
-			        particleCount: 70,
-			        angle: 120,
-			        spread: 58,
-			        origin: { x: 1, y: 0.72 },
-			      });
-			    }, 160);
 			  }
 
 		  async _persistPuzzleStats(won, ratingBefore = this.puzzleMode.rating) {
@@ -7427,7 +7422,6 @@ _showPuzzleSuccessOverlay() {
 			this._setCoachDialog(message, 'Game Over');
 			if (!humanLost && !this.coachMode.gameOverCelebrated) {
 				this.coachMode.gameOverCelebrated = true;
-				this._celebrate();
 			}
 			this._syncCoachControls();
 		}
@@ -8028,9 +8022,9 @@ _showPuzzleSuccessOverlay() {
 		      if (result.opponentBestMove) this.board.setBestMoveArrow(result.opponentBestMove, { color: '#CA3431' });
 		      this.coachMode.lastAdviceMoveIndex = result.moveIndex;
 		    } else if (key === 'BRILLIANT') {
-		      this._setCoachDialog(`${move.san} — a brilliant find. That's the engine's top choice and a genuinely tough move to spot.${adjustNote}`, 'Brilliant');
+		      this._setCoachDialog(`${move.san} — brilliant.${adjustNote}`, 'Brilliant');
 		    } else if (key) {
-		      this._setCoachDialog(`${move.san} — ${result.classification.name.toLowerCase()}. Solid stuff; keep going.${adjustNote}`, 'Coaching');
+		      this._setCoachDialog(`${move.san} — ${result.classification.name.toLowerCase()}.${adjustNote}`, 'Coaching');
 		    }
 	
 		    if (!this._checkCoachGameOver()) {
@@ -8067,7 +8061,6 @@ _showPuzzleSuccessOverlay() {
 	    // and draws too — demoralizing. Confetti now fires only for humanWon.
 	    if (humanWon && !this.coachMode.gameOverCelebrated) {
 	      this.coachMode.gameOverCelebrated = true;
-	      this._celebrate();
 	    } else {
 	      this.coachMode.gameOverCelebrated = true;
 	    }
@@ -10529,17 +10522,7 @@ _saveGameState() {
   }
 
 _showMoveBadge(classification, targetSquare, options = {}) {
-    if (!classification) {
-      this.elMoveBadge.style.display = 'none';
-      return;
-    }
-
-    // Brilliant & Great are reward badges — hide them entirely for guests
-    // (not signed in). Guests still see every other classification on the
-    // board. While auth resolves, treat as guest so a returning logged-in
-    // user doesn't briefly lose the badge (re-rendered on auth resolve).
-    const _badgeKey = this.analyzer.getClassificationKey(classification);
-    if ((_badgeKey === 'BRILLIANT' || _badgeKey === 'GREAT') && this._authGateState() !== 'signedIn') {
+    if (!classification || window.PlayFairPlay?.isBlocked()) {
       this.elMoveBadge.style.display = 'none';
       return;
     }
@@ -10800,14 +10783,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
 
 	    const shownMoveBadges = new Set(['BRILLIANT', 'GREAT', 'MISS', 'MISTAKE', 'INACCURACY', 'BLUNDER']);
 	    const classificationKey = result?.classificationKey || this.analyzer.getClassificationKey(result?.classification);
-	    // Brilliant & Great are reward badges — only for signed-in users. Guests
-	    // still see Best/Excellent/Good and the error classes (Inaccuracy/
-	    // Mistake/Blunder/Miss); they just don't get the celebratory rewards.
-	    // While auth is resolving, treat as guest so a returning logged-in user
-	    // never briefly loses the badge (the list re-renders on auth resolve).
-	    const signedInForBadges = this._authGateState() === 'signedIn';
-	    const badgeHiddenForGuest = (classificationKey === 'BRILLIANT' || classificationKey === 'GREAT') && !signedInForBadges;
-	    if (result && !result.isCoachMove && shownMoveBadges.has(classificationKey) && !badgeHiddenForGuest) {
+	    if (result && !result.isCoachMove && shownMoveBadges.has(classificationKey)) {
 	      const cls = result.classification;
 	      const icon = document.createElement('span');
 	      icon.className = this._classificationIconClass(cls, 'move-icon');

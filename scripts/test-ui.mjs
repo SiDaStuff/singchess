@@ -293,10 +293,7 @@ try {
       await page.locator('label:has(input[name="settings-board-theme"][value="green"])').click();
       assert.ok(await page.locator('input[name="settings-board-theme"][value="green"]').isChecked());
       assert.ok(await page.locator('#appearance-board-preview').isVisible());
-      await Promise.all([
-        page.waitForEvent('domcontentloaded'),
-        page.locator('#btn-save-appearance-settings').click(),
-      ]);
+      await page.locator('#btn-save-appearance-settings').click();
       await page.waitForFunction(() => typeof window.app?._navigateTo === 'function');
       assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('sidastuff.appearanceSettings')).boardTheme), 'green');
       await snapshot(page, 'settings-green', width);

@@ -1,4 +1,4 @@
-.admin-profile-panel { margin-block: 24px; padding: clamp(16px,3vw,28px); border: 1px solid var(--border-color); border-radius: 14px; background: var(--bg-panel); }
+.admin-profile-panel { margin-block: 24px; padding-block: 20px; border-top: 1px solid var(--border-color); background: var(--bg-panel); }
 .admin-control-card { margin-block: 18px; padding: 14px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-muted); }
 .admin-control-card h4 { margin: 0 0 8px; }
 .admin-feature-controls { display: grid; gap: 8px; margin-block: 12px; }

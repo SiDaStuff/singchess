@@ -7,9 +7,16 @@ document.addEventListener('DOMContentLoaded', () => {
   for (const target of [document.querySelector('.settings-content'), document.getElementById('account-signed-in-page')]) {
     if (!target) continue;
     const root = document.createElement('section');
-    root.className = 'linked-hub card';
-    root.innerHTML = '<div class="page-card-head"><span class="eyebrow">CONNECTED CHESS</span><h2>Your chess, all together.</h2><p>Link public profiles for quick game lookup, shared coach context, and rating import.</p></div><div data-accounts></div><p class="account-status" role="status" aria-live="polite" data-status></p><div data-automatic></div>';
-    target.prepend(root);
+    const inAccount = target.id === 'account-signed-in-page';
+    root.className = inAccount ? 'linked-hub account-connections' : 'linked-hub card settings-section';
+    root.id = inAccount ? 'account-connections' : 'settings-connections';
+    root.innerHTML = '<div class="page-card-head"><h2>Connected accounts</h2><p>Import public games and ratings by username. Connect Lichess in Play to play online.</p></div><div data-accounts></div><p class="account-status" role="status" aria-live="polite" data-status></p><div data-automatic></div>';
+    const after = target.querySelector(inAccount ? '.account-details-panel' : '#settings-board');
+    if (after) after.after(root); else target.append(root);
+    if (!inAccount) {
+      const navLink = document.createElement('a'); navLink.href = '#settings-connections'; navLink.textContent = 'Connected accounts';
+      document.querySelector('.settings-nav')?.append(navLink);
+    }
     roots.push(root);
   }
   const home = document.createElement('div');
@@ -19,16 +26,16 @@ document.addEventListener('DOMContentLoaded', () => {
   function automaticMessage() {
     if (!automatic) return 'Loading automatic-review status…';
     if (automatic.available === false) return 'The beta is paused on the server.';
-    if (!automatic.enabled) return 'Enable the beta before your next game finishes. Games already in your history when you enable it are not reviewed automatically.';
+    if (!automatic.enabled) return 'Enable automatic reviews before your next Play game finishes. Existing games are not reviewed automatically.';
     const checked = automatic.lastCheckedAt ? ` Last checked ${new Date(automatic.lastCheckedAt).toLocaleTimeString()}.` : '';
     if (automatic.status === 'retrying') return `The last attempt failed. The server will retry${automatic.nextCheckAt ? ` after ${new Date(automatic.nextCheckAt).toLocaleTimeString()}` : ' shortly'}.${checked}`;
     if (automatic.status === 'reviewing') return `The server is analyzing a completed game.${checked}`;
     if (automatic.status === 'daily_limit') return `Today's 12 review attempts have been used. Reviews resume after midnight UTC.${checked}`;
     if (automatic.nextCheckAt && automatic.nextCheckAt < Date.now() - 4 * 60000
       && (!automatic.workerLastTickAt || automatic.workerLastTickAt < Date.now() - 4 * 60000)) {
-      return `Automatic reviews are enabled, but the server has not checked recently. The backend scheduler may need attention.${checked}`;
+      return `Automatic reviews are delayed. Try again later or contact support.${checked}`;
     }
-    return `Watching for new completed games. Chess.com syncs use a 15-minute cache, and provider updates may take longer.${checked}`;
+    return `Watching your connected Lichess Play account for completed games.${checked}`;
   }
   async function request(path, body) {
     const uid = app.authState.user?.uid, version = generation;
@@ -48,7 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const name = saved[source] || '';
         return `<div class="linked-account" data-source="${source}"><div class="linked-account-head"><strong>${source === 'lichess' ? 'Lichess' : 'Chess.com'}</strong><span>${name ? 'Linked public profile' : 'Not linked'}</span></div><label class="field"><span class="field-label">Username</span><input class="input-select" data-username value="${escape(name)}" maxlength="40" autocomplete="off" placeholder="Your username"></label><div class="linked-actions"><button class="btn btn-secondary" type="button" data-action="link">${name ? 'Update link' : 'Link account'}</button>${name ? '<button class="btn btn-ghost" type="button" data-action="unlink">Unlink</button><button class="btn btn-secondary" type="button" data-action="games">Recent games</button>' : ''}</div>${account?.error ? `<p class="account-status error">${escape(account.error)}</p>` : ''}${account?.ratings ? `<div class="linked-ratings">${Object.entries(account.ratings).filter(([, rating]) => rating).map(([mode, rating]) => `<span>${escape(mode)} <strong>${rating}</strong></span>`).join('')}</div>` : ''}${account?.puzzleRating ? `<div class="linked-rating-import"><span>Puzzle ${account.ratingKind === 'peak' ? 'peak' : 'rating'} <strong>${account.puzzleRating}</strong></span><button class="btn btn-secondary btn-small" type="button" data-action="import-rating">Use for training</button></div>${account.ratingKind === 'peak' ? '<p class="linked-note">Chess.com publishes a puzzle peak, not a current puzzle rating.</p>' : ''}` : ''}</div>`;
       }).join('');
-      root.querySelector('[data-automatic]').innerHTML = `<div class="auto-review-beta"><div class="card-header"><h3>Automatic reviews <span class="beta-badge">MAX BETA</span></h3><span>${escape(automatic?.status || 'paused').replaceAll('_', ' ')}</span></div><p>New completed games appear here with a server review. Up to 12 games per UTC day, 160 half-moves per game. Provider updates may be delayed.</p><label class="checkbox-row"><input type="checkbox" data-auto-toggle ${automatic?.enabled ? 'checked' : ''} ${automatic?.eligible ? '' : 'disabled'}> Automatically review my linked games</label>${automatic?.eligible ? `<small>${automatic.usedToday || 0} / 12 review attempts used today</small>` : `<a class="btn-link" href="/plans" data-route="/plans">${automatic?.available === false ? 'Beta paused for maintenance' : 'Requires Max and a linked username'}</a>`}<div class="auto-review-list">${(automatic?.reviews || []).map(review => `<button type="button" class="import-result" data-review="${escape(review.id)}"><span>${escape(review.white)} vs ${escape(review.black)}<small>${review.source === 'chesscom' ? 'Chess.com' : 'Lichess'} · ${new Date(review.createdAt).toLocaleDateString()}</small></span><span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>`).join('') || ''}</div><p class="linked-note" role="status" data-auto-status>${escape(automaticMessage())}</p></div>`;
+      root.querySelector('[data-automatic]').innerHTML = `<div class="auto-review-beta"><div class="card-header"><h3>Automatic reviews <span class="beta-badge">MAX BETA</span></h3><span>${escape(automatic?.status || 'paused').replaceAll('_', ' ')}</span></div><p>New completed games played through your connected Lichess Play account appear here with a server review. Up to 12 games per UTC day, 160 half-moves per game.</p><label class="checkbox-row"><input type="checkbox" data-auto-toggle ${automatic?.enabled ? 'checked' : ''} ${automatic?.eligible ? '' : 'disabled'}> Review new Play games automatically</label>${automatic?.eligible ? `<small>${automatic.usedToday || 0} / 12 review attempts used today</small>` : `<a class="btn-link" href="/play" data-route="/play">${automatic?.available === false ? 'Beta paused for maintenance' : 'Requires Max and Lichess connected in Play'}</a>`}<div class="auto-review-list">${(automatic?.reviews || []).map(review => `<button type="button" class="import-result" data-review="${escape(review.id)}"><span>${escape(review.white)} vs ${escape(review.black)}<small>Lichess · ${new Date(review.createdAt).toLocaleDateString()}</small></span><span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>`).join('') || ''}</div><p class="linked-note" role="status" data-auto-status>${escape(automaticMessage())}</p></div>`;
     }
     home.hidden = !app.authState.user;
     home.innerHTML = `<span class="eyebrow">YOUR LINKED CHESS</span>${data.linked.map(entry => `<button type="button" class="btn btn-secondary btn-small" data-home-source="${entry.source}">${entry.source === 'chesscom' ? 'Chess.com' : 'Lichess'} · ${escape(entry.username)} <span aria-hidden="true">↗</span></button>`).join('')}<a class="btn-link" href="/settings" data-route="/settings">${data.linked.length ? 'Manage links' : 'Connect your accounts'}</a>`;

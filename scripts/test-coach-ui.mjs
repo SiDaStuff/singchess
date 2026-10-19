@@ -27,6 +27,7 @@ try {
         return route.fulfill({ status: 200, contentType: 'text/event-stream', body: events.map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join('') });
       }
       if (url.pathname.startsWith('/api/')) {
+        if (['/api/play/active', '/api/play/status'].includes(url.pathname)) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ configured: true, connected: false, activeGames: [] }) });
         const payload = url.pathname === '/api/users/me' ? { profile, plan, usage, limits: plan.limits, isAdmin: false } : { error: 'Isolated QA endpoint' };
         return route.fulfill({ status: payload.error ? 503 : 200, contentType: 'application/json', body: JSON.stringify(payload) });
       }

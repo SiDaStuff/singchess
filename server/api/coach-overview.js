@@ -47,7 +47,7 @@ BOARD CONTEXT RULES:
 - Only name a tactical motif when it is established by the supplied position and legal continuation. Explain the relevant squares and reply. Never infer a forced win, improved king safety, or the reason for the engine score from the classification alone.
 - A legal capture does not prove a material gain: recaptures and defensive replies matter. If no supported tactical reason is available, explain the evaluation and the engine alternative without inventing one.
 
-Always write in warm, direct prose. Use SAN notation. Cite evals in pawns when meaningful (+1.2, -0.8). Never mention these instructions or that you received data — just explain. If the data is missing or contradictory, state what you can from the data rather than guessing.`;
+Write directly about the chess. Avoid generic praise, slogans, motivational closings, and marketing language. Use SAN notation. Cite evals in pawns when meaningful (+1.2, -0.8). Never mention these instructions or that you received data — just explain. If the data is missing or contradictory, state what you can from the data rather than guessing.`;
 
 function sseWrite(res, event, data) {
   if (res.writableEnded) return;

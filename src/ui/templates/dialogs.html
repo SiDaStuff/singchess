@@ -46,9 +46,8 @@
       <div class="modal modal-import">
         <div class="modal-header">
           <div class="import-modal-title">
-            <span class="eyebrow">GAME REVIEW</span>
             <h2 id="pgn-modal-title">Import a game</h2>
-            <p>Choose a source to bring a game into your review workspace.</p>
+            <p>Paste a PGN or load public games by username.</p>
           </div>
           <button type="button" class="modal-close material-symbols-outlined" id="modal-close" aria-label="Close">close</button>
         </div>
@@ -62,7 +61,7 @@
           <div class="import-tool" id="modal-import-tool" data-import-scope="modal">
             <div class="import-source-heading">
               <span class="import-source-label">Choose a source</span>
-              <span class="import-source-note">Your game stays in this browser until you save it.</span>
+              <span class="import-source-note">Browser analysis is free.</span>
             </div>
             <div class="import-tabs" role="tablist" aria-label="Import source">
               <button type="button" class="import-tab active" data-import-tab="pgn" role="tab" aria-selected="true">
@@ -112,7 +111,7 @@
                 </div>
                 <label class="field">
                   <span class="field-label">Lichess username</span>
-                  <input id="import-username-lichess" class="input-select import-username" type="text" placeholder="hikaru" data-source="lichess">
+                  <input id="import-username-lichess" class="input-select import-username" type="text" placeholder="Lichess username" data-source="lichess">
                 </label>
                 <div class="import-row">
                   <label class="field">
@@ -140,7 +139,7 @@
                 </div>
                 <label class="field">
                   <span class="field-label">Chess.com username</span>
-                  <input id="import-username-chesscom" class="input-select import-username" type="text" placeholder="MagnusCarlsen" data-source="chesscom">
+                  <input id="import-username-chesscom" class="input-select import-username" type="text" placeholder="Chess.com username" data-source="chesscom">
                 </label>
                 <div class="import-row">
                   <label class="field">

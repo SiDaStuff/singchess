@@ -6,8 +6,12 @@ const { ServerStockfishEngine } = require('./stockfish-engine');
 const { isInteractiveReviewRunning } = require('./review-coordination');
 
 const LIMITS = Object.freeze({ gamesPerDay: 12, maxPlies: 160, maxPgnBytes: 100000, retainedReviews: 20, pollMs: 60000 });
-const eligible = profile => users.activePlan(profile).plan === 'max' && !profile?.ban?.disabled
-  && linked.SOURCES.some(source => linked.validName(profile?.savedUsernames?.[source]));
+const eligible = (profile, identity = null) => users.activePlan(profile).plan === 'max' && !profile?.ban?.disabled
+  && linked.validName(identity?.username || identity?.id);
+async function playIdentity(database, uid) {
+  const saved = (await database.ref(`playPrivate/connections/${uid}`).once('value')).val();
+  return saved?.profile && linked.validName(saved.profile.username || saved.profile.id) ? saved.profile : null;
+}
 
 async function analyze(game, { createEngine = () => new ServerStockfishEngine() } = {}) {
   const Chess = loadChess();
@@ -52,7 +56,7 @@ async function analyze(game, { createEngine = () => new ServerStockfishEngine() 
   } finally { engine.destroy(); }
 }
 
-function createWorker({ db, getProfile = users.getProfile, loadLinked = linked.loadLinked, reviewGame = analyze, now = Date.now, busy = isInteractiveReviewRunning, notify = users._pushNotification, enforceGlobal = false } = {}) {
+function createWorker({ db, getProfile = users.getProfile, getPlayIdentity = playIdentity, loadLinked = null, reviewGame = analyze, now = Date.now, busy = isInteractiveReviewRunning, notify = users._pushNotification, enforceGlobal = false } = {}) {
   let running = false;
   async function tick() {
     if (running || busy()) return;
@@ -86,14 +90,16 @@ function createWorker({ db, getProfile = users.getProfile, loadLinked = linked.l
             await ref.update({ enabled: false, status: 'disabled', nextPollAt: Number.MAX_SAFE_INTEGER });
             continue;
           }
-          if (!eligible(profile)) { await ref.update({ enabled: false, status: 'ineligible', nextPollAt: Number.MAX_SAFE_INTEGER }); continue; }
-          const data = await loadLinked({ uid, _profile: profile }, { database });
-          const games = data.linked.flatMap(entry => entry.games || []).filter(linked.complete);
-          const sig = linked.signature(profile.savedUsernames);
+          const identity = await getPlayIdentity(database, uid);
+          if (!eligible(profile, identity)) { await ref.update({ enabled: false, status: 'ineligible', nextPollAt: Number.MAX_SAFE_INTEGER }); continue; }
+          const sourceAccount = loadLinked
+            ? { games: (await loadLinked({ uid, _profile: profile }, { database, identity })).linked.flatMap(entry => entry.games || []) }
+            : await linked.fetchSource('lichess', identity.username || identity.id);
+          const games = (sourceAccount.games || []).filter(linked.complete);
+          const sig = `play:${String(identity.id || identity.username).toLowerCase()}`;
           // Enabling or changing links seeds the cursor, avoiding a surprise
           // backfill of historical games and repeated relink abuse.
           if (account.signature !== sig || !account.initialized) {
-            if (!data.linked.some(entry => !entry.error)) throw new Error('Provider sync is unavailable.');
             await ref.update({ signature: sig, initialized: true, seen: games.map(linked.gameKey), status: 'watching', nextPollAt: now() + LIMITS.pollMs });
             continue;
           }
@@ -114,7 +120,8 @@ function createWorker({ db, getProfile = users.getProfile, loadLinked = linked.l
             await ref.update({ day, count, status: 'reviewing', nextPollAt: now() + LIMITS.pollMs });
             const review = await reviewGame(game);
             const current = await getProfile(uid);
-            if (!eligible(current) || linked.signature(current.savedUsernames) !== sig || !(await ref.once('value')).val()?.enabled) break;
+            const currentIdentity = await getPlayIdentity(database, uid);
+            if (!eligible(current, currentIdentity) || `play:${String(currentIdentity?.id || currentIdentity?.username || '').toLowerCase()}` !== sig || !(await ref.once('value')).val()?.enabled) break;
             await database.ref(`maxAutoReviewPrivate/reviews/${uid}/${id}`).set({ id, source: game.source, username: game.username, white: game.white, black: game.black, pgn: game.pgn, createdAt: now(), review });
             seen.add(id);
             await ref.update({ seen: [...seen].slice(-100) });
@@ -144,4 +151,4 @@ function startScheduler() {
   timer.unref();
   return () => clearInterval(timer);
 }
-module.exports = { LIMITS, eligible, analyze, createWorker, startScheduler };
+module.exports = { LIMITS, eligible, playIdentity, analyze, createWorker, startScheduler };

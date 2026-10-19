@@ -27,7 +27,7 @@ try {
       const url = new URL(req.url, 'http://localhost');
       const json = payload => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(payload)); };
       const stream = (set, event) => { res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' }); set.add(res); res.on('close', () => set.delete(res)); res.write('data: ' + JSON.stringify(event) + '\n\n'); };
-      if (url.pathname === '/api/play/status' || url.pathname === '/api/play/active') return json({ configured: true, connected, profile, activeGames: activeGames(), recentGames: [] });
+      if (url.pathname === '/api/play/status' || url.pathname === '/api/play/active') return json({ configured: true, connected, profile, reviewStats: { gamesReviewed: 3, movesReviewed: 120, brilliant: 4, great: 7, best: 36 }, activeGames: activeGames(), recentGames: [] });
       if (url.pathname === '/api/play/events') return stream(eventClients, { type: 'connection', status: 'connected' });
       if (url.pathname === '/api/play/seek') { seeks++; assert.equal(body.rated, false); return stream(new Set(), { type: 'search', status: 'searching' }); }
       if (url.pathname === '/api/play/challenge') { assert.equal(body.time, 3); assert.equal(body.username, 'Friend'); return json({ challenge: { id: 'chal1234' } }); }
@@ -42,7 +42,7 @@ try {
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); const fixture = `http://127.0.0.1:${server.address().port}`;
     const context = await browser.newContext({ viewport: { width, height: 960 }, reducedMotion: 'reduce' });
-    const errors = [], page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
+    const errors = [], page = await context.newPage(); page.on('pageerror', error => errors.push(error.message)); page.on('dialog', dialog => dialog.accept());
     await context.route('**/*', async route => {
       const url = new URL(route.request().url());
       if (url.pathname.startsWith('/api/play/')) return route.continue({ url: fixture + url.pathname + url.search });
@@ -58,6 +58,7 @@ try {
       await page.evaluate(() => { const app = window.app; app.authState.user = { uid: 'qa-play', getIdToken: async () => 'isolated' }; app.authState.initialized = true; window.dispatchEvent(new CustomEvent('play:auth')); });
       await page.waitForFunction(() => window.Play.connected && window.Play.eventReady);
       check(await page.locator('[data-play="account"]').innerText().then(text => text.includes('Alice') && text.includes('1600')), `${width}: actual account and ratings render`);
+      check(await page.locator('[data-play="account"]').innerText().then(text => text.includes('4\nbrilliant') && text.includes('120\nreviewed moves')), `${width}: connected account shows reviewed move statistics`);
       await page.locator('[data-action="settings"]').click(); await page.locator('[data-preference="coordinates"]').uncheck(); await page.locator('[data-action="close-settings"]').click();
       check(await page.evaluate(() => !window.Play.board.preferences.coordinates && !JSON.parse(localStorage.getItem('sidastuff.playPreferences')).coordinates), `${width}: settings persist`);
       await page.locator('[data-control="3+2"]').click(); await page.locator('[data-play="start"]').click();

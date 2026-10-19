@@ -33,6 +33,11 @@
     "test:ui:annotations": "node scripts/test-board-annotations.mjs",
     "test:play": "node scripts/test-play-state.mjs && node scripts/test-play-api.cjs && node scripts/test-play-review.mjs && node scripts/test-play-board.mjs",
     "test:ui:play": "node scripts/test-play-ui.mjs",
+    "test:qol": "node scripts/test-qol-state.mjs && node scripts/test-puzzle-access.cjs",
+    "test:ui:qol": "node scripts/test-qol-ui.mjs",
+    "test:journey": "node scripts/test-journey-state.mjs",
+    "test:ui:journey": "node scripts/test-journey-ui.mjs",
+    "test:ui:design": "node scripts/test-design-ui.mjs",
     "db:recover": "node scripts/database.cjs recover"
   },
   "dependencies": {

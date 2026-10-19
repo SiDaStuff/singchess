@@ -38,6 +38,7 @@
   function setSidebarCollapsed(collapsed) {
     el['coach-chat-card']?.classList.toggle('sidebar-collapsed', collapsed);
     el['btn-coach-sidebar-toggle']?.setAttribute('aria-expanded', String(!collapsed));
+    try { localStorage.setItem('sidastuff.coachSidebarCollapsed', String(collapsed)); } catch {}
   }
 
   // ── localStorage (scoped per uid) ────────────────────────────────────
@@ -144,9 +145,8 @@
       const empty = document.createElement('div');
       empty.className = 'coach-empty';
       empty.innerHTML = `
-        <span class="material-symbols-outlined coach-empty-icon">school</span>
-        <h3>Ask the Coach</h3>
-        <p>Get help with openings, positions (paste a FEN), a game (paste a PGN to open the review system), or a study plan. The Coach verifies its answers with Stockfish and web search.</p>
+        <h3>Ask a chess question</h3>
+        <p>Paste a position or game, or ask about an opening.</p>
         <div class="coach-empty-suggest"></div>`;
       const suggest = empty.querySelector('.coach-empty-suggest');
       const ideas = ['Explain the Italian Game', 'What should I study as a 900 player?', 'Is 1.e4 e5 2.Nf3 Nc6 3.Bc4 good for White?'];
@@ -182,7 +182,7 @@
   }
 
   // Markdown -> sanitized HTML. Falls back to escaped text if libs missing.
-  function renderMarkdown(md) {
+  function renderMarkdown(md, { interactive = true } = {}) {
     const text = String(md || '');
     // Extract ```board FEN``` blocks into placeholders so marked doesn't escape
     // the board HTML. We swap them back in AFTER marked + DOMPurify run.
@@ -208,6 +208,31 @@
     }
     // Swap board placeholders back in (they're already-sanitized SVG HTML).
     html = html.replace(/@@BOARD_(\d+)@@/g, (_, i) => boards[Number(i)] || '');
+    // Turn legal SAN moves into keyboard-accessible board previews. Build DOM
+    // nodes after sanitizing Markdown so user text cannot inject attributes.
+    const positionFen = activeChat()?.positionContext?.fen || state.app?.chess?.fen();
+    if (interactive && positionFen && window.Chess) {
+      let sequence = new window.Chess(positionFen);
+      const container = document.createElement('div'); container.innerHTML = html;
+      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT), nodes = [];
+      while (walker.nextNode()) if (!walker.currentNode.parentElement.closest('button, a, code, pre, .chess-board')) nodes.push(walker.currentNode);
+      for (const node of nodes) {
+        const expression = /\b(?:O-O(?:-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?)[+#]?\b/g;
+        const fragment = document.createDocumentFragment(); let cursor = 0, matched = false;
+        for (const match of node.textContent.matchAll(expression)) {
+          let chess = new window.Chess(sequence.fen()), move;
+          try { move = chess.move(match[0], { sloppy: true }); } catch {}
+          if (!move) { chess = new window.Chess(positionFen); try { move = chess.move(match[0], { sloppy: true }); } catch {} }
+          if (!move) continue;
+          sequence = chess;
+          fragment.append(document.createTextNode(node.textContent.slice(cursor, match.index)));
+          const control = document.createElement('button'); control.type = 'button'; control.className = 'explanation-reference'; control.textContent = match[0]; control.dataset.coachPreviewFen = chess.fen(); control.title = `Show ${match[0]} on board`; fragment.append(control);
+          cursor = match.index + match[0].length; matched = true;
+        }
+        if (matched) { fragment.append(document.createTextNode(node.textContent.slice(cursor))); node.replaceWith(fragment); }
+      }
+      html = container.innerHTML;
+    }
     return html;
   }
 
@@ -371,7 +396,7 @@
         headers: await state.app._authHeaders({ 'Content-Type': 'application/json', Accept: 'text/event-stream' }),
         signal: controller.signal,
         cache: 'no-store',
-        body: JSON.stringify({ message: text, history, reviewContext: chat.reviewContext || undefined }),
+        body: JSON.stringify({ message: text, history, reviewContext: chat.positionContext || chat.reviewContext || undefined }),
       });
       if (!response.ok) {
         let msg = `Coach error (${response.status}).`;
@@ -388,7 +413,7 @@
         pendingRender = setTimeout(() => {
           pendingRender = null;
           if (assistantEl) {
-            assistantEl.innerHTML = renderMarkdown(assistantText);
+            assistantEl.innerHTML = renderMarkdown(assistantText, { interactive: false });
             scrollMessages();
           }
         }, 60);
@@ -1148,7 +1173,7 @@
       if (locked) ta.placeholder = 'This conversation has been ended.';
       else if (reviewRunning) ta.placeholder = 'A game review is running. Wait for it to finish.';
       else if (state.streaming) ta.placeholder = 'Waiting for the coach to finish…';
-      else ta.placeholder = 'Ask the coach anything about chess…';
+      else ta.placeholder = 'Ask a chess question…';
     }
     if (send) send.disabled = !signedIn || locked || state.streaming || reviewRunning;
     // Toggle a notice bubble if needed.
@@ -1232,10 +1257,15 @@
     if (!el['coach-chat-card']) resolveEls(); // resolve once
     if (!state.mounted) { bindEvents(); state.mounted = true; }
     // Collapse sidebar on mobile by default
-    if (window.innerWidth <= 720) setSidebarCollapsed(true);
+    try { const saved = localStorage.getItem('sidastuff.coachSidebarCollapsed'); setSidebarCollapsed(saved === null ? window.innerWidth <= 720 : saved === 'true'); } catch { setSidebarCollapsed(window.innerWidth <= 720); }
     renderGate();
     const uid = app.authState && app.authState.user && app.authState.user.uid;
     loadForUid(uid);
+    if (app._pendingCoachPosition && uid) {
+      const context = app._pendingCoachPosition; app._pendingCoachPosition = null;
+      createChat(); const chat = activeChat(); chat.title = 'Position discussion'; chat.positionContext = context; saveChats(); renderSidebar();
+      el['coach-chat-textarea'].value = 'Explain this position and the main plans.'; autoGrow();
+    }
     // Hand-off from the review page: if a seed is stashed, open a new chat
     // preloaded with the reviewed game's context + the generated overview.
     if (app._pendingCoachSeed) {
@@ -1244,7 +1274,7 @@
       try { startWithContext(seed); } catch (_) {}
     }
     // Auto-scroll the chat section into view.
-    setTimeout(() => { el['coach-chat-card']?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100);
+    // The route controller restores the user's scroll position.
   }
 
   // Called by app.js when auth resolves (post-reload, the uid arrives here).
@@ -1255,5 +1285,19 @@
     loadForUid(uid);
   }
 
+  document.addEventListener('click', async event => {
+    const control = event.target.closest('[data-coach-preview-fen]'); if (!control) return;
+    if (window.PlayFairPlay && !(await window.PlayFairPlay.verify())) return;
+    const position = new window.Chess(); if (!position.load(control.dataset.coachPreviewFen)) return;
+    let dialog = document.getElementById('coach-position-preview');
+    if (dialog) { dialog.board?.destroy(); dialog.remove(); }
+    dialog = document.createElement('dialog'); dialog.id = 'coach-position-preview'; dialog.className = 'qol-dialog'; dialog.setAttribute('aria-label', 'Coach move preview');
+    const wrapper = document.createElement('div'); wrapper.className = 'board-wrapper';
+    const surface = document.createElement('div'); surface.className = 'chess-board'; wrapper.append(surface);
+    const close = document.createElement('button'); close.type = 'button'; close.className = 'btn btn-secondary'; close.textContent = 'Close'; close.addEventListener('click', () => dialog.close());
+    dialog.append(wrapper, close); document.body.append(dialog); dialog.showModal();
+    dialog.board = new window.ChessBoard(surface); dialog.board.setChessInstance(position); dialog.board.setPositionFromFen(position.fen()); close.focus();
+    dialog.addEventListener('close', () => { dialog.board.destroy(); dialog.remove(); control.focus(); }, { once: true });
+  });
   window.CoachChat = { mount, onAuth, renderGate, send, stop };
 })();

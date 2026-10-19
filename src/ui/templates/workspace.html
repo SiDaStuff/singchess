@@ -1,5 +1,5 @@
     <main class="main-content" id="workspace" aria-label="Chess workspace">
-<div class="workspace-heading"><div><span class="eyebrow">YOUR CHESS WORKSPACE</span><h1 id="workspace-title">Game review</h1><p id="workspace-description">Explore the position. Understand every move.</p></div><span class="workspace-shortcut"><kbd>&larr;</kbd><kbd>&rarr;</kbd> Navigate moves</span></div>
+<div class="workspace-heading"><div><h1 id="workspace-title">Game review</h1><p id="workspace-description"></p></div><span class="workspace-shortcut"><kbd>&larr;</kbd><kbd>&rarr;</kbd> Navigate moves</span></div>
       <div class="board-section">
         <div class="player-info player-top" id="player-top">
           <span class="player-identity">
@@ -110,9 +110,9 @@
                 <span class="insight-class" id="insight-gate-class"></span>
                 <span class="insight-gate-lock-icon">🔒</span>
               </div>
-              <p class="insight-gate-copy">Create a free account to see move-by-move coaching, including loss, threats, and engine lines.</p>
+              <p class="insight-gate-copy">Create a free account to read the move explanation.</p>
               <div class="insight-gate-actions">
-                <a class="btn btn-primary btn-small" href="/signup?src=review" data-route="/signup">Create account</a>
+                <a class="btn btn-primary btn-small" href="/signup?src=review&amp;quick=1" data-route="/signup">Create free account</a>
               </div>
             </div>
             <div class="insight-content" id="insight-content" style="display:none">
@@ -204,8 +204,8 @@
           <div class="boost-hero">
             <div>
               <span class="boost-pill">Boost</span>
-              <h2>More server power for review and anticheat</h2>
-              <p>Boost removes daily server limits, adds stronger Stockfish 18 server review, and adds the Boost profile theme.</p>
+              <h2>Boost</h2>
+              <p>Unlimited server reviews and a weekly fair play allowance.</p>
             </div>
             <button id="btn-boost-account" class="btn btn-primary" type="button">
               <span class="btn-content">
@@ -240,7 +240,7 @@
         <div class="move-list-container card panel-wide" id="move-list-container" role="tabpanel" tabindex="0" aria-labelledby="analysis-tab-moves">
           <h3>Moves</h3>
           <div class="move-list" id="move-list">
-            <div class="move-list-empty">Your moves will appear here. Import a game or make your first move on the board.</div>
+            <div class="move-list-empty">Import a game or make a move.</div>
           </div>
         </div>
 
@@ -453,7 +453,7 @@
                 <div class="puzzle-level-embed-preview" id="puzzle-level-embed-preview" aria-label="Sample position"></div>
                 <div class="puzzle-level-embed-meta">
                   <strong id="puzzle-level-embed-title">Try it</strong>
-                  <span id="puzzle-level-embed-sub">A short puzzle at this level — give it a go before you commit.</span>
+                  <span id="puzzle-level-embed-sub">Sample puzzle at this level.</span>
                   <button id="btn-puzzle-level-try" class="btn btn-secondary" type="button">
                     <span class="btn-content">
                       <span class="material-symbols-outlined btn-symbol">play_arrow</span>

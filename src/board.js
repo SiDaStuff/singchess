@@ -47,6 +47,7 @@ class ChessBoard {
     this._setupAnnotations();
     this._setupDrag();
 	    window.addEventListener('resize', this._onResize, { passive: true });
+	    ChessBoard.instances ||= new Set(); ChessBoard.instances.add(this);
 	  }
 
   _addDestroyableListener(target, type, handler, options) {
@@ -69,6 +70,7 @@ class ChessBoard {
   }
 
   destroy() {
+    ChessBoard.instances?.delete(this);
     this.cancelDrag?.();
     this._cancelSlide();
     if (this._onResize) {
@@ -138,6 +140,9 @@ class ChessBoard {
 
   // Set position from FEN
 	  setPositionFromFen(fen) {
+        if (this._displayedFen && this._displayedFen !== fen && window.QualityOfLife?.preferences().clearArrows !== false) {
+          this.clearUserArrows(); this.clearInvertedSquares();
+        }
         if (this._slideElement) {
           this._cancelSlide();
           this._updatePieces();
@@ -310,13 +315,13 @@ class ChessBoard {
         if (col === 0) {
           // Show rank on leftmost squares (but it's row 0 visually = top)
         }
-        if (this.flipped ? row === 0 : row === 7) {
+        if (row === 7) {
           const fileLabel = document.createElement('span');
           fileLabel.className = 'coord-label coord-file';
           fileLabel.textContent = file;
           div.appendChild(fileLabel);
         }
-        if (this.flipped ? col === 7 : col === 0) {
+        if (col === 0) {
           const rankLabel = document.createElement('span');
           rankLabel.className = 'coord-label coord-rank';
           rankLabel.textContent = rank;
@@ -662,7 +667,7 @@ class ChessBoard {
 	      this._suppressNextClick = false;
 	      return;
 	    }
-	    this.clearInvertedSquares();
+	    if (window.QualityOfLife?.preferences().clearArrows !== false) this.clearInvertedSquares();
 	    this._selectSquare(sq);
 	  }
 
@@ -1072,7 +1077,6 @@ class ChessBoard {
     this._addDestroyableListener(this.container,'pointerdown', (e) => {
       if (!this.interactive) return;
       this._suppressNextClick = false;
-      if (this._prefersTap && e.pointerType !== 'mouse') return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       const sqEl = e.target.closest('.square');
       if (!sqEl) return;
@@ -1139,7 +1143,7 @@ class ChessBoard {
         return;
       }
 
-	      if (event.button === 0) {
+	      if (event.button === 0 && window.QualityOfLife?.preferences().clearArrows !== false) {
 	        this.clearUserArrows();
 	        this.clearInvertedSquares();
 	      }

@@ -64,9 +64,11 @@ export class PlayClockPair {
       const element = this.elements[color];
       if (element) {
         const text = formatPlayClock(values[color]);
-        if (element.textContent !== text) element.textContent = text;
+        const display = this.tenths === false ? text.split('.')[0] : text;
+        if (element.textContent !== display) element.textContent = display;
         element.classList.toggle('is-running', values.running === color);
         element.classList.toggle('is-low', values[color] <= this.lowTimeMs);
+        element.classList.toggle('is-urgent', values[color] < 30000 && values.running === color);
         element.dataset.running = String(values.running === color);
         element.setAttribute('aria-label', `${color === 'white' ? 'White' : 'Black'}: ${text}${values.running === color ? ', running' : ''}`);
       }

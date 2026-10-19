@@ -62,9 +62,14 @@ export function createFairPlayGuard(host) {
     pending = (async () => {
       try {
         const token = await user.getIdToken();
-        const response = await host.apiFetch('/api/play/active', {
-          headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', timeoutMs: 10000,
-        });
+        let response;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          response = await host.apiFetch('/api/play/active', {
+            headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', timeoutMs: 10000,
+          });
+          if (response.ok || attempt) break;
+          await new Promise(resolve => host.setTimeout(resolve, 400));
+        }
         if (!response.ok) throw new Error('Play status unavailable');
         const status = await response.json();
         if (!Array.isArray(status.activeGames)) throw new Error('Invalid Play status');
@@ -122,7 +127,7 @@ export function createFairPlayGuard(host) {
     if (host.document.visibilityState === 'visible') recheck();
   });
   const timer = host.setInterval?.(() => {
-    if (connected && host.document?.visibilityState !== 'hidden') recheck();
+    if ((connected || !verified) && host.document?.visibilityState !== 'hidden') recheck();
   }, 15000);
   return { isBlocked, snapshot, setActiveGames, observeStatus, verify, assertCanAnalyze,
     onAuth, attachApp, registerEngine, destroy() { host.clearInterval?.(timer); engines.clear(); } };

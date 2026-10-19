@@ -35,8 +35,10 @@ class MemoryDB {
 
 async function main() {
   const profile = { subscription: { plan: 'max', expiresAt: Date.now() + 86400000 }, savedUsernames: { lichess: 'qa-player' } };
-  assert.equal(eligible(profile), true);
-  for (const invalid of [{ ...profile, subscription: { plan: 'boost', expiresAt: Date.now() + 100000 } }, { ...profile, savedUsernames: {} }, { ...profile, ban: { disabled: true } }, { ...profile, subscription: { plan: 'max', expiresAt: 1 } }]) assert.equal(eligible(invalid), false);
+  const playIdentity = { id: 'qa-player', username: 'qa-player' };
+  assert.equal(eligible(profile, playIdentity), true);
+  assert.equal(eligible(profile, null), false, 'a public username is not a Play connection');
+  for (const invalid of [{ ...profile, subscription: { plan: 'boost', expiresAt: Date.now() + 100000 } }, { ...profile, ban: { disabled: true } }, { ...profile, subscription: { plan: 'max', expiresAt: 1 } }]) assert.equal(eligible(invalid, playIdentity), false);
   const game = { source: 'lichess', username: 'qa-player', white: 'qa-player', black: 'opponent', headers: { Result: '1-0', Site: 'https://lichess.org/abc12345' }, pgn: '[Result "1-0"]\n\n1. e4 e5 2. Nf3 Nc6 1-0' };
   // Run the REAL analyzer through the background adapter. Empty MultiPV
   // responses exercise its single-PV fallback (also used at terminal boards).
@@ -60,7 +62,7 @@ async function main() {
   assert.equal(gameKey(game), gameKey({ ...game, pgn: game.pgn + ' ', username: 'QA-PLAYER' }));
   const db = new MemoryDB(); let time = Date.now(), calls = 0, reviewed = 0, notices = 0;
   let games = [game];
-  const worker = createWorker({ db, now: () => time, getProfile: async () => profile, loadLinked: async () => ({ linked: [{ games }] }), reviewGame: async () => { reviewed++; return { results: [], whiteAccuracy: 95 }; }, notify: async () => { notices++; } });
+  const worker = createWorker({ db, now: () => time, getProfile: async () => profile, getPlayIdentity: async () => playIdentity, loadLinked: async () => ({ linked: [{ games }] }), reviewGame: async () => { reviewed++; return { results: [], whiteAccuracy: 95 }; }, notify: async () => { notices++; } });
   await db.ref('maxAutoReviewPrivate/accounts/qa').set({ enabled: true, nextPollAt: 0 });
   await worker.tick(); assert.equal(reviewed, 0, 'enrollment seeds history');
   assert.equal((await db.ref('maxAutoReviewPrivate/worker').once('value')).val().lastTickAt, time);
@@ -97,15 +99,15 @@ async function main() {
   const chesscom = await fetchSource('chesscom', 'qa', fetcher);
   assert.equal(chesscom.puzzleRating, 2200); assert.equal(chesscom.ratingKind, 'peak'); assert.equal(peak, 1, 'provider calls are serial');
   const emptyDb = new MemoryDB(); let firstGames = [], firstReviews = 0;
-  const emptyWorker = createWorker({ db: emptyDb, now: () => time, getProfile: async () => profile, loadLinked: async () => ({ linked: [{ games: firstGames }] }), reviewGame: async () => { firstReviews++; return { results: [] }; }, notify: async () => {} });
+  const emptyWorker = createWorker({ db: emptyDb, now: () => time, getProfile: async () => profile, getPlayIdentity: async () => playIdentity, loadLinked: async () => ({ linked: [{ games: firstGames }] }), reviewGame: async () => { firstReviews++; return { results: [] }; }, notify: async () => {} });
   await emptyDb.ref('maxAutoReviewPrivate/accounts/first').set({ enabled: true, nextPollAt: 0 });
   await emptyWorker.tick();
   firstGames = [game]; time += 60001; await emptyWorker.tick();
   assert.equal(firstReviews, 1, 'empty initial history must not skip the first new game');
 
   const retryDb = new MemoryDB(); let attempts = 0;
-  await retryDb.ref('maxAutoReviewPrivate/accounts/retry').set({ enabled: true, initialized: true, signature: require('../server/api/_lib/linked-chess-service').signature(profile.savedUsernames), seen: [], nextPollAt: 0 });
-  const retryWorker = createWorker({ db: retryDb, now: () => time, getProfile: async () => profile, loadLinked: async () => ({ linked: [{ games: [game] }] }), reviewGame: async () => { if (++attempts === 1) throw new Error('Injected engine failure'); return { results: [] }; }, notify: async () => {} });
+  await retryDb.ref('maxAutoReviewPrivate/accounts/retry').set({ enabled: true, initialized: true, signature: 'play:qa-player', seen: [], nextPollAt: 0 });
+  const retryWorker = createWorker({ db: retryDb, now: () => time, getProfile: async () => profile, getPlayIdentity: async () => playIdentity, loadLinked: async () => ({ linked: [{ games: [game] }] }), reviewGame: async () => { if (++attempts === 1) throw new Error('Injected engine failure'); return { results: [] }; }, notify: async () => {} });
   await retryWorker.tick();
   const retryState = (await retryDb.ref('maxAutoReviewPrivate/accounts/retry').once('value')).val();
   assert.equal(retryState.status, 'retrying'); assert.equal(retryState.count, 1);
@@ -120,12 +122,14 @@ async function main() {
   const service = require('../server/api/_lib/linked-chess-service');
   // Opt-in API fixtures must explicitly enable the admin-controlled beta.
   await emptyDb.ref('adminControls/features').set({ reviewBackground: true });
-  const originals = { requireUser: users.requireUser, initAdmin: users.initAdmin, patchProfile: users.patchProfile, loadLinked: service.loadLinked };
+  await emptyDb.ref('playPrivate/connections/api-qa').set({ profile: playIdentity });
+  const originals = { requireUser: users.requireUser, initAdmin: users.initAdmin, patchProfile: users.patchProfile, loadLinked: service.loadLinked, fetchSource: service.fetchSource };
   let currentProfile = profile, patched;
   users.requireUser = async event => { if (!event.headers?.authorization) throw Object.assign(new Error('Login required.'), { statusCode: 401 }); return { uid: 'api-qa', _profile: currentProfile }; };
   users.initAdmin = () => ({ db: emptyDb });
   users.patchProfile = async (uid, update) => { patched = { uid, update }; };
   service.loadLinked = async () => ({ linked: [{ source: 'lichess', username: 'qa-player', puzzleRating: 1780, ratingKind: 'current', latest: game, games: [game] }] });
+  service.fetchSource = async () => ({ source: 'lichess', username: 'qa-player', games: [game] });
   const autoApi = require('../server/api/max-auto-review');
   const linkApi = require('../server/api/linked-chess');
   const event = body => ({ httpMethod: 'POST', headers: { authorization: 'Bearer isolated' }, body: JSON.stringify(body) });
@@ -151,6 +155,7 @@ async function main() {
   assert.equal(context.linkedAccounts[0].puzzleRating, 1780);
   Object.assign(users, { requireUser: originals.requireUser, initAdmin: originals.initAdmin, patchProfile: originals.patchProfile });
   service.loadLinked = originals.loadLinked;
+  service.fetchSource = originals.fetchSource;
   if (disabledSetting === undefined) delete process.env.MAX_AUTO_REVIEW_ENABLED; else process.env.MAX_AUTO_REVIEW_ENABLED = disabledSetting;
   console.log('PASS Max gating, cursor, completed-only games, deduplication, quota, shared lease, bans, provider caching and rating semantics');
 }

@@ -1,7 +1,7 @@
 /* Route layouts. All colors come from the shared Sing Chess design system. */
-.page-card-head { display: grid; gap: 12px; margin-bottom: 30px; }
-.page-card-head h1 { margin: 0; font-size: clamp(1.8rem, 3vw, 2.5rem); line-height: 1.15; letter-spacing: -.045em; }
-.page-card-head p { max-width: 65ch; margin: 0; color: var(--text-secondary); font-size: .93rem; line-height: 1.7; }
+.page-card-head { display: grid; gap: 8px; margin-bottom: 24px; }
+.page-card-head h1 { margin: 0; font-size: clamp(26px, 2.5vw, 32px); line-height: 1.25; letter-spacing: -.025em; }
+.page-card-head p { max-width: 65ch; margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
 .page-panel h1[tabindex="-1"]:focus { outline: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .page-section-label { margin: 28px 0 14px; color: var(--text-secondary); font-size: .78rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
@@ -10,16 +10,14 @@
 .account-status, .profile-share-status { color: var(--text-secondary); font-size: .82rem; line-height: 1.6; margin: 12px 0 0; overflow-wrap: anywhere; }
 .account-status:empty, .profile-share-status:empty { display: none; }
 .account-status.success, .profile-share-status.success { color: var(--accent); }
-.account-status.error, .profile-share-status.error { color: var(--clr-blunder, #ec8278); }
+.account-status.error, .profile-share-status.error { color: var(--text-danger); }
 .account-loading, .profile-loading { padding: 50px 16px; text-align: center; color: var(--text-secondary); }
 .account-loading::before, .profile-loading::before { content: ''; display: block; width: 24px; height: 24px; margin: 0 auto 18px; border: 2px solid var(--border-color); border-top-color: var(--accent); border-radius: 50%; animation: pages-spin .9s linear infinite; }
 @keyframes pages-spin { to { transform: rotate(360deg); } }
 
 /* Authentication: focused forms and a quiet, chess-first welcome. */
-.auth-page { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .96fr); align-items: center; gap: clamp(32px, 6vw, 88px); width: min(1040px, 100%); margin-inline: auto; padding-block: 28px; }
-.auth-intro .auth-story-heading, .contact-intro .contact-story-heading { margin: 16px 0 20px; color: var(--text-primary); font-size: clamp(2.15rem, 4vw, 3.7rem); font-weight: 600; letter-spacing: -.055em; line-height: 1.1; }
-.auth-intro > p:not(.auth-story-heading), .contact-intro > p:not(.contact-story-heading) { color: var(--text-secondary); line-height: 1.8; font-size: .95rem; max-width: 39ch; }
-.auth-card { padding: clamp(24px, 3vw, 40px); width: 100%; }
+.auth-page { width: min(520px, 100%); margin-inline: auto; }
+.auth-card { padding: 24px; width: 100%; }
 .auth-card .page-card-head h1 { font-size: 1.8rem; }
 .auth-card .field + .field { margin-top: 18px; }
 .auth-actions { display: grid; gap: 12px; margin-top: 25px; }
@@ -32,12 +30,6 @@
 .btn-google:hover { border-color: var(--text-muted); }
 .btn-google-icon { flex: 0 0 auto; }
 .btn-content { display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
-.auth-scene { display: flex; align-items: flex-end; gap: 24px; margin-top: 36px; }
-.auth-scene-board { display: grid; grid-template-columns: repeat(4, 1fr); width: 224px; aspect-ratio: 1; flex: 0 0 auto; overflow: hidden; border-radius: 8px; opacity: .9; }
-.auth-scene-board > span { display: grid; place-items: center; background: #b2baaa; aspect-ratio: 1; }
-.auth-scene-board > span:nth-child(8n + 2), .auth-scene-board > span:nth-child(8n + 4), .auth-scene-board > span:nth-child(8n + 5), .auth-scene-board > span:nth-child(8n + 7) { background: #52664e; }
-.auth-scene-board img { width: 85%; height: 85%; }
-.auth-scene-caption { color: var(--text-muted); font-size: .74rem; line-height: 1.7; max-width: 100px; padding-bottom: 4px; }
 #page-auth .standalone-actions { gap: 12px; }
 #page-auth .standalone-actions .btn:first-child { width: 100%; }
 #page-auth .standalone-actions .btn:not(:first-child) { flex: 1; font-size: .8rem; }
@@ -129,8 +121,8 @@
 #settings-saved-data > .settings-section-sub:not(:first-of-type) { margin-top: 24px; }
 
 /* Account and player profiles. */
-.account-page-card, .profile-page-card { width: min(920px, 100%); margin-inline: auto; padding: clamp(24px, 4vw, 42px); }
-.account-hero { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 22px; padding: 24px; background: var(--bg-page); border: 1px solid var(--border-color); border-radius: 10px; }
+.account-page-card, .profile-page-card { width: min(920px, 100%); margin-inline: auto; padding: 24px; }
+.account-hero { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px; padding-block: 16px; border-block: 1px solid var(--border-soft); }
 .account-hero h2 { margin: 0; }
 .account-hero p { color: var(--text-secondary); font-size: .85rem; margin: 0; }
 .account-profile-row { display: flex; align-items: center; gap: 16px; min-width: 0; }
@@ -139,9 +131,9 @@
 .account-profile-row strong { font-size: 1.08rem; overflow-wrap: anywhere; }
 .account-profile-row span { color: var(--text-secondary); font-size: .8rem; overflow-wrap: anywhere; }
 .account-grid, .profile-stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.standalone-stat { display: flex; flex-direction: column; justify-content: space-between; gap: 18px; padding: 21px 18px; min-width: 0; min-height: 110px; border: 1px solid var(--border-color); background: var(--bg-page); border-radius: 10px; }
+.standalone-stat { display: flex; flex-direction: column; justify-content: space-between; gap: 12px; padding: 12px 0; min-width: 0; min-height: 80px; border-bottom: 1px solid var(--border-soft); }
 .standalone-stat > span { font-size: .77rem; color: var(--text-secondary); }
-.standalone-stat > strong { font-size: 1.65rem; line-height: 1; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.standalone-stat > strong { font-size: 24px; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .usage-section { display: grid; gap: 22px; margin-top: 30px; }
 .usage-bar-top { display: flex; justify-content: space-between; gap: 15px; font-size: .79rem; margin-bottom: 9px; color: var(--text-secondary); }
 .usage-bar-top strong { color: var(--text-primary); font-size: .76rem; text-align: right; font-variant-numeric: tabular-nums; }
@@ -192,7 +184,7 @@
 
 /* Plans have a clear comparison, with one restrained accent. */
 .plans-page-card { position: relative; width: min(1080px, 100%); margin-inline: auto; padding: clamp(24px, 3.5vw, 42px); }
-.plans-page-head { text-align: center; justify-items: center; margin-bottom: 36px; }
+.plans-page-head { margin-bottom: 24px; }
 .plans-page-head p { max-width: 55ch; }
 .boost-auth-required { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; padding: 18px 22px; margin-bottom: 32px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-page); }
 .boost-auth-required h2 { margin: 0; font-size: .95rem; }
@@ -201,8 +193,8 @@
 .boost-auth-required .btn { min-height: 36px; font-size: .78rem; }
 .boost-pricing-section > .section-subtitle { margin: 0 0 24px; color: var(--text-secondary); font-size: .84rem; text-align: center; }
 .plan-tiers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
-.plan-tier { position: relative; display: flex; flex-direction: column; gap: 0; padding: 30px 24px 24px; border: 1px solid var(--border-color); background: var(--bg-page); border-radius: 12px; }
-.plan-tier.featured { border-color: var(--accent); background: var(--surface-selected); }
+.plan-tier { position: relative; display: flex; flex-direction: column; gap: 0; padding: 22px 18px; border: 1px solid var(--border-color); background: var(--bg-panel); border-radius: var(--card-radius); }
+.plan-tier.featured { border-color: var(--accent); }
 .plan-tier-name { font-size: 1.1rem; font-weight: 600; letter-spacing: -.025em; }
 .plan-tier-price { display: flex; align-items: baseline; gap: 5px; margin: 22px 0 28px; }
 .plan-tier-price .amount { font-size: 2.8rem; font-weight: 500; letter-spacing: -.07em; line-height: 1; }
@@ -223,15 +215,10 @@
 .boost-status-card p { margin: 7px 0 0; color: var(--text-secondary); font-size: .8rem; line-height: 1.6; }
 .boost-footer-link { text-align: center; margin-top: 30px; font-size: .8rem; }
 .boost-footer-link a { color: var(--text-secondary); }
-.confetti-canvas { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 90; }
 
 /* Contact, legal text, and route errors. */
-.contact-page { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1fr); gap: clamp(32px, 6vw, 72px); width: min(1080px, 100%); margin-inline: auto; align-items: start; }
-.contact-intro { padding-top: 28px; }
-.contact-intro .contact-story-heading { font-size: clamp(2.2rem, 4vw, 3.15rem); }
-.contact-detail { display: flex; align-items: center; gap: 12px; margin-top: 35px; color: var(--text-muted); font-size: .77rem; }
-.contact-detail .material-symbols-outlined { color: var(--accent); font-size: 20px; }
-.contact-card { width: 100%; padding: clamp(24px, 3vw, 36px); }
+.contact-page { width: min(680px, 100%); margin-inline: auto; }
+.contact-card { width: 100%; padding: 24px; }
 .contact-card .page-card-head h1 { font-size: 1.7rem; }
 .contact-card .field + .field { margin-top: 20px; }
 .contact-card textarea { resize: vertical; min-height: 155px; }
@@ -318,14 +305,14 @@
 .coach-chat-messages { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 20px; overflow-y: auto; padding: 4px 8px 24px 0; scroll-behavior: smooth; }
 .coach-empty { display: grid; justify-items: center; gap: 14px; width: min(480px, 100%); margin: auto; padding: 32px 10px; text-align: center; }
 .coach-empty-icon { display: grid; place-items: center; color: var(--accent); font-size: 36px; width: 68px; height: 68px; border-radius: 15px; background: var(--surface-selected); margin-bottom: 8px; }
-.coach-empty h3 { margin: 0; font-size: 1.7rem; letter-spacing: -.04em; }
+.coach-empty h3 { margin: 0; font-size: 20px; letter-spacing: -.015em; }
 .coach-empty p { color: var(--text-secondary); font-size: .84rem; line-height: 1.8; margin: 0; }
 .coach-empty-suggest { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 12px; }
 .coach-empty-chip { min-height: 36px; padding: 9px 12px; font-size: .74rem; font-weight: 400; text-align: left; }
 .coach-bubble { max-width: 90%; min-width: 0; font-size: .89rem; line-height: 1.85; overflow-wrap: anywhere; }
 .coach-bubble.user { align-self: flex-end; background: var(--bg-elevated); border: 1px solid var(--border-color); padding: 12px 17px; border-radius: 12px 12px 3px 12px; white-space: pre-wrap; }
 .coach-bubble.assistant { align-self: flex-start; padding: 0 4px; color: var(--text-primary); }
-.coach-bubble-error { align-self: stretch; max-width: 100%; padding: 13px 16px; background: var(--surface-danger); border: 1px solid var(--border-danger); border-radius: 8px; color: var(--clr-blunder); font-size: .82rem; }
+.coach-bubble-error { align-self: stretch; max-width: 100%; padding: 13px 16px; background: var(--surface-danger); border: 1px solid var(--border-danger); border-radius: 8px; color: var(--text-danger); font-size: .82rem; }
 .coach-bubble.assistant.streaming::after { content: '▋'; color: var(--accent); animation: coach-caret 1s steps(1) infinite; }
 @keyframes coach-caret { 50% { opacity: 0; } }
 .coach-markdown p { margin: 0 0 15px; }
@@ -378,26 +365,19 @@
 
 @media (max-width: 1100px) {
   .settings-workspace { grid-template-columns: 180px minmax(0, 1fr); gap: 22px; }
-  .auth-scene-caption { display: none; }
   .coach-chat-shell { grid-template-columns: 204px minmax(0, 1fr); }
   .plan-tier { padding-inline: 20px; }
 }
 @media (max-width: 800px) {
   .auth-page { grid-template-columns: minmax(0, 1fr); max-width: 500px; gap: 26px; padding-block: 8px; }
-  .auth-intro .auth-story-heading { margin: 10px 0 12px; font-size: 2.5rem; }
-  .auth-intro > p:not(.auth-story-heading) { display: none; }
-  .auth-scene { display: none; }
   .settings-workspace { grid-template-columns: minmax(0, 1fr); gap: 18px; }
   .settings-nav { position: static; display: flex; gap: 7px; overflow-x: auto; padding-bottom: 8px; }
   .settings-nav a { flex: 0 0 auto; padding: 10px 12px; border: 1px solid var(--border-color); font-size: .77rem; }
   .settings-nav a .material-symbols-outlined { font-size: 17px; }
   .settings-page-header { margin-bottom: 22px; }
   .contact-page { grid-template-columns: minmax(0, 1fr); max-width: 640px; gap: 24px; }
-  .contact-intro { padding-top: 0; }
-  .contact-intro .contact-story-heading { font-size: 2.5rem; }
-  .contact-detail { display: none; }
-  .plan-tiers { grid-template-columns: minmax(0, 1fr); max-width: 510px; margin-inline: auto; gap: 28px; }
-  .plan-tier { padding: 28px; }
+  .plan-tiers { grid-template-columns: minmax(0, 1fr); max-width: 510px; margin-inline: auto; gap: 16px; }
+  .plan-tier { padding: 20px; }
   .plan-tier-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .plan-tier-price { margin-block: 18px 22px; }
   .coach-chat-shell { gap: 12px; height: calc(100dvh - 138px); min-height: 500px; }
@@ -420,13 +400,12 @@
   .settings-preview-grid p { margin-inline: auto; }
   .appearance-preview-board { width: min(176px, 100%); }
   .chip { padding-inline: 9px; font-size: .75rem; }
-  .contact-intro .contact-story-heading { font-size: 2rem; }
   .settings-color-grid, .settings-advanced-engine-fields { gap: 12px; }
   .account-grid, .profile-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .account-hero { padding: 18px; }
+  .account-hero { padding: 14px 0; }
   .account-username-row { flex-direction: column; align-items: stretch; }
   .account-security-actions #btn-signout { margin-left: 0; }
-  .standalone-stat { min-height: 100px; padding: 18px; }
+  .standalone-stat { min-height: 80px; padding: 12px 0; }
   .profile-header { gap: 16px; }
   .profile-avatar { width: 64px; height: 64px; font-size: 1.5rem; }
   .profile-header-copy { gap: 8px; }

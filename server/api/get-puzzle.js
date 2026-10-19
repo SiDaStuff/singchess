@@ -1,9 +1,5 @@
 const puzzleDb = require('./_lib/puzzle-db');
-const { requireFeature } = require('./_lib/user-service');
-
-function safePuzzleId(id) {
-  return String(id || '').replace(/[.#$\[\]/]/g, '_');
-}
+const { requireFeature, getFeatureControls } = require('./_lib/user-service');
 
 function allowedOrigin(origin) {
   if (!origin) return '';
@@ -31,7 +27,7 @@ function dbUnavailableResponse(headers) {
     statusCode: 503,
     headers,
     body: JSON.stringify({
-        error: 'The SQL puzzle library has not been imported yet. Run npm run puzzles:build on the server.',
+      error: 'Puzzles are temporarily unavailable. Try again later.',
       code: 'puzzle_db_missing',
     }),
   };
@@ -56,7 +52,14 @@ exports.handler = async (event) => {
   }
 
   try {
-    await requireFeature(event, 'puzzles');
+    // Puzzle reads are public. Supplied credentials must still pass account
+    // and feature checks; an expired token must never silently become a guest.
+    if (event.headers?.authorization || event.headers?.Authorization) {
+      await requireFeature(event, 'puzzles');
+    } else {
+      const { features } = await getFeatureControls();
+      if (!features.puzzles) throw Object.assign(new Error('Puzzles are currently disabled.'), { statusCode: 403, code: 'feature_disabled' });
+    }
     if (!puzzleDb.isReady()) {
       return dbUnavailableResponse(headers);
     }
@@ -117,11 +120,11 @@ exports.handler = async (event) => {
       body: JSON.stringify({ error: 'Invalid request' }),
     };
   } catch (err) {
-    console.error('Puzzle API error:', err);
+    if (!err.statusCode || err.statusCode >= 500) console.error('Puzzle API error:', err);
     return {
       statusCode: err.statusCode || 500,
       headers,
-      body: JSON.stringify({ error: err.message || 'Server error' }),
+      body: JSON.stringify({ error: err.message || 'Server error', ...(err.code ? { code: err.code } : {}) }),
     };
   }
 };

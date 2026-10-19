@@ -1,24 +1,10 @@
 <section role="main" id="play-page" class="page-panel play-page" aria-label="Play" hidden></section>
 
 <section role="main" id="page-login" class="page-panel auth-page" hidden>
-      <div class="auth-intro">
-        <span class="eyebrow">Sing Chess</span>
-        <p class="auth-story-heading">Every game.<br>A chance to improve.</p>
-        <p>Your games and progress in one place.</p>
-        <div class="auth-scene" aria-hidden="true">
-          <div class="auth-scene-board">
-            <span></span><span></span><span><img src="/assets/pieces/cburnett/bK.svg" alt=""></span><span></span>
-            <span></span><span><img src="/assets/pieces/cburnett/bP.svg" alt=""></span><span></span><span></span>
-            <span></span><span></span><span><img src="/assets/pieces/cburnett/wN.svg" alt=""></span><span></span>
-            <span><img src="/assets/pieces/cburnett/wK.svg" alt=""></span><span></span><span></span><span></span>
-          </div>
-          <span class="auth-scene-caption">Review. Practice. Improve.</span>
-        </div>
-      </div>
       <div class="card panel-wide page-card auth-card">
         <div class="page-card-head">
-          <h1>Welcome back</h1>
-          <p>Sign in to save your reviews and continue your training.</p>
+          <h1>Sign in</h1>
+          <p>Use your email or Google account.</p>
         </div>
         <label class="field">
           <span class="field-label">Email</span>
@@ -54,10 +40,11 @@
 <section role="main" id="page-signup" class="page-panel onboarding-page" hidden>
       <div class="card panel-wide page-card onboarding-card">
         <div class="page-card-head">
-          <span class="eyebrow" id="signup-eyebrow">Make yourself at home</span>
-          <h1 id="signup-headline">Your chess, your way.</h1>
-          <p id="signup-subtitle">Choose a board you love. Find your level. Start improving.</p>
+          <span class="eyebrow" id="signup-eyebrow">Free account</span>
+          <h1 id="signup-headline">Create an account</h1>
+          <p id="signup-subtitle">Get move explanations, save puzzle progress, and sync your setup.</p>
         </div>
+        <p class="signup-reassurance"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Free account. No card needed.</p>
 
         
         <div class="onboard-wizard-progress" aria-hidden="true">
@@ -67,11 +54,11 @@
 
         
         <div class="onboard-step" id="onboard-step-1">
-          <h2 class="onboard-step-title">Build your favorite board</h2>
+          <h2 class="onboard-step-title">Board and pieces</h2>
           <p class="onboard-step-sub">Try a color and piece set. Your preview updates as you choose.</p>
           <div class="onboard-appearance-grid">
             <div class="field">
-              <span class="field-label">Board Colors</span>
+              <span class="field-label">Board colors</span>
               <div class="select-row" data-cols="3" role="radiogroup" aria-label="Board colors">
                 <label class="select-row-item board-color-chip">
                   <input type="radio" name="onboard-board-theme" value="classic" checked>
@@ -106,7 +93,7 @@
               </div>
             </div>
             <div class="field">
-              <span class="field-label">Piece Icons</span>
+              <span class="field-label">Pieces</span>
               <div class="select-row" data-cols="3" role="radiogroup" aria-label="Piece icons">
                 <label class="select-row-item piece-set-chip">
                   <input type="radio" name="onboard-piece-theme" value="cburnett" checked>
@@ -209,12 +196,12 @@
           <div class="onboard-integration-list">
             <label class="field onboard-integration-field">
               <span class="field-label"><span class="onboard-provider-mark lichess-logo" aria-hidden="true"></span>Lichess username</span>
-              <input id="onboard-lichess-username" class="input-select" type="text" autocomplete="off" placeholder="e.g. hikaru" maxlength="40">
+              <input id="onboard-lichess-username" class="input-select" type="text" autocomplete="off" placeholder="Lichess username" maxlength="40">
               <span class="onboard-field-help">Import your recent public Lichess games.</span>
             </label>
             <label class="field onboard-integration-field">
               <span class="field-label"><span class="onboard-provider-mark chesscom-logo" aria-hidden="true"></span>Chess.com username</span>
-              <input id="onboard-chesscom-username" class="input-select" type="text" autocomplete="off" placeholder="e.g. MagnusCarlsen" maxlength="40">
+              <input id="onboard-chesscom-username" class="input-select" type="text" autocomplete="off" placeholder="Chess.com username" maxlength="40">
               <span class="onboard-field-help">Import your recent public Chess.com games.</span>
             </label>
           </div>
@@ -274,8 +261,8 @@
 <section role="main" id="page-account" class="page-panel" hidden>
       <div class="card panel-wide page-card account-page-card" id="account-page-card">
         <div class="page-card-head">
-          <span class="eyebrow">Your space</span><h1>Your chess is taking shape.</h1>
-          <p>A clear view of your progress, your plan, and the details that make this account yours.</p>
+          <h1>Account</h1>
+          <p>Profile, puzzle progress, and plan usage.</p>
         </div>
         <div id="account-loading" class="account-loading" hidden aria-live="polite" role="status">
           <p>Loading your account…</p>
@@ -301,14 +288,14 @@
             </div>
             <p class="account-usage" id="spa-account-usage"></p>
           </div>
-          <h2 class="page-section-label">Training at a glance</h2><div class="account-grid">
+          <h2 class="page-section-label">Progress</h2><div class="account-grid">
             <div class="standalone-stat"><span>Plan</span><strong id="spa-account-plan">Free</strong></div>
             <div class="standalone-stat"><span>Puzzle rating</span><strong id="spa-account-puzzle-rating">1500</strong></div>
             <div class="standalone-stat"><span>Solved</span><strong id="spa-account-puzzles-solved">0</strong></div>
             <div class="standalone-stat"><span>Attempted</span><strong id="spa-account-puzzles-attempted">0</strong></div>
           </div>
           <div class="usage-section" id="spa-account-usage-section"></div>
-          <section class="account-details-panel" aria-label="Public profile"><h2>Your public profile</h2><p class="section-description">Share your progress with a username that is easy to remember.</p><div class="account-profile-link-row">
+          <section class="account-details-panel" aria-label="Public profile"><h2>Public profile</h2><p class="section-description">Your username appears in your profile link.</p><div class="account-profile-link-row">
             <span class="account-profile-label">Your public profile</span>
             <a class="btn btn-secondary btn-small" id="btn-account-view-profile" href="/" data-route="/index">View profile</a>
             <button class="btn btn-secondary btn-small" id="btn-account-copy-profile" type="button">Copy link</button>
@@ -383,7 +370,7 @@
     </section>
 
 <section role="main" id="page-settings" class="page-panel" hidden>
-      <div class="settings-page-header page-card-head"><span class="eyebrow">Fine-tune your experience</span><h1>Make the board yours.</h1><p>Set up your analysis, personalize your board, and choose how you stay in the loop.</p></div>
+      <div class="settings-page-header page-card-head"><h1>Settings</h1><p>Board, analysis, sound, and notifications.</p></div>
       <div class="settings-workspace">
         <nav class="settings-nav" aria-label="Settings categories">
           <a href="#settings-analysis"><span class="material-symbols-outlined" aria-hidden="true">analytics</span>Analysis</a>
@@ -525,7 +512,7 @@
             </div>
           </div>
           <div class="field">
-            <span class="field-label">Board Colors</span>
+            <span class="field-label">Board colors</span>
             <div class="select-row" data-cols="3" role="radiogroup" aria-label="Board colors">
               <label class="select-row-item board-color-chip">
                 <input type="radio" name="settings-board-theme" value="classic">
@@ -560,7 +547,7 @@
             </div>
           </div>
         <div class="field">
-          <span class="field-label">Piece Icons</span>
+          <span class="field-label">Pieces</span>
           <div class="select-row" data-cols="3" role="radiogroup" aria-label="Piece icons">
             <label class="select-row-item piece-set-chip">
               <input type="radio" name="settings-piece-theme" value="cburnett">
@@ -614,7 +601,7 @@
         </div>
         <label class="switch-row app-switch-row">
           <span>
-            <strong>Piece Animations</strong>
+            <strong>Piece animation</strong>
             <small>Smoothly animate pieces to their new squares.</small>
           </span>
           <span class="app-switch">
@@ -700,7 +687,7 @@
 
 <section role="main" id="page-boost" class="page-panel" hidden>
       <div class="card panel-wide page-card plans-page-card">
-        <canvas id="confetti-canvas" class="confetti-canvas" aria-hidden="true"></canvas><div class="page-card-head plans-page-head"><span class="eyebrow">Plans</span><h1>Choose the right tools for your games.</h1><p>All plans include local analysis and puzzles. Paid plans add server capacity and fair-play reviews.</p></div>
+        <div class="page-card-head plans-page-head"><h1>Plans</h1><p>Browser analysis and puzzles are free. Boost and Max add server reviews and larger Coach allowances.</p></div>
         <div class="boost-status-container" id="spa-boost-status-container" hidden aria-live="polite" role="status">
           <div class="boost-status-card" id="spa-boost-status-card" aria-live="polite" role="status">
             <span class="material-symbols-outlined boost-status-icon" aria-hidden="true">check_circle</span>
@@ -711,11 +698,11 @@
           </div>
         </div>
         <div class="boost-auth-required" id="spa-boost-auth-required" hidden>
-          <h2>Manage your plan.</h2>
-          <p>Sign in to see your current plan and manage your account.</p>
+          <h2>Free account</h2>
+          <p>Puzzle progress, synced settings, and daily server review and Coach allowances. No card needed.</p>
           <div class="standalone-actions center-actions">
-            <button id="btn-boost-to-signin" class="btn btn-primary" type="button">Sign In</button>
-            <button id="btn-boost-to-signup" class="btn btn-secondary" type="button">Create Account</button>
+            <button id="btn-boost-to-signin" class="btn btn-secondary" type="button">Sign In</button>
+            <button id="btn-boost-to-signup" class="btn btn-primary" type="button">Create free account</button>
           </div>
         </div>
         <div id="spa-boost-content" hidden>
@@ -734,11 +721,10 @@
                   <li><span class="material-symbols-outlined" aria-hidden="true">check</span> Unlimited puzzles</li>
                   <li><span class="material-symbols-outlined" aria-hidden="true">close</span> No anticheat reviews</li>
                 </ul>
-                <div class="plan-tier-cta"><span class="plan-tier-current" id="plan-tier-current-free" hidden>Your plan</span></div>
+                <div class="plan-tier-cta"><a id="plan-free-signup" class="btn btn-secondary" href="/signup?src=plans&amp;quick=1" hidden>Create free account</a><span class="plan-tier-current" id="plan-tier-current-free" hidden>Your plan</span></div>
               </div>
 
               <div class="plan-tier plan-tier-boost featured">
-                <span class="plan-tier-badge">More capacity</span>
                 <div class="plan-tier-name">Boost</div>
                 <div class="plan-tier-price"><span class="amount">$4</span><span class="period">/mo</span></div>
                 <ul class="plan-tier-list">
@@ -836,7 +822,7 @@
 <section role="main" id="page-404" class="page-panel message-page" hidden>
       <div class="card panel-wide page-card message-card"><div class="message-icon" aria-hidden="true"><span class="material-symbols-outlined" aria-hidden="true">explore</span></div><span class="eyebrow">Page not found</span>
         <div class="page-card-head">
-          <h1>This square is empty.</h1>
+          <h1>Page not found</h1>
           <p>We couldn’t find this page.</p>
         </div>
         <div class="standalone-actions">
@@ -868,7 +854,7 @@
               <span class="plan-badge" id="profile-plan-badge">Free</span>
             </div>
           </div>
-          <h2 class="page-section-label">On the training board</h2><div class="profile-stats-grid">
+          <h2 class="page-section-label">Puzzle statistics</h2><div class="profile-stats-grid">
             <div class="standalone-stat"><span>Puzzle rating</span><strong id="profile-rating">1500</strong></div>
             <div class="standalone-stat"><span>Solved</span><strong id="profile-solved">0</strong></div>
             <div class="standalone-stat"><span>Attempted</span><strong id="profile-attempted">0</strong></div>
@@ -887,10 +873,10 @@
     </section>
 
 <section role="main" id="page-contact" class="page-panel contact-page" hidden>
-      <div class="contact-intro"><span class="eyebrow">We’re here to help</span><p class="contact-story-heading">Good chess starts<br>with a conversation.</p><p>A question about your account, a bug you spotted, or an idea for the board. Send it our way.</p><div class="contact-detail"><span class="material-symbols-outlined" aria-hidden="true">forum</span><span>Account help · Feedback · Billing</span></div></div><div class="card panel-wide page-card contact-card">
+      <div class="card panel-wide page-card contact-card">
         <div class="page-card-head">
-          <h1>Send us a message</h1>
-          <p>Tell us what’s on your mind. Include any details that will help us help you.</p>
+          <h1>Contact</h1>
+          <p>For bugs, include what you were doing and what went wrong.</p>
         </div>
         <label class="field">
           <span class="field-label">Your email</span>
@@ -919,7 +905,7 @@
 
 <section role="main" id="page-anticheat-report" class="page-panel" hidden>
       <div class="card panel-wide page-card report-page-card">
-        <div class="page-card-head"><span class="eyebrow">Fair play analysis</span><h1>Your game report.</h1><p>Engine statistics provide context for a player’s moves. They are a guide, not proof of cheating.</p></div>
+        <div class="page-card-head"><h1>Fair play report</h1><p>Engine statistics alone do not prove cheating.</p></div>
         <div class="anticheat-report-meta" id="anticheat-report-meta">
           <span class="anticheat-status" id="anticheat-report-status" aria-live="polite" role="status">Loading report…</span>
           <span class="anticheat-report-job" id="anticheat-report-job"></span>
@@ -931,9 +917,9 @@
 
 <section role="main" id="page-privacy" class="page-panel" hidden>
       <div class="card panel-wide page-card legal-page-card">
-        <div class="page-card-head"><span class="eyebrow">Service terms</span>
+        <div class="page-card-head">
           <h1>Privacy Policy</h1>
-          <p class="legal-updated">Last updated: 18 July 2026</p>
+          <p class="legal-updated">Last updated: 19 October 2026</p>
         </div>
         <article class="legal-body">
           <p>This policy explains what Sing Chess collects and why. We keep it simple: we only store what we need to run the service, and we don't sell your data.</p>
@@ -941,14 +927,15 @@
           <h2>What we store</h2>
           <ul>
             <li><strong>Account data.</strong> Your email and a Firebase user ID if you sign up. Passwords are handled by Firebase; we never see them.</li>
-            <li><strong>Games and reviews.</strong> PGNs you paste or import, plus any reviews you save to your account.</li>
-            <li><strong>Training data.</strong> Your puzzle rating, solve history, coach chat history (if saved), and coach-game results.</li>
+            <li><strong>Games and reviews.</strong> PGNs you paste or import, reviews you save, and automatic reviews created for eligible completed Lichess Play games.</li>
+            <li><strong>Training and coach data.</strong> Your puzzle rating, solve history, coach conversations, and coach-game results. Coach messages and relevant chess context are sent to the configured AI provider to produce a reply.</li>
+            <li><strong>Connected chess accounts.</strong> Public usernames you save for imports. If you connect Lichess Play, we store your Lichess identity and an encrypted OAuth credential so the server can make authorized Board API requests. The credential is never sent to your browser.</li>
             <li><strong>Preferences.</strong> Board theme, piece set, engine settings, and similar options. These live in your browser by default and sync to your account when you're signed in.</li>
             <li><strong>Technical data.</strong> IP address and browser type for rate limits and security. We also keep anonymous counts like total games reviewed.</li>
           </ul>
 
           <h2>Where your data lives</h2>
-          <p>Account data is stored in Google Firebase (Authentication and Realtime Database). Local preferences stay in your browser unless you sign in.</p>
+          <p>Account data is stored in Google Firebase Authentication and Realtime Database. Firebase may process data on Google infrastructure, including in the United States. Local preferences stay in your browser unless you sign in and sync them.</p>
 
           <h2>Cookies and local storage</h2>
           <p>We don't use advertising or tracking cookies. Firebase may set an authentication cookie or local storage entry to keep you signed in. To help detect multi-accounting and abuse, we set a single device-identifier cookie and store a hash of your IP address; raw IP addresses are not kept. You can clear all stored data from Settings → Clear data or through your browser.</p>
@@ -967,8 +954,8 @@
           <h2>Messages</h2>
           <p>When you use the contact form, we keep your email and message so we can reply. If you're signed in, we also store your user ID. Only site admins can see these.</p>
 
-          <h2>Your choices</h2>
-          <p>You can use most of the site without an account. To delete your account and all associated data, contact us.</p>
+          <h2>Retention and your choices</h2>
+          <p>Notifications are removed after 30 days. Automatic reviews retain the 20 most recent reviews. Other account data is kept while your account is active or as needed to provide the service, prevent abuse, resolve disputes, and meet legal obligations. You can disconnect Lichess Play, unlink public usernames, clear local browser data in Settings, or ask us to access, correct, export, or delete your account data through the contact form. Some requests may require identity verification.</p>
 
           <h2>Contact</h2>
           <p>Questions about privacy? Use the contact form or email the address on the home page.</p>
@@ -982,9 +969,9 @@
 
 <section role="main" id="page-terms" class="page-panel" hidden>
       <div class="card panel-wide page-card legal-page-card">
-        <div class="page-card-head"><span class="eyebrow">Clear rules. A better community.</span>
+        <div class="page-card-head">
           <h1>Terms of Service</h1>
-          <p class="legal-updated">Last updated: 18 July 2026</p>
+          <p class="legal-updated">Last updated: 19 October 2026</p>
         </div>
         <article class="legal-body">
           <p>By using Sing Chess, you agree to these terms. If you don't agree, please don't use the service.</p>
@@ -993,13 +980,16 @@
           <p>Keep your login details safe. You're responsible for activity under your account. You must be at least 13 to sign up, or have a guardian's permission. You may create and use only one account. Creating multiple accounts, sharing accounts, or using another person's account is not allowed. We may use technical information such as a hashed IP address and a device identifier to detect violations.</p>
 
           <h2>Acceptable use</h2>
-          <p>Use Sing Chess for your own chess training and analysis. Don't try to break, overload, or scrape the service. Don't automate, script, or otherwise abuse review, anti-cheat, or coach limits. Activity that appears designed to extract value beyond normal personal use may result in account closure. Don't use the review or anti-cheat tools to harass or falsely accuse other players. Engine stats are a guide, not proof of cheating. Don't upload someone else's games without their permission.</p>
+          <p>Use Sing Chess for your own chess training and analysis. Don't try to break, overload, or scrape the service. Don't automate, script, or otherwise abuse review, fair-play, Play, or coach limits. Don't use analysis, coaching, or engine assistance during an active online game. Activity that appears designed to extract value beyond normal personal use may result in account closure. Don't use fair-play tools to harass or falsely accuse other players. Engine stats are a guide, not proof of cheating. Don't upload private content without permission.</p>
 
           <h2>Your content</h2>
           <p>You own the games and PGNs you upload. By saving them to your account, you let us store and process them so you can view them later.</p>
 
           <h2>Analysis and ratings</h2>
           <p>Reviews, accuracy scores, and classifications come from Stockfish at fixed depths. They're helpful estimates, not final judgments of a move or player.</p>
+
+          <h2>Connected services and Play</h2>
+          <p>Lichess and Chess.com are independent services with their own terms. When you connect Lichess Play, you authorize Sing Chess to use the permissions shown on the Lichess consent screen. You remain responsible for moves, challenges, and other actions submitted from your account. Provider outages, rate limits, account restrictions, or API changes may interrupt linked features. You can disconnect Lichess from Play when no online game is active.</p>
 
           <h2>Paid plans</h2>
           <p>Free, Boost, and Max plans are available. Paid plans add features like more server reviews and anti-cheat games. Prices and perks may change. Refunds are handled case by case — contact us with billing questions.</p>
@@ -1054,9 +1044,9 @@
           <div class="coach-chat-locked" id="coach-chat-locked" hidden>
             <span class="material-symbols-outlined coach-locked-icon" aria-hidden="true">lock</span>
             <h2>Chess Coach</h2>
-            <p>Ask about openings, positions, or training goals. The coach uses Stockfish to check positions. Sign in to get started.</p>
-            <a class="btn btn-primary" href="/login" data-route="/login">Sign in</a>
-            <a class="btn btn-secondary" href="/signup?src=coach" data-route="/signup">Create account</a>
+            <p>Ask about your openings or a position you just played. Your free account includes a daily AI Coach allowance.</p>
+            <a class="btn btn-primary" href="/signup?src=coach&amp;quick=1" data-route="/signup">Create free account</a>
+            <a class="btn btn-secondary" href="/login" data-route="/login">Sign in</a>
           </div>
           <div class="coach-usage-bar" id="coach-usage-bar" hidden aria-live="polite" role="status">
             <div class="coach-usage-track"><div class="coach-usage-fill"></div></div>
@@ -1071,7 +1061,7 @@
             </div>
           </div>
           <form class="coach-chat-input" id="coach-chat-form">
-            <textarea id="coach-chat-textarea" class="coach-chat-textarea" aria-label="Message the coach" placeholder="Ask about a position, opening, or your next goal…" rows="1" autocomplete="off"></textarea>
+            <textarea id="coach-chat-textarea" class="coach-chat-textarea" aria-label="Message the coach" placeholder="Ask a chess question…" rows="1" autocomplete="off"></textarea>
             <button type="submit" id="btn-coach-send" class="btn btn-primary coach-send-btn" aria-label="Send message">
               <span class="material-symbols-outlined btn-symbol" aria-hidden="true">send</span>
             </button>

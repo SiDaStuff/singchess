@@ -11,7 +11,7 @@
         <a href="/terms">Terms</a>
         <a href="/contact">Contact</a>
       </nav>
-      <a class="footer-credit" href="https://cloudaccessfoundation.org/" target="_blank" rel="noopener noreferrer">Hosted and Supported by the Cloud Access Foundation</a>
+      <a class="footer-credit" href="https://cloudaccessfoundation.org/" target="_blank" rel="noopener noreferrer">Hosting supported by the Cloud Access Foundation</a>
     `;
     const placeholder = document.querySelector('[data-site-footer]');
     if (placeholder) placeholder.replaceWith(footer);

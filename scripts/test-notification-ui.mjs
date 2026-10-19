@@ -31,6 +31,8 @@ try {
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(base);
     await page.waitForFunction(() => window.app?.authState.initialized);
+    await page.evaluate(() => window.app._renderNotificationPanel([{ id: 'generic', type: 'auto_review', title: 'Notification', body: 'Alice vs Bob', read: false }], 1));
+    check(await page.locator('.notification-item-title').innerText() === 'Game review ready', `${width}: generic notification titles are replaced with useful text`);
     await page.evaluate(() => window.app._navigateTo('/settings'));
     const button = page.locator('#btn-save-notify-settings'), status = page.locator('#notify-settings-status');
     await button.click();

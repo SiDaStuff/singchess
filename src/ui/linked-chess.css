@@ -1,18 +1,19 @@
 .linked-hub { margin-bottom: 24px; }
+.account-connections { border-top: 1px solid var(--border-soft); padding-top: 20px; margin-top: 24px; }
 .linked-hub .page-card-head { margin-bottom: 22px; }
 .linked-hub [data-accounts] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.linked-account { min-width: 0; border: 1px solid var(--border-soft); border-radius: 9px; padding: 18px; background: var(--bg-muted); display: grid; gap: 14px; align-content: start; }
+.linked-account { min-width: 0; border-top: 1px solid var(--border-soft); padding: 16px 0; display: grid; gap: 12px; align-content: start; }
 .linked-account-head { display: grid; gap: 4px; }
 .linked-account-head > span, .linked-note { color: var(--text-muted); font-size: 11px; }
 .linked-actions, .linked-ratings, .home-linked-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.linked-actions .btn { font-size: 10px; padding: 9px; }
-.linked-ratings { gap: 10px; font-size: 10px; color: var(--text-secondary); text-transform: capitalize; }
+.linked-actions .btn { font-size: 12px; padding: 9px; }
+.linked-ratings { gap: 10px; font-size: 12px; color: var(--text-secondary); text-transform: capitalize; }
 .linked-ratings strong { color: var(--text-primary); margin-left: 4px; }
 .linked-rating-import { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 11px; justify-content: space-between; }
 .auto-review-beta { border-top: 1px solid var(--border-soft); margin-top: 24px; padding-top: 24px; display: grid; gap: 16px; }
-.auto-review-beta .card-header { margin: 0; font-size: 10px; color: var(--text-muted); }
+.auto-review-beta .card-header { margin: 0; font-size: 12px; color: var(--text-muted); }
 .auto-review-beta p { font-size: 11px; color: var(--text-secondary); }
-.auto-review-beta small { color: var(--text-muted); font-size: 10px; }
+.auto-review-beta small { color: var(--text-muted); font-size: 12px; }
 .auto-review-list { display: grid; gap: 8px; }
 .auto-review-list .import-result { justify-content: space-between; }
 .auto-review-list small { display: block; margin-top: 4px; }

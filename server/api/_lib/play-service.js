@@ -235,7 +235,19 @@ class PlayService {
         cache = { checkedAt: this.now(), games }; await this.ref(`recent/${uid}`).set(cache);
       } catch (error) { if (error.statusCode === 401) throw error; recentError = true; }
     }
-    return { configured: true, connected: true, profile: connection.profile, activeGames, recentGames: cache?.games || [], recentError, timeControls: CONTROLS };
+    const storedReviews = (await this.database().ref(`maxAutoReviewPrivate/reviews/${uid}`).once('value')).val() || {};
+    const reviewStats = { gamesReviewed: 0, movesReviewed: 0, brilliant: 0, great: 0, best: 0 };
+    for (const item of Object.values(storedReviews)) {
+      const results = Array.isArray(item?.review?.results) ? item.review.results : [];
+      reviewStats.gamesReviewed += 1; reviewStats.movesReviewed += results.length;
+      for (const result of results) {
+        const key = String(result?.classificationKey || result?.classification?.key || result?.classification?.name || result?.classification || '').toLowerCase();
+        if (key === 'brilliant') reviewStats.brilliant += 1;
+        else if (key === 'great') reviewStats.great += 1;
+        else if (key === 'best') reviewStats.best += 1;
+      }
+    }
+    return { configured: true, connected: true, profile: connection.profile, reviewStats, activeGames, recentGames: cache?.games || [], recentError, timeControls: CONTROLS };
   }
   async disconnect(uid) {
     const connection = await this.connection(uid, false);

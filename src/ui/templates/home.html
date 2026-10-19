@@ -1,5 +1,5 @@
 <section role="main" id="main-menu" class="main-menu" aria-label="Home">
-  <div class="home-heading"><div><span class="eyebrow"><span class="status-dot"></span> CHESS TRAINING</span><h1>Review your games.<br><span>Improve your play.</span></h1><p>Find the moves that mattered.<br>Review games, practice tactics, and ask the coach about positions.</p></div><a class="btn btn-secondary home-coach-link" href="/coach" data-route="/coach"><span class="material-symbols-outlined">school</span> Open coach <span aria-hidden="true">&nearr;</span></a></div>
+  <div class="home-heading"><div><h1>Review a game</h1><p>Paste a PGN or import public games from Lichess or Chess.com.</p></div><a class="btn btn-primary home-coach-link" href="/play" data-route="/play"><span class="material-symbols-outlined" aria-hidden="true">swords</span> Play</a></div>
   <div class="home-workspace">
     <div class="home-board-card">
       <div class="home-board-head"><span class="home-feature-label"><span class="status-dot"></span> THE STUDY BOARD</span><span class="home-board-caption" id="home-study-caption">Paris &middot; 1858</span></div>
@@ -8,7 +8,7 @@
       <div class="home-player"><span class="player-avatar"><img src="/assets/pieces/cburnett/wK.svg" alt=""></span><span><strong id="home-study-white">Paul Morphy</strong><small>White pieces</small></span><span class="home-piece-label">&#9812;</span></div>
       <div class="home-board-footer"><div><span class="eyebrow" id="home-study-label">THE OPERA GAME</span><p id="home-study-description">17 moves. A classic attacking game.</p></div><button type="button" id="btn-home-sample" class="btn btn-secondary">Review this game <span class="material-symbols-outlined">arrow_forward</span></button></div>
     </div>
-    <div class="home-import-card"><div class="home-import-head"><span class="eyebrow">GAME REVIEW</span><h2>Learn from your games.</h2><p>Import a game and review the positions that changed it.</p></div>        <!-- Linked usernames: quick-load chips when signed in and linked -->
+    <div class="home-import-card"><div class="home-import-head"><h2>Import game</h2></div>        <!-- Linked usernames: quick-load chips when signed in and linked -->
         <div class="home-quick-load" id="home-quick-load" hidden>
           <span class="home-quick-load-label">Open my recent games from</span>
           <div class="home-quick-load-buttons" id="home-quick-load-buttons"></div>
@@ -34,7 +34,7 @@
           <div class="import-panels">
             <!-- PGN panel -->
             <div class="import-panel active" data-import-panel="pgn">
-              <p class="import-panel-hint">Paste a game in PGN format to review it instantly.</p>
+              <p class="import-panel-hint">Paste a game in PGN format.</p>
               <label class="field" for="home-pgn-input">Your game (PGN)</label>
               <textarea id="home-pgn-input" class="import-pgn-input input-select" placeholder="[White &quot;You&quot;]&#10;[Black &quot;Your opponent&quot;]&#10;&#10;1. e4 e5 2. Nf3 Nc6 3. Bb5 a6..." rows="5"></textarea>
               <div class="import-actions">
@@ -52,7 +52,7 @@
               <p class="import-panel-hint">Enter a Lichess username to load their recent games.</p>
               <label class="field">
                 <span class="field-label">Lichess username</span>
-                <input id="home-import-username-lichess" class="input-select import-username" type="text" placeholder="hikaru" data-source="lichess">
+                <input id="home-import-username-lichess" class="input-select import-username" type="text" placeholder="Lichess username" data-source="lichess">
               </label>
               <div class="import-row">
                 <label class="field">
@@ -77,7 +77,7 @@
               <p class="import-panel-hint">Enter a Chess.com username to load their recent games.</p>
               <label class="field">
                 <span class="field-label">Chess.com username</span>
-                <input id="home-import-username-chesscom" class="input-select import-username" type="text" placeholder="MagnusCarlsen" data-source="chesscom">
+                <input id="home-import-username-chesscom" class="input-select import-username" type="text" placeholder="Chess.com username" data-source="chesscom">
               </label>
               <div class="import-row">
                 <label class="field">
@@ -101,14 +101,14 @@
           <div class="import-status" id="home-import-status" role="status" aria-live="polite"></div>
           <div class="import-results" id="home-import-results"></div>
         </div>
-<div class="import-trust"><span class="material-symbols-outlined">verified_user</span><span>Browser reviews are free. No account needed.</span></div><div class="home-study-note"><span class="material-symbols-outlined">lightbulb</span><div><strong>Review the turning points.</strong><p>Stockfish shows what happened. The coach explains the ideas behind the moves.</p></div></div></div>
+<div class="import-trust"><span>Browser reviews are free. No account needed.</span></div></div>
   </div>
-  <div class="home-lower"><div class="section-heading"><span class="eyebrow">TRAINING TOOLS</span><h2>Practice with a clear plan.</h2></div><div class="feature-grid">
+  <div class="home-lower"><div class="section-heading"><h2>Practice</h2></div><div class="feature-grid">
     <a id="btn-menu-puzzles" class="feature-card" href="/puzzles" data-route="/puzzles"><span class="feature-icon material-symbols-outlined">extension</span><div><strong>Solve puzzles</strong><p>Practice positions matched to your level.</p></div><span class="material-symbols-outlined">arrow_forward</span></a>
     <a class="feature-card" href="/coach" data-route="/coach"><span class="feature-icon material-symbols-outlined">school</span><div><strong>Ask the coach</strong><p>Discuss an opening, position, or training goal.</p></div><span class="material-symbols-outlined">arrow_forward</span></a>
     <a id="btn-menu-anticheat" class="feature-card" href="/anticheat" data-route="/anticheat"><span class="feature-icon material-symbols-outlined">shield</span><div><strong>Check fair play</strong><p>Review patterns in online games.</p></div><span class="material-symbols-outlined">arrow_forward</span></a>
   </div></div>      <!-- Community stats -->
-      <div class="home-stats" id="home-stats" aria-label="Community stats">
+      <div class="home-stats" id="home-stats" aria-label="Community stats" hidden>
         <div class="home-stat-card" data-stat="reviews">
           <span class="material-symbols-outlined home-stat-icon">analytics</span>
           <span class="home-stat-value" id="home-stat-reviews">—</span>
@@ -126,5 +126,5 @@
         </div>
       </div>
 
-<a id="btn-menu-plans" class="home-plans-link" href="/plans" data-route="/plans">Need more capacity? View Boost &amp; Max <span aria-hidden="true">&nearr;</span></a>
+<a id="btn-menu-plans" class="home-plans-link" href="/plans" data-route="/plans">Compare plans <span aria-hidden="true">&nearr;</span></a>
 </section>

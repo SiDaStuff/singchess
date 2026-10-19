@@ -56,12 +56,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   const copy = {
-    review: ['Game review', 'Review the position and understand each move.'],
-    puzzle: ['Tactics training', 'Find the strongest move.'],
-    coach: ['Play your coach', 'Play a game and review the key positions.'],
-    anticheat: ['Fair play analysis', 'Explore game patterns with evidence and context.'],
+    review: ['Game review', ''],
+    puzzle: ['Puzzles', ''],
+    coach: ['Practice game', ''],
+    anticheat: ['Fair play', ''],
   };
-  const labels = { '/play': 'Play · BETA', '/play/callback': 'Play · BETA', '/': 'Overview', '/index': 'Overview', '/review': 'Game review', '/puzzles': 'Puzzles', '/coach': 'Coach', '/anticheat': 'Fair play', '/settings': 'Settings', '/account': 'Your account', '/signin': 'Sign in', '/login': 'Sign in', '/signup': 'Create account', '/plans': 'Plans', '/boost': 'Plans', '/contact': 'Contact', '/privacy': 'Privacy', '/terms': 'Terms', '/auth': 'Account help', '/404': 'Not found', '/incompatible-browser': 'Unsupported browser' };
+  const labels = { '/play': 'Play · BETA', '/play/callback': 'Play · BETA', '/': 'Home', '/index': 'Home', '/review': 'Game review', '/puzzles': 'Puzzles', '/coach': 'Coach', '/anticheat': 'Fair play', '/settings': 'Settings', '/account': 'Your account', '/signin': 'Sign in', '/login': 'Sign in', '/signup': 'Create account', '/plans': 'Plans', '/boost': 'Plans', '/contact': 'Contact', '/privacy': 'Privacy', '/terms': 'Terms', '/auth': 'Account help', '/404': 'Not found', '/incompatible-browser': 'Unsupported browser' };
   const sync = () => {
     const mode = document.body.dataset.mode;
     const content = copy[mode] || copy.review;

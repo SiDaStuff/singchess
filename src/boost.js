@@ -32,111 +32,6 @@
     return window.firebase;
   }
 
-  // Confetti animation setup
-  class ConfettiGenerator {
-    constructor(canvasId) {
-      this.canvas = document.getElementById(canvasId);
-      if (!this.canvas) return;
-      this.ctx = this.canvas.getContext('2d');
-      this.particles = [];
-      this.animationId = null;
-      this.resizeCanvas();
-      window.addEventListener('resize', () => this.resizeCanvas());
-    }
-
-    resizeCanvas() {
-      if (!this.canvas) return;
-      this.canvas.width = window.innerWidth;
-      this.canvas.height = window.innerHeight;
-    }
-
-    createParticles(count = 150) {
-      const colors = ['#9d4edd', '#c77dff', '#e0aaff', '#9d4edd', '#c77dff'];
-      const shapes = ['circle', 'square', 'confetti'];
-      
-      for (let i = 0; i < count; i++) {
-        this.particles.push({
-          x: Math.random() * this.canvas.width,
-          y: Math.random() * this.canvas.height - this.canvas.height,
-          vx: (Math.random() - 0.5) * 8,
-          vy: Math.random() * 4 + 6,
-          size: Math.random() * 8 + 4,
-          color: colors[Math.floor(Math.random() * colors.length)],
-          shape: shapes[Math.floor(Math.random() * shapes.length)],
-          rotation: Math.random() * Math.PI * 2,
-          rotationVelocity: (Math.random() - 0.5) * 0.2,
-          life: 1,
-          decay: Math.random() * 0.015 + 0.015,
-        });
-      }
-    }
-
-    draw() {
-      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-
-      for (let i = this.particles.length - 1; i >= 0; i--) {
-        const p = this.particles[i];
-
-        // Update position
-        p.x += p.vx;
-        p.y += p.vy;
-        p.vy += 0.2; // gravity
-        p.rotation += p.rotationVelocity;
-        p.life -= p.decay;
-
-        if (p.life <= 0) {
-          this.particles.splice(i, 1);
-          continue;
-        }
-
-        // Draw particle
-        this.ctx.save();
-        this.ctx.globalAlpha = p.life;
-        this.ctx.translate(p.x, p.y);
-        this.ctx.rotate(p.rotation);
-
-        this.ctx.fillStyle = p.color;
-
-        if (p.shape === 'circle') {
-          this.ctx.beginPath();
-          this.ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2);
-          this.ctx.fill();
-        } else if (p.shape === 'square') {
-          this.ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
-        } else {
-          // confetti shape (thin rectangle)
-          this.ctx.fillRect(-p.size / 3, -p.size / 2, (p.size * 2) / 3, p.size);
-        }
-
-        this.ctx.restore();
-      }
-
-      if (this.particles.length > 0) {
-        this.animationId = requestAnimationFrame(() => this.draw());
-      } else {
-        this.stop();
-      }
-    }
-
-    celebrate(count = 150) {
-      // Guard against a second celebrate() while a loop is already running —
-      // previously it would start a parallel requestAnimationFrame chain and
-      // orphan the first (this.animationId only tracks the newest), leaking it.
-      if (this.animationId) this.stop();
-      this.createParticles(count);
-      this.draw();
-    }
-
-    stop() {
-      if (this.animationId) {
-        cancelAnimationFrame(this.animationId);
-        this.animationId = null;
-      }
-    }
-  }
-
-  const confetti = new ConfettiGenerator('confetti-canvas');
-
   // In the SPA, IDs are prefixed with "spa-" to avoid collisions with the in-menu boost page.
   const elStatus = document.getElementById('spa-boost-status');
   const elStatusContainer = document.getElementById('spa-boost-status-container');
@@ -169,18 +64,27 @@
   }
 
   function renderBoostState(user, me) {
+    // The app's resolved identity wins over a delayed pricing-page auth
+    // callback, including sign-out and profile-request failures.
+    const account = window.app?.authState;
+    if (account?.initialized) {
+      user = account.user;
+      me = user ? (account.me || me) : null;
+    }
     // Signed-out visitors: show a clear path to sign in / create an account,
     // alongside the pricing info. The auth panel was bound but permanently
     // hidden before, so a guest could never act on the upgrade call-to-action.
-    if (elAuthRequired) elAuthRequired.hidden = !!(user && me);
+    if (elAuthRequired) elAuthRequired.hidden = !!user || account?.initialized === false;
     if (elContent) elContent.hidden = false;
     if (elStatusContainer) elStatusContainer.hidden = true;
+    const freeSignup = document.getElementById('plan-free-signup');
+    if (freeSignup) freeSignup.hidden = !!user || account?.initialized === false;
 
     // Mark the user's current tier on each pricing card.
     const plan = (user && me) ? (me.plan || { plan: 'free', name: 'Free' }) : { plan: 'free' };
     ['free', 'boost', 'max'].forEach((key) => {
       const el = document.getElementById(`plan-tier-current-${key}`);
-      if (el) el.hidden = plan.plan !== key;
+      if (el) el.hidden = !user || !me || plan.plan !== key;
     });
 
     // Don't offer an upgrade-to-itself CTA on the plan the user already owns —
@@ -214,48 +118,6 @@
     // Free user: the pricing tiers (#spa-boost-content) are visible by default.
     if (elBtnAccount) elBtnAccount.hidden = false;
     setStatus('', '');
-  }
-
-  // Waitlist intent capture — stores the email locally so we can notify the
-  // user when Boost opens. No payment, no server billing dependency.
-  let waitlistBound = false;
-  function setupWaitlist() {
-    const emailInput = document.getElementById('spa-boost-notify-email');
-    const btn = document.getElementById('spa-btn-boost-notify');
-    const statusEl = document.getElementById('spa-boost-notify-status');
-    if (!btn || !emailInput) return;
-
-    // Prefill a previously-saved email so returning visitors see their spot reserved.
-    try {
-      const saved = window.localStorage.getItem('sidastuff.boost.waitlist');
-      if (saved) {
-        emailInput.value = saved;
-        if (statusEl) {
-          statusEl.textContent = "You're on the list — we'll email you when Boost opens.";
-          statusEl.className = 'account-status success';
-        }
-      }
-    } catch (_) {}
-
-    if (waitlistBound) return;
-    waitlistBound = true;
-    btn.addEventListener('click', () => {
-      const email = (emailInput.value || '').trim();
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-        if (statusEl) {
-          statusEl.textContent = 'Enter a valid email to reserve your spot.';
-          statusEl.className = 'account-status error';
-        }
-        return;
-      }
-      try { window.localStorage.setItem('sidastuff.boost.waitlist', email); } catch (_) {}
-      if (statusEl) {
-        statusEl.textContent = "You're on the list — we'll email you when Boost opens.";
-        statusEl.className = 'account-status success';
-      }
-      btn.disabled = true;
-      btn.querySelector('.btn-label').textContent = 'Reserved ✓';
-    });
   }
 
   let authSubscriptionAttached = false;

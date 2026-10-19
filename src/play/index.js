@@ -15,7 +15,7 @@ export class PlayExperience {
     this.app = app; this.root = root; this.api = new PlayApi(app);
     this.preferences = loadPlayPreferences(); this.control = TIME_CONTROLS.find(c => c.time === 10 && !c.increment); this.rated = false;
     try { const saved = JSON.parse(localStorage.getItem('sing.play.setup') || '{}'); this.control = TIME_CONTROLS.find(c => c.time === saved.time && c.increment === saved.increment) || this.control; this.rated = saved.rated === true; } catch {}
-    this.profile = null; this.activeGames = []; this.recentGames = []; this.connected = false; this.full = null; this.state = null; this.identity = ''; this.sessionVersion = 0; this.activityRevision = 0;
+    this.profile = null; this.reviewStats = null; this.activeGames = []; this.recentGames = []; this.connected = false; this.full = null; this.state = null; this.identity = ''; this.sessionVersion = 0; this.activityRevision = 0;
     this.gameController = null; this.eventController = null; this.seekController = null; this.pending = null; this.challenge = null; this.gameConnection = 'connecting'; this.refreshTask = null;
     this.mount();
     this.sounds = app.boardSounds; this.sounds.setPreferences(this.preferences);
@@ -34,9 +34,11 @@ export class PlayExperience {
     window.addEventListener('app:route', event => {
       if (!event.detail?.route?.startsWith('/play')) {
         this.root.classList.remove('play-focus');
-        // Play streams are useful only while its UI is visible. Releasing them
-        // keeps route changes and the rest of the app free of background work.
-        this.closeStreams(); this.eventReady = false;
+        // Keep one stream for a game that is still being played so clocks and
+        // turn notifications stay current. Idle lobby streams can be released.
+        if (!this.full || isFinished(this.state?.status)) this.closeStreams();
+        else for (const key of ['eventController', 'seekController']) { this[key]?.abort(); this[key] = null; }
+        this.eventReady = false;
       }
     });
     window.addEventListener('online', () => { this.reconnectNow(); });
@@ -48,25 +50,25 @@ export class PlayExperience {
   $(name) { return this.root.querySelector(`[data-play="${name}"]`); }
   mount() {
     this.root.innerHTML = `
-      <div class="play-heading"><div><span class="eyebrow">ONLINE CHESS</span><h1>Play <span class="beta-badge">BETA</span></h1><p>Play rated or casual games through Lichess.</p></div><div class="play-heading-actions"><span class="play-provider">Powered by <a href="https://lichess.org" target="_blank" rel="noopener noreferrer">Lichess ↗</a></span><button type="button" class="icon-button btn-secondary" data-action="settings" aria-label="Game settings">${icon('tune')}</button></div></div>
+      <div class="play-heading"><div><h1>Play <span class="beta-badge">BETA</span></h1></div><div class="play-heading-actions"><span class="play-provider">Via <a href="https://lichess.org" target="_blank" rel="noopener noreferrer">Lichess ↗</a></span><button type="button" class="icon-button btn-secondary" data-action="settings" aria-label="Game settings">${icon('tune')}</button></div></div>
       <div class="play-notice" data-play="notice" role="status" aria-live="polite" hidden></div>
       <div class="play-layout">
         <div class="play-arena">
           <div class="play-player" data-play="player-top"><span class="play-avatar">${icon('person')}</span><div><strong data-play="name-top">Opponent</strong><span data-play="detail-top">No active game</span></div><div class="play-clock" data-play="clock-black" aria-label="Black clock">10:00</div></div>
           <div class="board-wrapper"><div id="play-chess-board" data-play="board" class="chess-board"></div><div class="play-board-loading" data-play="board-loading" hidden><span class="spinner"></span><span>Connecting to your game…</span></div></div>
-          <div class="play-player" data-play="player-bottom"><span class="play-avatar play-avatar-self">${icon('person')}</span><div><strong data-play="name-bottom">You</strong><span data-play="detail-bottom">Select a time control to start</span></div><div class="play-clock" data-play="clock-white" aria-label="White clock">10:00</div></div>
+          <div class="play-player" data-play="player-bottom"><span class="play-avatar play-avatar-self">${icon('person')}</span><div><strong data-play="name-bottom">You</strong><span data-play="detail-bottom">Choose a time control</span></div><div class="play-clock" data-play="clock-white" aria-label="White clock">10:00</div></div>
           <div class="play-board-toolbar"><span class="play-connection" data-play="connection"><span class="status-dot"></span> Ready to play</span><div><button type="button" class="btn btn-ghost btn-small" data-action="cancel-premove" data-play="premove" hidden>Cancel premove</button><button type="button" class="icon-button btn-ghost" data-action="flip" aria-label="Flip board" title="Flip board">${icon('swap_vert')}</button><button type="button" class="icon-button btn-ghost" data-action="focus" aria-label="Toggle focus mode" title="Focus mode">${icon('fullscreen')}</button></div></div>
         </div>
         <aside class="play-side">
-          <section class="play-setup card" data-play="lobby"><div class="play-section-head"><div><span class="eyebrow">GAME SETUP</span><h2>Play Online</h2></div>${icon('chess')}</div>
+          <section class="play-setup card" data-play="lobby"><div class="play-section-head"><h2>New game</h2></div>
             <div data-play="account" class="play-account"></div>
-            <fieldset class="play-time-controls"><legend>Time control</legend>${['Bullet', 'Blitz', 'Rapid', 'Classical'].map(group => `<div class="play-time-group"><span>${group}</span><div>${TIME_CONTROLS.filter(c => c.group === group).map(c => `<button type="button" data-control="${c.time}+${c.increment}" aria-pressed="false" ${c.mode === 'unavailable' ? 'disabled title="Bullet is unavailable through the Lichess Board API"' : ''}>${c.time}<small> + ${c.increment}</small></button>`).join('')}</div></div>`).join('')}</fieldset>
+            <fieldset class="play-time-controls"><legend>Time control</legend>${['Bullet', 'Blitz', 'Rapid', 'Classical'].map(group => `<div class="play-time-group"><span>${group}</span><div>${TIME_CONTROLS.filter(c => c.group === group).map(c => `<button type="button" data-control="${c.time}+${c.increment}" aria-pressed="false" ${c.mode === 'unavailable' ? 'disabled title="Bullet is unavailable"' : ''}>${c.time}<small> + ${c.increment}</small></button>`).join('')}</div></div>`).join('')}</fieldset>
             <p class="play-control-note" data-play="control-note"></p>
             <div class="play-rated" role="group" aria-label="Game type"><button type="button" data-rated="false">Casual</button><button type="button" data-rated="true">Rated</button></div>
-            <button type="button" class="btn btn-primary play-start" data-play="start" data-action="start">${icon('play_arrow')} Play Online <span data-play="start-control">10 + 0</span></button>
+            <button type="button" class="btn btn-primary play-start" data-play="start" data-action="start">${icon('play_arrow')} <span data-play="start-label">Find match</span><span data-play="start-control">10 + 0</span></button>
             <div class="play-search" data-play="search" hidden><span class="spinner"></span><div><strong data-play="search-title">Finding your game</strong><small data-play="search-detail"></small></div><button type="button" class="btn btn-ghost btn-small" data-action="cancel-search">Cancel</button></div>
             <details class="play-friend" data-play="friend"><summary>Challenge a friend</summary><form data-play="friend-form"><label class="field"><span class="field-label">Lichess username</span><input class="input-select" data-play="friend-name" autocomplete="off" maxlength="30" pattern="[A-Za-z0-9_-]{2,30}" placeholder="Your friend’s username" required></label><label class="field"><span class="field-label">Your pieces</span><select class="input-select" data-play="friend-color"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></label><button type="submit" class="btn btn-secondary" data-play="challenge-button">Send challenge</button></form><div data-play="outgoing" class="play-outgoing" hidden></div></details>
-            <p class="play-small-note">Bullet is unavailable. Blitz supports friend challenges. Rapid and classical support public matchmaking.</p>
+            <p class="play-small-note">Blitz supports friend challenges. Choose rapid or classical for matchmaking.</p>
           </section>
           <section class="play-live card" data-play="live" hidden><div class="play-section-head"><h2 data-play="live-title">Your game</h2><span class="play-live-pill" data-play="live-pill">LIVE</span></div><p class="play-game-caption" data-play="game-caption"></p><p class="play-turn" data-play="turn" role="status"></p><div class="play-material" data-play="material"></div><div class="play-moves" data-play="moves" aria-label="Game moves"></div><div class="play-draw-offer" data-play="draw-offer" hidden><strong>Your opponent offers a draw</strong><button type="button" class="btn btn-secondary btn-small" data-action="accept-draw">Accept</button><button type="button" class="btn btn-ghost btn-small" data-action="decline-draw">Decline</button></div><div data-play="game-actions" class="play-game-actions"><button type="button" class="btn btn-secondary btn-small" data-action="offer-draw">Offer draw</button><button type="button" class="btn btn-ghost btn-small" data-action="resign">Resign</button><button type="button" class="btn btn-ghost btn-small" data-play="abort-button" data-action="abort" hidden>Abort</button></div><div class="play-confirm" data-play="confirm" hidden><span data-play="confirm-text"></span><button type="button" class="btn btn-secondary btn-small" data-action="confirm-action">Confirm</button><button type="button" class="btn btn-ghost btn-small" data-action="dismiss-confirm">Cancel</button></div><p class="play-fairplay-note">${icon('shield')} Analysis becomes available after the game.</p><a href="/play" data-route="/play" class="btn-link" data-action="lobby">Back to Play</a></section>
           <section class="play-results card" data-play="results" hidden aria-live="polite"><span class="play-result-icon" data-play="result-icon">${icon('emoji_events')}</span><span class="eyebrow">GAME COMPLETE</span><h2 data-play="result-title"></h2><p data-play="result-reason"></p><div class="play-result-opponent" data-play="result-opponent"></div><div class="play-result-facts" data-play="result-facts"></div><button type="button" class="btn btn-primary play-review" data-action="review">${icon('analytics')} Review Game</button><button type="button" class="btn btn-secondary" data-action="again">${icon('replay')} Play Again</button><div class="play-result-links"><a data-play="lichess-link" target="_blank" rel="noopener noreferrer">View on Lichess ↗</a><button type="button" class="btn-link" data-action="download">Download PGN</button></div><button type="button" class="btn btn-ghost" data-action="lobby">Return to Play</button></section>
@@ -105,6 +107,7 @@ export class PlayExperience {
     } else if (this.app.authState.user) await this.refresh();
     const resume = query.get('game');
     if (resume && /^[A-Za-z0-9]{8}$/.test(resume) && this.connected) await this.resume(resume);
+    else if (this.full && !isFinished(this.state?.status) && this.connected && !this.gameController) await this.resume(this.full.id);
   }
   authChanged() {
     const next = this.app.authState.user?.uid || '';
@@ -119,7 +122,7 @@ export class PlayExperience {
     const version = this.sessionVersion, activity = this.activityRevision;
     this.refreshTask = (async () => {
       const data = await this.api.request('/status'); if (version !== this.sessionVersion) return;
-      this.configured = data.configured; this.connected = data.connected; this.profile = data.profile;
+      this.configured = data.configured; this.connected = data.connected; this.profile = data.profile; this.reviewStats = data.reviewStats || null;
       this.recentGames = data.recentGames || [];
       if (activity === this.activityRevision) {
         this.activeGames = data.activeGames || [];
@@ -144,8 +147,15 @@ export class PlayExperience {
     if (!this.app.authState.user) el.innerHTML = `<div><strong>Sign in required</strong><p>Sign in before connecting Lichess.</p></div><a class="btn btn-secondary btn-small" href="/login" data-route="/login">Sign in</a>`;
     else if (!this.connected) el.innerHTML = `<div><strong>Lichess is not connected</strong><p>Connect your account to play online.</p></div><button type="button" class="btn btn-secondary btn-small" data-action="connect">Connect Lichess</button>`;
     else {
-      const p = this.profile || {}, perfs = p.perfs || {};
+      const p = this.profile || {}, perfs = p.perfs || {}, stats = this.reviewStats || {};
       el.innerHTML = `<div class="play-account-top"><span class="play-avatar play-avatar-self">${icon('person')}</span><div><a href="https://lichess.org/@/${encodeURIComponent(p.username || p.id || '')}" target="_blank" rel="noopener noreferrer"><strong>${escape(p.title ? `${p.title} ` : '')}${escape(p.username || p.id)}</strong> ↗</a><small><span class="status-dot"></span> Connected</small></div><button type="button" class="btn-link" data-action="disconnect">Disconnect</button></div><div class="play-ratings">${['bullet', 'blitz', 'rapid', 'classical'].map(key => `<span>${key}<strong>${perfs[key]?.games ? `${escape(perfs[key].rating)}${perfs[key].prov ? '?' : ''}` : '—'}</strong></span>`).join('')}</div>${p.count?.all != null ? `<p class="play-profile-stat">${Number(p.count.all).toLocaleString()} games · ${Number(p.count.win || 0).toLocaleString()} wins</p>` : ''}`;
+      const ratings = Object.entries(perfs).filter(([, perf]) => Number.isFinite(Number(perf?.rating)))
+        .sort((a, b) => Number(b[1].games || 0) - Number(a[1].games || 0));
+      const ratingGrid = el.querySelector('.play-ratings');
+      if (ratingGrid) ratingGrid.innerHTML = ratings.map(([key, perf]) => `<span>${escape(key)}<strong>${escape(perf.rating)}${perf.prov ? '?' : ''}</strong><small>${Number(perf.games || 0).toLocaleString()} games</small></span>`).join('');
+      el.querySelector('.play-profile-stat')?.remove();
+      const seconds = Number(p.playTime?.total || 0);
+      el.insertAdjacentHTML('beforeend', `${p.count ? `<div class="play-profile-stats"><span><strong>${Number(p.count.all || 0).toLocaleString()}</strong> games</span><span><strong>${Number(p.count.win || 0).toLocaleString()}</strong> wins</span><span><strong>${Number(p.count.loss || 0).toLocaleString()}</strong> losses</span><span><strong>${Number(p.count.draw || 0).toLocaleString()}</strong> draws</span>${seconds ? `<span><strong>${Math.round(seconds / 3600).toLocaleString()}</strong> hours</span>` : ''}</div>` : ''}${stats.gamesReviewed ? `<div class="play-profile-stats play-review-stats"><span><strong>${Number(stats.brilliant || 0).toLocaleString()}</strong> brilliant</span><span><strong>${Number(stats.great || 0).toLocaleString()}</strong> great</span><span><strong>${Number(stats.best || 0).toLocaleString()}</strong> best</span><span><strong>${Number(stats.movesReviewed || 0).toLocaleString()}</strong> reviewed moves</span></div>` : ''}`);
     }
     this.renderSetup();
   }
@@ -155,6 +165,7 @@ export class PlayExperience {
     for (const el of this.root.querySelectorAll('[data-rated]')) el.setAttribute('aria-pressed', String(el.dataset.rated === String(this.rated)));
     this.$('control-note').textContent = this.control.mode === 'challenge' ? 'Blitz is available through a friend challenge.' : `${this.control.group} · ${this.control.time} minutes${this.control.increment ? ` + ${this.control.increment} seconds per move` : ' per side'}`;
     this.$('start-control').textContent = `${this.control.time} + ${this.control.increment}`;
+    this.$('start-label').textContent = this.control.mode === 'challenge' ? 'Challenge a friend' : 'Find match';
     this.$('start').disabled = Boolean(this.seekController || this.challenge || this.control.mode === 'unavailable');
     this.$('challenge-button').disabled = Boolean(!this.connected || this.seekController || this.challenge || this.control.mode === 'unavailable');
     if (!this.full || isFinished(this.state?.status) && !this.$('lobby').hidden) this.clocks?.sync({ white: this.control.time * 60000, black: this.control.time * 60000, running: null });
@@ -171,7 +182,7 @@ export class PlayExperience {
       const status = game.status || game.state?.status;
       const result = game.winner ? game.winner === (isWhite ? 'white' : 'black') ? 'Won' : 'Lost' : ['aborted', 'noStart'].includes(status) ? 'Ended' : 'Draw';
       return `<button type="button" class="play-game-row" data-review-game="${escape(gameId(game))}"><span class="play-history-result ${result.toLowerCase()}">${result === 'Won' ? '+' : result === 'Lost' ? '−' : '='}</span><span><strong>${escape(title)}</strong><small>${escape(game.speed || game.perf || 'Chess')} · ${escape(result)}</small></span><span class="play-review-label">Review ${icon('arrow_forward')}</span></button>`;
-    }).join('') : `<p class="play-empty">${this.connected ? 'Completed games will appear here, ready to review.' : 'Your completed games and reviews, in one place.'}</p>`;
+    }).join('') : `<p class="play-empty">${this.connected ? 'No completed games yet. Start a game above.' : 'Connect Lichess to load recent games.'}</p>`;
   }
   saveSetup() { try { localStorage.setItem('sing.play.setup', JSON.stringify({ time: this.control.time, increment: this.control.increment, rated: this.rated })); } catch {} }
   async click(event) {
@@ -300,6 +311,7 @@ export class PlayExperience {
           await this.api.stream(`/game/${id}/stream`, event => {
             if (controller.signal.aborted || this.gameController !== controller) return;
             if (event.type === 'gameFull') {
+              this.board.restoreAuthoritative?.();
               if (event.variant?.key && event.variant.key !== 'standard') { const error = new Error('This game uses a variant. Continue it on Lichess.'); error.status = 400; throw error; }
               const firstPosition = this.full?.id !== id;
               this.full = event; this.full.id = id; this.color = event.white?.id?.toLowerCase() === this.profile?.id?.toLowerCase() ? 'white' : 'black';
@@ -382,7 +394,7 @@ export class PlayExperience {
     this.board.showOptimisticMove(move); this.board.setPending(true); this.$('turn').textContent = 'Opponent’s move';
     try {
       await this.api.post(`/game/${id}/move`, { move, ply });
-      if (this.pending === token) this.pendingTimer = setTimeout(() => { if (this.pending === token) { this.message('Confirming your move with the server…'); this.gameController?.abort(); this.gameController = null; this.run(() => this.resume(id)); } }, 7000);
+      if (this.pending === token) this.pendingTimer = setTimeout(() => { if (this.pending === token) { this.message('Confirming your move…'); this.gameController?.abort(); this.gameController = null; this.run(() => this.resume(id)); } }, 7000);
     } catch (error) {
       if (this.pending !== token || this.full?.id !== id) return;
       // A network failure may follow an accepted move. Fetch a fresh full state before another submission.
@@ -391,6 +403,7 @@ export class PlayExperience {
   }
   async gameAction(action) { if (!this.full || isFinished(this.state?.status)) return; await this.api.post(`/game/${this.full.id}/action`, { action }); }
   renderResult() {
+    const firstDisplay = this.$('results').hidden;
     const result = resultFor(this.full, this.state, this.color), opponent = this.full[this.color === 'white' ? 'black' : 'white'];
     this.$('live').hidden = true; this.$('lobby').hidden = true; this.$('results').hidden = false; this.$('history').hidden = true; this.root.classList.add('play-has-result');
     this.$('result-title').textContent = result.outcome; this.$('result-reason').textContent = result.reason;
@@ -400,11 +413,12 @@ export class PlayExperience {
     const duration = game?.lastMoveAt && game?.createdAt ? Math.max(0, Math.round((game.lastMoveAt - game.createdAt) / 60000)) : null;
     this.$('result-facts').textContent = `${this.$('game-caption').textContent}${Number.isFinite(ratingDiff) ? ` · ${ratingDiff > 0 ? '+' : ''}${ratingDiff} rating` : ''}${duration !== null ? ` · ${duration < 1 ? 'Under 1 min' : `${duration} min`}` : ''}`;
     this.$('lichess-link').href = `https://lichess.org/${this.full.id}`;
+    if (firstDisplay && window.matchMedia('(max-width: 740px)').matches) requestAnimationFrame(() => this.$('results').scrollIntoView({ block: 'nearest', behavior: 'instant' }));
   }
   showGame() { this.$('lobby').hidden = true; this.$('live').hidden = false; this.$('results').hidden = true; this.$('history').hidden = true; this.root.classList.add('play-in-game'); this.root.classList.remove('play-has-result'); }
   showLobby() {
     this.$('lobby').hidden = false; this.$('live').hidden = true; this.$('results').hidden = true; this.$('history').hidden = false; this.root.classList.remove('play-in-game', 'play-has-result');
-    if (!this.full || isFinished(this.state?.status)) { this.gameController?.abort(); this.gameController = null; this.clocks?.stop(); this.board?.setPosition(INITIAL, { interactive: false }); this.$('name-top').textContent = 'Opponent'; this.$('detail-top').textContent = 'No active game'; this.$('name-bottom').textContent = this.profile?.username || 'You'; this.$('detail-bottom').textContent = 'Select a time control to start'; this.$('connection').innerHTML = '<span class="status-dot"></span> Ready'; }
+    if (!this.full || isFinished(this.state?.status)) { this.gameController?.abort(); this.gameController = null; this.clocks?.stop(); this.board?.setPosition(INITIAL, { interactive: false }); this.$('name-top').textContent = 'Opponent'; this.$('detail-top').textContent = 'No active game'; this.$('name-bottom').textContent = this.profile?.username || 'You'; this.$('detail-bottom').textContent = 'Choose a time control'; this.$('connection').innerHTML = '<span class="status-dot"></span> Ready'; }
     this.renderSetup();
   }
   savedGames() { try { return JSON.parse(localStorage.getItem(`sing.play.games.${this.identity}`) || '[]'); } catch { return []; } }
@@ -457,7 +471,7 @@ export class PlayExperience {
     this.message('');
   }
   reconnectNow() { if (this.full && !isFinished(this.state?.status)) { const id = this.full.id; this.gameController?.abort(); this.gameController = null; this.run(() => this.resume(id)); } }
-  closeStreams() { for (const key of ['gameController', 'eventController', 'seekController']) { this[key]?.abort(); this[key] = null; } clearTimeout(this.pendingTimer); clearTimeout(this.noticeTimer); }
+  closeStreams() { for (const key of ['gameController', 'eventController', 'seekController']) { this[key]?.abort(); this[key] = null; } clearTimeout(this.pendingTimer); clearTimeout(this.noticeTimer); this.message(''); }
   destroy() { this.closeStreams(); clearInterval(this.refreshTimer); this.clocks.destroy(); this.board.destroy(); }
 }
 

@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import { Chess } from 'chess.js';
+import { DEFAULTS, normalizePreferences, exportPreferences, importPreferences, nextMistake, matchingMoves, schedulePuzzle, annotatedPgn } from '../src/ui/qol-state.js';
+
+assert.equal(normalizePreferences({ fontSize: 100 }).fontSize, 22);
+assert.equal(normalizePreferences({ coordinates: 'invalid', sounds: 'false' }).coordinates, 'inside');
+assert.equal(normalizePreferences({ coordinates: 'invalid', sounds: 'false' }).sounds, true);
+const data = new Map([['sidastuff.usability', JSON.stringify(DEFAULTS)], ['firebase-token', 'private'], ['sidastuff.coachChats.user', 'private']]);
+const storage = { getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) };
+assert.deepEqual(Object.keys(exportPreferences(storage).preferences), ['sidastuff.usability']);
+assert.throws(() => importPreferences({ version: 1, preferences: { 'firebase-token': 'overwrite' } }, storage));
+assert.equal(data.get('firebase-token'), 'private');
+assert.throws(() => importPreferences({ version: 1, preferences: { 'sidastuff.usability': '{broken' } }, storage));
+const results = [{ classificationKey: 'BOOK' }, { classification: { key: 'MISTAKE', name: 'Mistake' } }, { classificationKey: 'MISS' }, { classification: 'blunder' }];
+assert.equal(nextMistake(results, -1), 1);
+assert.equal(nextMistake(results, 3), 1);
+assert.equal(nextMistake(results, 1, -1), 3);
+assert.deepEqual(matchingMoves(results, 'missed'), [2]);
+assert.equal(schedulePuzzle({}, false, 0).due, 600000);
+assert.ok(schedulePuzzle({ repetitions: 2 }, true, 0).due > schedulePuzzle({}, true, 0).due);
+const pgn = annotatedPgn({ moves: ['e4', 'e5', 'Nf3'], headers: { White: 'Alice', Black: 'Bob', Result: '*' }, results: [{ classification: { name: 'Good' }, evalAfter: 25, bestMove: 'd2d4', moveUci: 'e2e4' }], notes: { 0: { text: 'Plan: develop {pieces}' } } }, Chess);
+assert.match(pgn, /Plan: develop pieces/);
+assert.match(pgn, /\[%eval 0.25\]/);
+assert.match(pgn, /\(1\. d4\)/);
+const replay = new Chess(); assert.ok(replay.load_pgn(pgn)); assert.deepEqual(replay.history(), ['e4', 'e5', 'Nf3']);
+const varied = annotatedPgn({ moves: ['e4', 'e5', 'Nf3'], variations: { 0: [{ moves: ['c5'] }], 2: [{ moves: ['Nc6'] }] }, notes: { '-1': { text: 'Opening plan' } } }, Chess);
+assert.match(varied, /\(1\.\.\. c5\)/); assert.match(varied, /\(2\. Nf3 Nc6\)/); assert.match(varied, /Opening plan/);
+console.log('PASS preference validation, private data exclusion, atomic imports, review filters, repetition scheduling, and annotated PGN round trip');

@@ -204,6 +204,24 @@ try {
     await page.keyboard.press('Enter'); await page.keyboard.press('ArrowUp'); await page.keyboard.press('ArrowUp'); await page.keyboard.press('Enter');
     check(await page.evaluate(() => moves.length === 2 && moves.at(-1) === 'e2e4'), `${width}px: keyboard can select, navigate and submit a legal move`);
     check(await page.evaluate(() => { const fen = board.fen; return !board.setPosition('invalid') && board.fen === fen; }), `${width}px: malformed stream position preserves the valid board`);
+    await page.evaluate(() => {
+      moves.length = 0; board.cancelPremove(); board.setPreferences({ multiPremoves: true, touchConfirm: false });
+      const chess = new Chess(); chess.move('e4'); board.setPosition(chess.fen(), { interactive: true, pending: false });
+      board._activate('g1'); board._activate('f3'); board._activate('f3'); board._activate('g5');
+    });
+    check(await page.evaluate(() => board.premoves.length === 2 && !moves.length), `${width}px: multiple premoves queue against the planned position`);
+    await page.evaluate(() => {
+      const chess = new Chess(); chess.move('e4'); chess.move('e5');
+      board.setPosition(chess.fen(), { interactive: true, pending: false });
+      board.setPosition(chess.fen(), { interactive: true, pending: true });
+    });
+    check(await page.evaluate(() => moves.join() === 'g1f3' && board.premoves.length === 1), `${width}px: only the first queued premove submits per opponent move`);
+    await page.evaluate(() => {
+      const chess = new Chess(); for (const san of ['e4', 'e5', 'Nf3']) chess.move(san);
+      board.setPosition(chess.fen(), { interactive: true, pending: false });
+      chess.move('Nc6'); board.setPosition(chess.fen(), { interactive: true, pending: false });
+    });
+    check(await page.evaluate(() => moves.join() === 'g1f3,f3g5' && !board.premoves.length), `${width}px: queued follow-up is revalidated and submits on the next turn`);
     await page.evaluate(() => board.destroy());
     check(await page.locator('.piece').count() === 0 && await page.locator('.drag-piece').count() === 0, `${width}px: destroying the board releases DOM overlays`);
     await page.close();

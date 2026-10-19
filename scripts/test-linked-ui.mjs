@@ -36,7 +36,10 @@ try {
         if (body) posts.push({ path: url.pathname, ...body });
         let payload;
         const linked = Object.entries(profile.savedUsernames).filter(([, name]) => name).map(([source, username]) => ({ source, username, puzzleRating: source === 'lichess' ? 1780 : 2345, ratingKind: source === 'lichess' ? 'current' : 'peak', ratings: { blitz: 1650 }, latest: { ...game, source, username, headers: source === 'lichess' ? game.headers : { ...game.headers, UTCDate: '2026.10.12' } }, games: [game] }));
-        if (url.pathname === '/api/linked-chess') {
+        // The synthetic account has no live game. A 503 here correctly keeps
+        // the real fair-play guard locked, so provide an authoritative fixture.
+        if (['/api/play/active', '/api/play/status'].includes(url.pathname)) payload = { configured: true, connected: false, activeGames: [] };
+        else if (url.pathname === '/api/linked-chess') {
           if (body?.action === 'import-rating') profile.puzzleRating = body.source === 'lichess' ? 1780 : 2345;
           if (body?.action === 'unlink') profile.savedUsernames[body.source] = '';
           payload = { linked: body?.action === 'unlink' ? linked.filter(item => item.source !== body.source) : linked };
@@ -81,7 +84,7 @@ try {
     await toggle.check();
     await page.waitForFunction(() => document.querySelector('#page-settings .auto-review-beta').textContent.includes('watching'));
     check(enabled && posts.some(post => post.path === '/api/max-auto-review' && post.enabled), `${width}: Max opt-in wired to backend`);
-    check(await hub.locator('[data-auto-status]').innerText().then(text => text.includes('Watching for new completed games') && !text.includes('Enable the beta')), `${width}: enabled empty list shows watching state`);
+    check(await hub.locator('[data-auto-status]').innerText().then(text => text.includes('Watching your connected Lichess Play account') && !text.includes('Enable automatic reviews')), `${width}: enabled empty list shows watching state`);
     automaticStatus = 'retrying';
     await page.evaluate(() => window.LinkedChessHub.refresh());
     check(await hub.locator('[data-auto-status]').innerText().then(text => text.includes('last attempt failed') && text.includes('server will retry')), `${width}: failed attempt shows retry status`);

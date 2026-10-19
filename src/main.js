@@ -22,3 +22,5 @@ import './ui/linked-chess.js';
 
 import './ui/admin-profile.js';
 import './play/index.js';
+import './ui/quality-of-life.js';
+import './ui/training-journey.js';
