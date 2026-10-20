@@ -53,6 +53,32 @@ async function fetchSource(source, username, fetcher = fetchCompat) {
   return { source, username, puzzleRating, ratingKind, ratings, games, latest: games[0] || null, fetchedAt: Date.now() };
 }
 
+async function refreshCachedSource({ database, ref, source, username, now, fetchSourceFn }) {
+  const claim = await ref.transaction(current => {
+    if (current?.leaseUntil > now || current?.expiresAt > now) return;
+    return { ...current, leaseUntil: now + 45000 };
+  });
+  if (!claim.committed) return claim.snapshot.val()?.data || null;
+  const providerRef = database.ref(`linkedChessPrivate/providers/${source}`);
+  const owner = crypto.randomUUID();
+  let providerClaimed = false;
+  try {
+    const slot = await providerRef.transaction(current => current?.expiresAt > now ? undefined : { owner, expiresAt: now + 60000 });
+    if (!slot.committed) throw new Error('Provider sync is busy.');
+    providerClaimed = true;
+    const data = await fetchSourceFn(source, username);
+    await ref.set({ data, expiresAt: now + (source === 'chesscom' ? 15 * 60000 : 5 * 60000), leaseUntil: 0 });
+    return data;
+  } catch (error) {
+    const previous = claim.snapshot.val()?.data;
+    const data = previous || { source, username, error: error.statusCode === 400 ? error.message : 'Provider unavailable. Please try again later.' };
+    await ref.set({ data, expiresAt: now + 60000, leaseUntil: 0 });
+    return data;
+  } finally {
+    if (providerClaimed) await providerRef.transaction(current => current?.owner === owner ? null : undefined);
+  }
+}
+
 async function loadLinked(user, { database = initAdmin().db, now = Date.now(), fetchSourceFn = fetchSource, forceRefresh = false } = {}) {
   const saved = user._profile?.savedUsernames || {};
   const linked = [];
@@ -63,32 +89,15 @@ async function loadLinked(user, { database = initAdmin().db, now = Date.now(), f
     const ref = database.ref(`linkedChessPrivate/cache/${key}`);
     const cached = (await ref.once('value')).val();
     if (!forceRefresh && cached?.data && cached.expiresAt > now) { linked.push(cached.data); continue; }
-    const claim = await ref.transaction(current => {
-      if (current?.leaseUntil > now || current?.expiresAt > now) return;
-      return { ...current, leaseUntil: now + 45000 };
-    });
-    if (!claim.committed) {
-      const state = claim.snapshot.val();
-      linked.push(state?.data || { source, username, error: 'Account sync is in progress. Try again shortly.' });
+    if (!forceRefresh && cached?.data) {
+      // Stale-while-revalidate: page loads use the last successful snapshot and
+      // never wait on Lichess/Chess.com. One leased background task refreshes it.
+      linked.push({ ...cached.data, refreshing: true });
+      void refreshCachedSource({ database, ref, source, username, now, fetchSourceFn }).catch(() => {});
       continue;
     }
-    const providerRef = database.ref(`linkedChessPrivate/providers/${source}`);
-    const owner = crypto.randomUUID();
-    let providerClaimed = false;
-    try {
-      const slot = await providerRef.transaction(current => current?.expiresAt > now ? undefined : { owner, expiresAt: now + 60000 });
-      if (!slot.committed) throw new Error('Provider sync is busy.');
-      providerClaimed = true;
-      const data = await fetchSourceFn(source, username);
-      await ref.set({ data, expiresAt: now + (source === 'chesscom' ? 15 * 60000 : 60000), leaseUntil: 0 });
-      linked.push(data);
-    } catch (error) {
-      const data = { source, username, error: error.statusCode === 400 ? error.message : 'Provider unavailable. Please try again later.' };
-      await ref.set({ data, expiresAt: now + 60000, leaseUntil: 0 });
-      linked.push(data);
-    } finally {
-      if (providerClaimed) await providerRef.transaction(current => current?.owner === owner ? null : undefined);
-    }
+    linked.push(await refreshCachedSource({ database, ref, source, username, now, fetchSourceFn })
+      || { source, username, error: 'Account sync is in progress. Try again shortly.' });
   }
   return { linked, fetchedAt: now };
 }

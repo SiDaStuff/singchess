@@ -33,6 +33,6 @@ exports.handler = async event => {
       await users.patchProfile(user.uid, { savedUsernames: saved });
       user._profile.savedUsernames = saved;
     } else if (event.httpMethod !== 'GET') return users.json(405, { error: 'Use GET or POST.' });
-    return users.json(200, await linked.loadLinked(user, { forceRefresh: true }));
+    return users.json(200, await linked.loadLinked(user));
   } catch (error) { return users.json(error instanceof SyntaxError ? 400 : error.statusCode || 500, { error: error instanceof SyntaxError ? 'Invalid JSON.' : error.statusCode ? error.message : 'Account sync is unavailable. Please try again.' }); }
 };

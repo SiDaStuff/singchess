@@ -213,7 +213,9 @@ class ChessReviewApp {
 	    this._engineInitStarted = false;
 	    // Loading Stockfish is tied to a chess action or a review route. An
 	    // idle Home, account or live Play visit needs no WASM download.
-		    this._initAuth();
+		    const startAuth = () => this._initAuth();
+		    if ('requestIdleCallback' in window) requestIdleCallback(startAuth, { timeout: 1800 });
+		    else setTimeout(startAuth, 250);
 		    this._updateBoard();
 		    this._updateLiveEvalPanel();
 		    this._resetInsightPanel();
@@ -2100,7 +2102,15 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    const status = document.getElementById('spa-ban-user-status');
 	    const set = (m, c) => { if (status) { status.textContent = m; status.className = 'account-status ' + c; } };
 	    if (!email) return;
-	    if (ban && !reason) { window.alert('Reason required to ban.'); return; }
+	    if (ban && !reason) {
+	      window.Swal?.fire({
+	        icon: 'warning',
+	        title: 'Reason required',
+	        text: 'Enter a reason before banning this user.',
+	        confirmButtonText: 'OK',
+	      });
+	      return;
+	    }
 	    set('Working…', '');
 	    try {
 	      const res = await apiFetch('/api/admin/ban-user', {
@@ -2927,6 +2937,7 @@ return window.firebase;
                 const reportMatch = /^\/anticheat\/report\/([^/]+)/.exec(currentRoute);
                 if (reportMatch) this._renderAnticheatReportPage(reportMatch[1]);
               }
+              if (user && this.anticheatMode?.active) this._loadAnticheatReports(true).catch(() => {});
               // Re-evaluate the move-insights gate + review save-CTA now that
               // auth has resolved (they may have flashed for a signed-in user
               // whose authState.user was still null at render time).
@@ -5318,7 +5329,9 @@ if (this.elBtnAnticheatRefresh) {
 		    this._hideRoutePages();
 		    if (this.elMainMenu) this.elMainMenu.hidden = false;
 		    this._renderHomeQuickLoad();
-		    this._loadHomeStats();
+		    const loadStats = () => this._loadHomeStats();
+		    if ('requestIdleCallback' in window) requestIdleCallback(loadStats, { timeout: 2500 });
+		    else setTimeout(loadStats, 1000);
 		    if (this.elMainContent) this.elMainContent.hidden = false;
 		    document.body.classList.add('menu-active');
 		    document.body.classList.remove('in-app-route');

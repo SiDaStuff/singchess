@@ -3,10 +3,10 @@
 // Inference runs on NVIDIA ONLY. There is no Fast/Strong tier anymore — the
 // feature set was simplified to a single model, with a cheap fallback:
 //
-//   model list = [ openai/gpt-oss-120b, openai/gpt-oss-20b ]
+//   model list = [ nvidia/nemotron-3-ultra-550b-a55b, openai/gpt-oss-120b, openai/gpt-oss-20b ]
 //
-// chatCompletion tries the list in order. If openai/gpt-oss-120b is unavailable
-// (quota exhausted, rate-limited, or any error), it falls back to gpt-oss-20b
+// chatCompletion tries the list in order. If a model is unavailable (quota
+// exhausted, rate-limited, or any error), it falls through to the next model
 // so the coach keeps answering. All models are OpenAI-compatible; no adapter
 // is needed.
 //
@@ -17,13 +17,13 @@ const { fetchCompat } = require('./fetch-compat');
 
 const NVIDIA_BASE_URL = process.env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1';
 
-// Ordered model fallback list. openai/gpt-oss-120b is the primary/recommended model;
-// openai/gpt-oss-20b is used when 120b runs out. EVERY model here must be NVIDIA-hosted.
+// Ordered model fallback list. Nemotron Ultra is primary; GPT-OSS models are
+// fallbacks when it is unavailable.
 // The first configured, non-empty entry wins per-run (all listed are tried in
 // order until one succeeds).
 function nvidiaModelList() {
   const fromEnv = String(process.env.NVIDIA_MODELS || '').split(',').map((m) => m.trim()).filter(Boolean);
-  const defaults = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+  const defaults = ['nvidia/nemotron-3-ultra-550b-a55b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
   return fromEnv.length ? fromEnv : defaults;
 }
 
@@ -160,7 +160,7 @@ function assembleStreamResult(content, toolCalls, finishReason, usage) {
 }
 
 // One NVIDIA call. Returns the raw fetch Response (already OpenAI-shaped).
-// modelKey is an entry from nvidiaModelList(), e.g. 'openai/gpt-oss-120b'.
+// modelKey is an entry from nvidiaModelList(), e.g. 'nvidia/nemotron-3-ultra-550b-a55b'.
 // NVIDIA's base URL already ends in /v1, so chat/completions is appended directly.
 async function callNvidia({ opts, model }) {
   const apiKey = process.env.NVIDIA_API_KEY;
@@ -237,12 +237,18 @@ async function chatCompletion(opts) {
   for (const model of models) {
     if (lastErr && lastErr.quotaExhausted) {
       console.warn(`[llm] nvidia/${lastErr.model} quota-exhausted; failing over to ${model} immediately (speed).`);
-      try { return await callNvidia({ opts, model }); } catch (err) { lastErr = err; continue; }
+      try {
+        const response = await callNvidia({ opts, model });
+        response.__singChessModel = model;
+        return response;
+      } catch (err) { lastErr = err; continue; }
     }
     let tried = 0;
     for (; tried < PROVIDER_RETRIES; tried++) {
       try {
-        return await callNvidia({ opts, model });
+        const response = await callNvidia({ opts, model });
+        response.__singChessModel = model;
+        return response;
       } catch (err) {
         lastErr = err;
         const applyNoRetry = !isRetryable(err) || err.quotaExhausted;
@@ -304,6 +310,7 @@ TOOLS.
   - web_search: verify external facts (openings, players, events, theory). No API key — Wikipedia + DuckDuckGo.
   - exa_search: real-time web search via Exa (only available when the server has EXA_API_KEY set). Prefer this over web_search for ANY time-sensitive question — recent tournaments, current ratings, the latest news, a player's recent results, etc. Returns results with title, URL, published date, and a short snippet. Always cite the source URL inline.
   - coach_games: read linked accounts, public ratings, recent completed PGNs, and recent automatic review summaries. Use this first when the user asks about their games or training. Chess.com puzzle ratings are published peaks; never describe them as current. Use fetch_games with the saved username for clickable game cards.
+  - For recurring-mistake or exercise requests, use coach_games first, inspect the supplied review summaries/recent PGNs, and ground every exercise in verified evidence. Produce exactly three exercises when requested; each must include a legal FEN position, a question, a verified answer, and a specific training goal. Call show_board for every exercise position and stockfish for each concrete answer before presenting it.
   - lichess_opening: name an opening and get master-game White/Draw/Black stats for a line. Pass moves as UCI strings. Use for ANY "what opening is this" or opening-name question instead of guessing — always cite the name + W/D/B.
   - lichess_player: look up a Lichess player's public profile + ratings by username. Use when the user names a Lichess player; never invent ratings.
   - user_plan_stats: look up the user's current plan (Free/Boost/Max) and remaining quota for reviews, anticheat, and coach tokens. Use when they ask about limits, subscription, or "how much do I have left".

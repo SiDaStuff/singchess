@@ -9,8 +9,7 @@
 // History sent to the backend on each request (the backend no longer persists).
 
 (function () {
-  // No Fast/Strong model preference anymore — the coach uses a single model
-  // (gpt-oss-120b, with a gpt-oss-20b fallback on the server).
+  // The server uses Nemotron Ultra first, then GPT-OSS fallbacks.
 
   const state = {
     app: null,            // the ChessReviewApp instance (for auth + engine)
@@ -264,9 +263,17 @@
     return wrap;
   }
 
-  function renameActiveChat() {
+  async function renameActiveChat() {
     const chat = activeChat(); if (!chat || state.streaming) return;
-    const title = window.prompt('Conversation name', chat.title || 'New chat');
+    const result = await window.AppDialog?.open({
+      title: 'Rename conversation',
+      input: 'text',
+      inputValue: chat.title || 'New chat',
+      inputPlaceholder: 'Conversation name',
+      confirmButtonText: 'Save',
+      showCancelButton: true,
+    });
+    const title = result?.isConfirmed ? result.value : '';
     if (!title?.trim()) return; chat.title = title.trim().slice(0, 80); chat.updatedAt = Date.now(); saveChats(); renderSidebar(); renderMessages();
   }
 
@@ -278,7 +285,7 @@
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
-  function handleMessageAction(button) {
+  async function handleMessageAction(button) {
     const chat = activeChat(); const index = Number(button.dataset.messageIndex); const message = chat?.messages[index];
     if (!chat || !message || state.streaming) return;
     const name = button.dataset.coachMessageAction;
@@ -301,7 +308,16 @@
     if (name === 'up' || name === 'down') {
       message.feedback = name; chat.updatedAt = Date.now(); saveChats(); renderMessages();
       let reason = '';
-      if (name === 'down') reason = window.prompt('What could be better? (optional)', '') || '';
+      if (name === 'down') {
+        const result = await window.AppDialog?.open({
+          title: 'Feedback',
+          text: 'What could be better? (optional)',
+          input: 'textarea',
+          showCancelButton: true,
+          confirmButtonText: 'Send feedback',
+        });
+        reason = result?.isConfirmed ? String(result.value || '') : '';
+      }
       state.app?._authHeaders({ 'Content-Type': 'application/json' }).then((headers) => window.apiFetch('/api/coach/feedback', {
         method: 'POST', headers, cache: 'no-store', body: JSON.stringify({
           rating: name, reason, content: message.content, chatId: chat.id, messageTs: message.ts,
@@ -554,6 +570,11 @@
       };
       await readStream(response, {
         onInit: (data) => { if (data && data.pid) state.chatPid = data.pid; },
+        onModel: (model) => {
+          if (/gpt-oss/i.test(String(model || ''))) {
+            appendBubble('notice', 'Model fallback: this reply used a smaller GPT-OSS model because the primary model was unavailable. Verify important analysis with Stockfish.');
+          }
+        },
         onReasoning: showReasoning,
         onToken: (t) => {
           // First answer token: collapse the reasoning view and start the reply.
@@ -678,6 +699,7 @@
           if (event === 'token' && h.onToken) h.onToken(data.text || '');
           else if (event === 'reasoning' && h.onReasoning) h.onReasoning(data.text || '');
           else if (event === 'init' && h.onInit) h.onInit(data);
+          else if (event === 'model' && h.onModel) h.onModel(data.model);
           else if (event === 'tool_call' && h.onToolCall) h.onToolCall(data);
           else if (event === 'tool_status' && h.onToolStatus) h.onToolStatus(data);
           else if (event === 'tool_result_visible' && h.onToolResultVisible) h.onToolResultVisible(data);
@@ -1101,7 +1123,8 @@
     if (window.Swal && window.Swal.fire) {
       return window.Swal.fire(opts).then((r) => !!r.isConfirmed).catch(() => false);
     }
-    return Promise.resolve(window.confirm(opts.title + '\n' + (opts.text || '')));
+    const dialog = window.AppDialog?.open({ ...opts, showCancelButton: true });
+    return dialog ? dialog.then((r) => !!r?.isConfirmed) : Promise.resolve(false);
   }
 
   // ── UI helpers ───────────────────────────────────────────────────────
@@ -1338,10 +1361,14 @@
       const chat = activeChat(); if (!chat || state.streaming) return; chat.archived = !chat.archived; chat.updatedAt = Date.now(); saveChats(); renderSidebar();
     });
     el['btn-coach-export']?.addEventListener('click', exportActiveChat);
-    el['btn-coach-preferences']?.addEventListener('click', () => {
-      const rating = window.prompt('Your approximate rating (optional)', state.preferences.rating || '') ?? state.preferences.rating;
-      const openings = window.prompt('Openings you play (optional)', state.preferences.openings || '') ?? state.preferences.openings;
-      const style = window.prompt('Preferred coaching style: concise, practical, or detailed', state.preferences.style || 'practical') ?? state.preferences.style;
+    el['btn-coach-preferences']?.addEventListener('click', async () => {
+      const ask = async (title, inputValue, input = 'text') => {
+        const result = await window.AppDialog?.open({ title, input, inputValue, showCancelButton: true, confirmButtonText: 'Next' });
+        return result?.isConfirmed ? result.value : inputValue;
+      };
+      const rating = await ask('Your approximate rating (optional)', state.preferences.rating || '');
+      const openings = await ask('Openings you play (optional)', state.preferences.openings || '');
+      const style = await ask('Preferred coaching style: concise, practical, or detailed', state.preferences.style || 'practical');
       state.preferences = { rating: String(rating || '').slice(0, 20), openings: String(openings || '').slice(0, 300), style: String(style || '').slice(0, 40) };
       try { localStorage.setItem(`sidastuff.coachPreferences.${state.uid}`, JSON.stringify(state.preferences)); } catch {}
       scheduleRemoteSync();
@@ -1350,7 +1377,12 @@
       const key = `sidastuff.coachTasks.${state.uid}`; let tasks = [];
       try { tasks = JSON.parse(localStorage.getItem(key) || '[]'); } catch {}
       const text = tasks.length ? tasks.slice(0, 20).map((task, index) => `${index + 1}. ${task.done ? '✓ ' : ''}${task.text.replace(/\s+/g, ' ').slice(0, 140)}`).join('\n') : 'No saved study tasks yet.';
-      window.alert(text);
+      window.Swal?.fire({
+        icon: 'error',
+        title: 'Coach unavailable',
+        text,
+        confirmButtonText: 'OK',
+      });
     });
     el['btn-coach-weekly']?.addEventListener('click', () => {
       if (state.streaming) return;

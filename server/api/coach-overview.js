@@ -21,10 +21,10 @@ const { loadChess } = require('./_lib/analysis-loader');
 
 const HEARTBEAT_MS = 20000;
 // Overview replies are short, so reserve less than a full chat turn.
-const OVERVIEW_RESERVE_TOKENS = 1500;
+const OVERVIEW_RESERVE_TOKENS = 1800;
 // Cap the streamed reply length (keeps cost + latency low — overview is short).
-const OVERVIEW_MAX_TOKENS_MOVE = 320;
-const OVERVIEW_MAX_TOKENS_GAME = 900;
+const OVERVIEW_MAX_TOKENS_MOVE = 700;
+const OVERVIEW_MAX_TOKENS_GAME = 1400;
 
 // Dedicated reviewer prompt. NOT the conversational coach prompt — this one IS
 // a game reviewer that explains engine data concretely and briefly.

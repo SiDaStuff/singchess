@@ -190,11 +190,7 @@ class PlayService {
     await this.ref(`active/${uid}`).remove();
     return { connected: true, profile: profile(account) };
   }
-  async active(uid, connection = null, force = false) {
-    connection ||= await this.connection(uid, false);
-    if (!connection) return [];
-    const cached = await this.value(`active/${uid}`);
-    if (!force && cached && cached.checkedAt > this.now() - 4000) return cached.games || [];
+  async refreshActive(uid, connection) {
     if (this.activePending.has(uid)) return this.activePending.get(uid);
     const pending = (async () => {
       const data = await this.json('/api/account/playing?nb=50', { token: connection.token });
@@ -205,6 +201,17 @@ class PlayService {
     })();
     this.activePending.set(uid, pending);
     try { return await pending; } finally { this.activePending.delete(uid); }
+  }
+  async active(uid, connection = null, force = false, staleWhileRevalidate = false) {
+    connection ||= await this.connection(uid, false);
+    if (!connection) return [];
+    const cached = await this.value(`active/${uid}`);
+    if (!force && cached && cached.checkedAt > this.now() - 4000) return cached.games || [];
+    if (!force && staleWhileRevalidate && cached) {
+      void this.refreshActive(uid, connection).catch(() => {});
+      return cached.games || [];
+    }
+    return this.refreshActive(uid, connection);
   }
   async assertAnalysisAllowed(uid) {
     const connection = await this.connection(uid, false);
@@ -218,7 +225,7 @@ class PlayService {
     }
     const connection = await this.connection(uid, false);
     if (!connection) return { configured: true, connected: false, activeGames: [], recentGames: [], timeControls: CONTROLS };
-    const activeGames = await this.active(uid, connection);
+    const activeGames = await this.active(uid, connection, false, onlyActive);
     if (onlyActive) return { connected: true, activeGames };
     if (!connection.profileUpdatedAt || connection.profileUpdatedAt < this.now() - 60000) {
       const account = await this.json('/api/account', { token: connection.token });

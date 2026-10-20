@@ -3,7 +3,11 @@ import './ui/trusted-types.js';
 import './ui/critical.css';
 
 // Home is already in the HTML and can paint while controllers download.
-const application = import('./application.js');
+const application = new Promise((resolve, reject) => {
+  const start = () => import('./application.js').then(resolve, reject);
+  if ('requestIdleCallback' in window) requestIdleCallback(start, { timeout: 1200 });
+  else setTimeout(start, 150);
+});
 let ready = false;
 const controlsReady = new Promise(resolve => window.addEventListener('app:ready', () => { ready = true; resolve(); }, { once: true }));
 application.catch(error => {

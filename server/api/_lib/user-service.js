@@ -83,9 +83,8 @@ function initAdmin() {
   }
   if (!db) {
     const { SqlDatabase } = require('./sql-database');
-    const path = require('node:path');
     db = new SqlDatabase({
-      filename: path.resolve(process.env.SQLITE_DATABASE_PATH || path.join(__dirname, '../../data/application.sqlite')),
+      filename: require('./database-file').databaseFilename(),
       backup: require('./firebase-backup'),
     });
   }
@@ -150,10 +149,21 @@ async function requireUser(event) {
 
   const { admin: firebaseAdmin, db: database } = initAdmin();
   let decoded;
-  try { decoded = await firebaseAdmin.auth().verifyIdToken(token); }
+  try {
+    decoded = await firebaseAdmin.auth().verifyIdToken(token);
+  }
   catch (error) {
     const invalid = ['auth/id-token-expired', 'auth/id-token-revoked', 'auth/invalid-id-token', 'auth/argument-error'].includes(error.code);
-    throw Object.assign(new Error(invalid ? 'Your sign-in session expired. Please sign in again.' : 'Sign-in verification is temporarily unavailable.'), { statusCode: invalid ? 401 : 503, code: error.code });
+    const transient = !invalid && /EAI_AGAIN|ENOTFOUND|ECONNRESET|ETIMEDOUT|temporarily unavailable/i.test(`${error.code || ''} ${error.message || ''}`);
+    if (transient) {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      try { decoded = await firebaseAdmin.auth().verifyIdToken(token); }
+      catch (retryError) {
+        throw Object.assign(new Error('Sign-in verification is temporarily unavailable.'), { statusCode: 503, code: retryError.code || 'auth_network_error' });
+      }
+    } else {
+      throw Object.assign(new Error(invalid ? 'Your sign-in session expired. Please sign in again.' : 'Sign-in verification is temporarily unavailable.'), { statusCode: invalid ? 401 : 503, code: error.code });
+    }
   }
   // Read the full profile in one shot — avoids a separate getBanForUid call
   // and lets getMe reuse the result instead of reading again.

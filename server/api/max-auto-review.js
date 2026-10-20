@@ -31,10 +31,15 @@ exports.handler = async event => {
       const review = (await db.ref(`maxAutoReviewPrivate/reviews/${user.uid}/${id}`).once('value')).val();
       return review ? json(200, { review }) : json(404, { error: 'Review not found.' });
     }
-    const state = (await ref.once('value')).val() || {};
-    const worker = (await db.ref('maxAutoReviewPrivate/worker').once('value')).val() || {};
-    const reviews = (await db.ref(`maxAutoReviewPrivate/reviews/${user.uid}`).orderByChild('createdAt').limitToLast(20).once('value')).val() || {};
-    const identity = await playIdentity(db, user.uid);
+    const [stateSnap, workerSnap, reviewsSnap, identity] = await Promise.all([
+      ref.once('value'),
+      db.ref('maxAutoReviewPrivate/worker').once('value'),
+      db.ref(`maxAutoReviewPrivate/reviews/${user.uid}`).orderByChild('createdAt').limitToLast(20).once('value'),
+      playIdentity(db, user.uid),
+    ]);
+    const state = stateSnap.val() || {};
+    const worker = workerSnap.val() || {};
+    const reviews = reviewsSnap.val() || {};
     return json(200, { beta: true, available, eligible: available && eligible(user._profile, identity), enabled: Boolean(available && state.enabled && eligible(user._profile, identity)), status: available ? state.status || 'paused' : 'maintenance', lastCheckedAt: state.lastCheckedAt || null, workerLastTickAt: worker.lastTickAt || null, nextCheckAt: state.enabled ? state.nextPollAt || null : null, limits: LIMITS, usedToday: state.day === new Date().toISOString().slice(0, 10) ? state.count || 0 : 0, reviews: Object.values(reviews).sort((a, b) => b.createdAt - a.createdAt).map(({ review, pgn, ...metadata }) => metadata) });
   } catch (error) { return json(error instanceof SyntaxError ? 400 : error.statusCode || 500, { error: error instanceof SyntaxError ? 'Invalid JSON.' : error.statusCode ? error.message : 'Auto-review unavailable. Please try again.' }); }
 };

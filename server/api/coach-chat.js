@@ -226,6 +226,7 @@ exports.streamHandler = async (req, res) => {
     await runConversation({
       res, llmMessages, user, context, tokenUsage, outputBudget: reserveAmount, closedRef: () => closed,
       onToken: (t) => { assistantText += t; sseWrite(res, 'token', { text: t }); },
+      onModel: (model) => sseWrite(res, 'model', { model }),
       onToolCall: (call) => sseWrite(res, 'tool_call', call),
       onToolStatus: (status) => sseWrite(res, 'tool_status', status),
       onToolResultVisible: (vis) => sseWrite(res, 'tool_result_visible', vis),
@@ -322,7 +323,7 @@ function buildLlmMessages(history, currentText, reviewContext, options = {}) {
 // Guards against the "No response." failure mode: (a) every token is counted in
 // `emitted` via the `emit` wrapper, and (b) a guaranteed non-empty fallback is
 // streamed if nothing was emitted, so the client always receives ≥1 token.
-async function runConversation({ res, llmMessages, user, context, tokenUsage, outputBudget, closedRef, onToken, onToolCall, onToolStatus, onToolResultVisible }) {
+async function runConversation({ res, llmMessages, user, context, tokenUsage, outputBudget, closedRef, onToken, onModel, onToolCall, onToolStatus, onToolResultVisible }) {
   // Wrap onToken so we know whether ANY content was streamed across all rounds.
   let emitted = '';
   let pendingCharacters = 0;
@@ -368,6 +369,7 @@ async function runConversation({ res, llmMessages, user, context, tokenUsage, ou
       messages: llmMessages, tools: getToolDefinitions(), toolChoice: 'auto',
       stream: true, maxTokens: nextBudget(), temperature: 0.3,
     });
+    onModel?.(streamRes.__singChessModel);
     const result = await llm.streamDeltas(streamRes, emit, {
       onReasoning: (t) => { roundReasoning += t; countPartial(t); if (!closedRef()) sseWrite(res, 'reasoning', { text: t }); },
     });
@@ -501,6 +503,7 @@ async function runConversation({ res, llmMessages, user, context, tokenUsage, ou
   const finalRes = await llm.chatCompletion({
     messages: llmMessages, stream: true, temperature: 0.4, maxTokens: nextBudget(),
   });
+  onModel?.(finalRes.__singChessModel);
   const finalStream = await llm.streamDeltas(finalRes, emit, {
     onReasoning: (t) => { roundReasoning += t; countPartial(t); if (!closedRef()) sseWrite(res, 'reasoning', { text: t }); },
   });

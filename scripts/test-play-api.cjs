@@ -124,6 +124,9 @@ async function main() {
   assert.equal((await api('/seek', { method: 'POST', body: { time: 10, increment: 0, rated: false } })).status, 409, 'open events before creating a seek');
   assert.equal((await api('/assist', { method: 'POST' })).status, 200);
   active = [{ gameId, color: 'white', fullId: 'private-player-secret', opponent: { username: 'Opponent' } }]; now += 5000;
+  const staleActiveStatus = await api('/active');
+  assert.equal(staleActiveStatus.data.activeGames.length, 0, 'status returns the cached snapshot without waiting on Lichess');
+  await waitFor(async () => (await service.value('active/alice'))?.games?.length === 1, 'active games did not refresh in the background');
   const activeStatus = await api('/active'); assert.equal(activeStatus.data.activeGames.length, 1); assert.equal(activeStatus.data.activeGames[0].fullId, undefined);
   assert.equal((await api('/assist', { method: 'POST' })).status, 409, 'server analysis guard follows real active games');
   assert.equal((await api('/disconnect', { method: 'POST' })).status, 409, 'disconnect cannot bypass live-game guard');

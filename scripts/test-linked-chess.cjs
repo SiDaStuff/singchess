@@ -86,7 +86,11 @@ async function main() {
   const options = { database: cachedDb, now: time, fetchSourceFn: async () => { calls++; return { source: 'lichess', username: 'qa-player', games: [], puzzleRating: 1750, ratingKind: 'current' }; } };
   await loadLinked({ _profile: profile }, options); await loadLinked({ _profile: profile }, options);
   assert.equal(calls, 1, 'refresh cache prevents upstream abuse');
-  await loadLinked({ _profile: profile }, { ...options, now: time + 60001 }); assert.equal(calls, 2);
+  const stale = await loadLinked({ _profile: profile }, { ...options, now: time + 300001 });
+  assert.equal(stale.linked[0].refreshing, true, 'expired provider data is returned immediately');
+  assert.equal(calls, 1, 'stale reads do not wait for the provider refresh');
+  for (let i = 0; i < 20 && calls < 2; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 2, 'expired provider data refreshes in the background');
   let simultaneous = 0, peak = 0;
   const fetcher = async url => {
     simultaneous++; peak = Math.max(peak, simultaneous);

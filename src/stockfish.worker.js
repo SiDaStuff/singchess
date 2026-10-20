@@ -31,6 +31,7 @@ function sendToMain(type, payload) {
 }
 
 function dbg(msg) {
+  if (!self.STOCKFISH_DEBUG) return;
   // Surface worker diagnostics in the browser console as well.
   try { console.log('[stockfish-worker]', msg); } catch (_) {}
   // Also send a structured DEBUG message to the main thread.

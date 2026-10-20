@@ -110,7 +110,17 @@ class PuzzleStore {
 }
 let singleton;
 function store() {
-  return singleton ||= new PuzzleStore(path.resolve(process.env.SQLITE_DATABASE_PATH || path.join(__dirname, '../../data/application.sqlite')));
+  if (!singleton) {
+    singleton = new PuzzleStore(require('./database-file').databaseFilename());
+    // Keep training usable after a fresh deployment or database-path recovery.
+    // The full indexed corpus can be imported later without replacing these IDs.
+    if (!singleton.isReady()) singleton.importBatch([
+      { id: 'bundled-mate-1', fen: 'r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4', solution: ['h5f7'], rating: 1400, themes: ['mateIn1', 'opening'], popularity: 1, plays: 1 },
+      { id: 'bundled-back-rank-1', fen: '6k1/5ppp/8/8/8/8/8/R3K2R w KQ - 0 1', solution: ['a1a8'], rating: 1500, themes: ['mateIn1', 'backRank'], popularity: 1, plays: 1 },
+      { id: 'bundled-check-1', fen: '4k3/8/8/8/8/8/6r1/R3K3 w Q - 0 1', solution: ['a1a8'], rating: 1600, themes: ['checkingMoves', 'rookEndgame'], popularity: 1, plays: 1 },
+    ]);
+  }
+  return singleton;
 }
 module.exports = { PuzzleStore, ratingWindow, rowToPayload, normalizeTheme,
   isReady: () => store().isReady(), getPuzzleById: id => store().getPuzzleById(id),

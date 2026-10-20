@@ -50,6 +50,9 @@ const REALLY_BIG_SEVERITY = 1.0;
 
 // Build a review profile object from a profile spec + user multiPv override.
 function _reviewProfile(spec, profile) {
+  // Older clients and partially populated profile payloads must never crash a
+  // streaming review. Fall back to the normal quick tier when a tier is absent.
+  spec = spec && typeof spec === 'object' ? spec : SERVER_REVIEW_PROFILE.quickScan;
   const selectedProfile = profile || {};
   return {
     mode: spec.mode,
@@ -148,6 +151,7 @@ async function _deepenCriticalMoments({ analyzer, engines, moves, initialFen, qu
 // linearly 0→100% with no backwards jumps — exactly what the frontend board
 // overlay expects.
 async function _evaluateProgressiveReview({ analyzer, engines, moves, initialFen, baseProfile, profile, onProgress }) {
+  baseProfile = baseProfile && typeof baseProfile === 'object' ? baseProfile : SERVER_REVIEW_PROFILE;
   const positions = analyzer._positionsForMoves(moves, initialFen);
   const total = positions.length;
   const results = new Array(total);

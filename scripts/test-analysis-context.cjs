@@ -108,6 +108,13 @@ function engineFor(context, before, after) {
     assert.equal(evals[1].cp, 80); assert.equal(evals.at(-1).cp, 80);
     assert.equal(analyzer.whiteAbsCp(evals[1].cp, positions[1]), -80);
   });
+  await test('progressive server reviews recover from a missing profile', async () => {
+    const analyzer = new MoveAnalyzer();
+    analyzer.evaluatePositionsPooled = async positions => positions.map(() => ({ cp: 0, bestMove: '', lines: [] }));
+    const evals = await serverContext.internals._evaluateProgressiveReview({ analyzer, engines: [], moves: ['e4'], baseProfile: undefined, profile: undefined });
+    assert.equal(evals.length, 2);
+    assert.ok(evals.every(Boolean));
+  });
   await test('server analyzer loads the shared tactics module in its chess realm', () => {
     const loaded = require('../server/api/_lib/analysis-loader').loadAnalyzer();
     assert.equal(typeof loaded.MoveAnalyzer, 'function');

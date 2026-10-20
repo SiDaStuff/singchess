@@ -64,10 +64,10 @@ export function installQualityOfLife(app) {
     body.style.removeProperty('--qol-board-size');
     body.style.removeProperty('--qol-panel-size');
     app.boardSounds?.setPreferences({ sounds: p.sounds, volume: p.volume });
-    if (window.Play) {
+    if (window.Play?.preferences) {
       Object.assign(window.Play.preferences, { sounds: p.sounds, volume: p.volume, autoQueen: p.autoQueen, legalMoves: p.legalMoves, coordinates: p.coordinates !== 'none', multiPremoves: p.multiPremoves });
-      window.Play.board.setPreferences(window.Play.preferences);
-      window.Play.clocks.tenths = p.tenths;
+      window.Play.board?.setPreferences?.(window.Play.preferences);
+      if (window.Play.clocks) window.Play.clocks.tenths = p.tenths;
     }
     for (const node of document.querySelectorAll('[data-qol-setting]')) {
       const value = p[node.dataset.qolSetting];
@@ -95,7 +95,7 @@ export function installQualityOfLife(app) {
   const commands = [
     ['Open Play', 'Alt+P', () => app._navigateTo('/play')], ['Open Review', 'Alt+R', () => app._navigateTo('/review', { skipImport: true })],
     ['Open Puzzles', 'Alt+U', () => app._navigateTo('/puzzles')], ['Open Coach', 'Alt+C', () => app._navigateTo('/coach')],
-    ['Open Settings', 'Alt+S', () => app._navigateTo('/settings')], ['Flip board', 'F', () => currentBoard().flip()],
+    ['Open Settings', 'Alt+S', () => app._navigateTo('/settings')], ['Flip board', 'F', () => currentBoard()?.flip()],
     ['Focus mode', 'Z', toggleFocus], ['Next mistake', 'J', () => jumpMistake(1)], ['Previous mistake', 'K', () => jumpMistake(-1)],
     ['Next puzzle', 'N', nextPuzzle], ['Retry puzzle', 'T', () => app._retryCurrentPuzzle()], ['Review due puzzles', '', reviewDuePuzzle],
     ['Bookmark position', 'B', bookmark], ['Copy FEN', '', () => copyFen()], ['Copy PGN', '', () => copyPgn()], ['Copy position link', '', copyLink],
@@ -103,7 +103,7 @@ export function installQualityOfLife(app) {
     ['Mute / unmute', 'M', () => save({ sounds: !state.preferences.sounds })], ['Clear board arrows', 'Escape', clearArrows],
     ['Restore saved review', '', restoreDraft], ['Expand all panels', '', expandAllPanels], ['Export preferences', '', exportSettings], ['Import preferences', '', () => importInput.click()],
   ];
-  function currentBoard() { return location.pathname.startsWith('/play') ? window.Play.board.renderer : app.board; }
+  function currentBoard() { return location.pathname.startsWith('/play') ? window.Play?.board?.renderer : app.board; }
   function renderCommands() {
     commandList.replaceChildren();
     for (const [label, shortcut, action] of commands.filter(([label]) => label.toLowerCase().includes(search.value.toLowerCase()))) {
@@ -434,7 +434,7 @@ export function installQualityOfLife(app) {
       return;
     }
     if (key === 'escape') { clearArrows(); return; }
-    const action = { f: () => currentBoard().flip(), z: toggleFocus, j: () => jumpMistake(1), k: () => jumpMistake(-1), b: bookmark, n: nextPuzzle, t: () => app.puzzleMode.active && app._retryCurrentPuzzle(), m: () => save({ sounds: !state.preferences.sounds }) }[key];
+    const action = { f: () => currentBoard()?.flip(), z: toggleFocus, j: () => jumpMistake(1), k: () => jumpMistake(-1), b: bookmark, n: nextPuzzle, t: () => app.puzzleMode.active && app._retryCurrentPuzzle(), m: () => save({ sounds: !state.preferences.sounds }) }[key];
     if (action) { event.preventDefault(); run(action); }
   });
   // Native dialogs return focus to their opener, including keyboard activation.
