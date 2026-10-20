@@ -79,6 +79,9 @@ const isDev = process.env.NODE_ENV === 'development' || process.env.CHESS_REVIEW
 const allowedOrigins = new Set([
   'https://chess.singdevelopments.com',
   'https://mastermind.singdevelopments.com',
+  // Cloudflare Pages/Workers deploy origin (used during the Netlify→CF
+  // migration; production custom domain chess.singdevelopments.com is above).
+  'https://singchess.sing-developments.workers.dev',
 ]);
 // Localhost origins are always safe to allow: browsers never send Origin:localhost
 // to a real production domain, and they're necessary for direct :3000 access

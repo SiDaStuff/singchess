@@ -6,6 +6,8 @@ function allowedOrigin(origin) {
   const isDev = process.env.NODE_ENV === 'development' || process.env.CHESS_REVIEW_DEV_SERVER === '1';
   // Netlify frontend (production SPA).
   if (origin === 'https://chess.singdevelopments.com') return origin;
+  // Cloudflare Pages/Workers deploy origin during the Netlify→CF migration.
+  if (origin === 'https://singchess.sing-developments.workers.dev') return origin;
   // Backend VM (mastermind) — same-origin API calls.
   if (origin === 'https://mastermind.singdevelopments.com') return origin;
   if (isDev && /^http:\/\/(localhost|127\.0\.0\.1):(3000|5173|4173)$/.test(origin)) return origin;
