@@ -1,5 +1,10 @@
     <main class="main-content" id="workspace" aria-label="Chess workspace">
 <div class="workspace-heading"><div><h1 id="workspace-title">Game review</h1><p id="workspace-description"></p></div><span class="workspace-shortcut"><kbd>&larr;</kbd><kbd>&rarr;</kbd> Navigate moves</span></div>
+      <div class="review-mode-bar" id="review-mode-bar" role="tablist" aria-label="Review mode" hidden>
+        <button type="button" class="review-mode-btn active" id="review-mode-summary" data-review-mode="summary" role="tab" aria-selected="true">Game Summary</button>
+        <button type="button" class="review-mode-btn" id="review-mode-guided" data-review-mode="guided" role="tab" aria-selected="false">Guided Review</button>
+        <button type="button" class="review-mode-btn" id="review-mode-self" data-review-mode="self" role="tab" aria-selected="false">Self Analysis</button>
+      </div>
       <div class="board-section">
         <div class="player-info player-top" id="player-top">
           <span class="player-identity">
@@ -245,8 +250,77 @@
         </div>
 
         <div class="eval-graph-card card panel-wide" id="eval-graph-card" role="tabpanel" tabindex="0" aria-labelledby="analysis-tab-graph">
-	          <h3>Position evaluation</h3><p class="graph-hint">Engine evaluation across your game. Select a move to explore.</p>
-          <canvas role="img" aria-label="Game evaluation graph" id="eval-graph" width="320" height="120"></canvas>
+	          <h3>Position evaluation</h3><p class="graph-hint">Engine evaluation across your game. Click anywhere to jump to a move.</p>
+          <div class="eval-graph-wrap" id="eval-graph-wrap">
+            <canvas role="img" aria-label="Game evaluation graph" id="eval-graph" width="320" height="120"></canvas>
+            <span class="eval-graph-hover" id="eval-graph-hover" aria-hidden="true"></span>
+          </div>
+        </div>
+
+        <div class="guided-review card panel-wide" id="guided-review" hidden role="tabpanel" aria-labelledby="review-mode-guided">
+          <div class="guided-review-head">
+            <div class="guided-review-title">
+              <h3>Guided Review</h3>
+              <span class="guided-progress" id="guided-progress"></span>
+            </div>
+            <div class="guided-nav" role="group" aria-label="Key moments">
+              <button type="button" class="btn btn-secondary btn-small" id="btn-guided-prev-key">
+                <span class="material-symbols-outlined btn-symbol" aria-hidden="true">navigate_before</span>
+                <span class="btn-label">Previous</span>
+              </button>
+              <span class="guided-count" id="guided-count"></span>
+              <button type="button" class="btn btn-secondary btn-small" id="btn-guided-next-key">
+                <span class="btn-label">Next</span>
+                <span class="material-symbols-outlined btn-symbol" aria-hidden="true">navigate_next</span>
+              </button>
+            </div>
+          </div>
+          <div class="guided-body">
+            <div class="guided-move" id="guided-move">
+              <span class="guided-move-number" id="guided-move-number"></span>
+              <span class="guided-move-san" id="guided-move-san"></span>
+            </div>
+            <div class="guided-class-row">
+              <span class="guided-class-badge" id="guided-class-badge"></span>
+              <span class="guided-why" id="guided-why"></span>
+            </div>
+            <p class="guided-explanation" id="guided-explanation"></p>
+            <div class="guided-actions">
+              <button type="button" class="btn btn-primary btn-small" id="btn-guided-try-again">
+                <span class="material-symbols-outlined btn-symbol" aria-hidden="true">replay</span>
+                <span class="btn-label">Try Again</span>
+              </button>
+              <button type="button" class="btn btn-secondary btn-small" id="btn-guided-best-line">
+                <span class="material-symbols-outlined btn-symbol" aria-hidden="true">psychology</span>
+                <span class="btn-label">Show Best Move</span>
+              </button>
+            </div>
+            <div class="guided-best-cont" id="guided-best-cont" hidden>
+              <span class="guided-best-label">Best continuation</span>
+              <span class="guided-best-line" id="guided-best-line"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="try-again card panel-wide" id="try-again-panel" hidden role="tabpanel" aria-labelledby="review-mode-guided">
+          <div class="try-again-head">
+            <h3>Try Again</h3>
+            <button type="button" class="btn btn-secondary btn-small" id="btn-try-again-close" aria-label="Close try again">
+              <span class="material-symbols-outlined btn-symbol" aria-hidden="true">close</span>
+            </button>
+          </div>
+          <p class="try-again-copy" id="try-again-copy">Find a better move than the one played. Pick any move on the board.</p>
+          <div class="try-again-result" id="try-again-result" hidden></div>
+          <div class="try-again-actions">
+            <button type="button" class="btn btn-secondary btn-small" id="btn-try-again-solution">
+              <span class="material-symbols-outlined btn-symbol" aria-hidden="true">psychology</span>
+              <span class="btn-label">Show Solution</span>
+            </button>
+            <button type="button" class="btn btn-secondary btn-small" id="btn-try-again-done">
+              <span class="material-symbols-outlined btn-symbol" aria-hidden="true">check</span>
+              <span class="btn-label">Done</span>
+            </button>
+          </div>
         </div>
 
         <div class="analysis-overview card panel-wide">
@@ -586,6 +660,20 @@
             </div>
           </div>
           <div class="phase-breakdown" id="phase-breakdown"></div>
+          <div class="review-actions" role="group" aria-label="Review actions">
+            <button type="button" class="btn btn-primary btn-small" id="btn-review-start-guided">
+              <span class="material-symbols-outlined btn-symbol" aria-hidden="true">school</span>
+              <span class="btn-label">Guided Review</span>
+            </button>
+            <button type="button" class="btn btn-secondary btn-small" id="btn-review-self">
+              <span class="material-symbols-outlined btn-symbol" aria-hidden="true">edit</span>
+              <span class="btn-label">Self Analysis</span>
+            </button>
+            <button type="button" class="btn btn-secondary btn-small" id="btn-review-play-again">
+              <span class="material-symbols-outlined btn-symbol" aria-hidden="true">sports_esports</span>
+              <span class="btn-label">Play Again</span>
+            </button>
+          </div>
           <div class="summary-coach">
             <button id="btn-game-coach" class="btn btn-secondary btn-small" type="button">
               <span class="btn-content">

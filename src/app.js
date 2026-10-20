@@ -95,6 +95,12 @@ class ChessReviewApp {
 	    this.liveMoveResults = [];
 	    this.explorerReturnState = null;
     this.exploreLineMode = false;
+    // Guided review + try-again state
+    this.reviewMode = 'summary';
+    this.guidedKeyMoves = [];
+    this.guidedIndex = -1;
+    this._guidingDuringTryAgain = false;
+    this.tryAgainState = null;
     // "Explore Best Move" preview state — when set, the board is showing the
     // position after the engine's recommended move as a read-only preview.
     // _exitBestMovePreview() restores the saved board. No move can be played
@@ -205,6 +211,8 @@ class ChessReviewApp {
 
     this.elEvalGraph = document.getElementById('eval-graph');
     this.evalGraphCtx = this.elEvalGraph.getContext('2d');
+    this.elEvalGraphWrap = document.getElementById('eval-graph-wrap');
+    this.elEvalGraphHover = document.getElementById('eval-graph-hover');
 
     this.boardSounds = new BoardSounds();
 	    this._preloadSounds().catch(() => {});
@@ -629,6 +637,32 @@ class ChessReviewApp {
 
     this.elCriticalMoments = document.getElementById('critical-moments');
     this.elCriticalList = document.getElementById('critical-list');
+    // Guided review + review-mode switcher + try-again
+    this.elReviewModeBar = document.getElementById('review-mode-bar');
+    this.elReviewModeBtns = [...document.querySelectorAll('.review-mode-btn')];
+    this.elGuidedReview = document.getElementById('guided-review');
+    this.elGuidedProgress = document.getElementById('guided-progress');
+    this.elGuidedCount = document.getElementById('guided-count');
+    this.elGuidedPrevKey = document.getElementById('btn-guided-prev-key');
+    this.elGuidedNextKey = document.getElementById('btn-guided-next-key');
+    this.elGuidedMoveNumber = document.getElementById('guided-move-number');
+    this.elGuidedMoveSan = document.getElementById('guided-move-san');
+    this.elGuidedClassBadge = document.getElementById('guided-class-badge');
+    this.elGuidedWhy = document.getElementById('guided-why');
+    this.elGuidedExplanation = document.getElementById('guided-explanation');
+    this.elGuidedTryAgain = document.getElementById('btn-guided-try-again');
+    this.elGuidedBestLineBtn = document.getElementById('btn-guided-best-line');
+    this.elGuidedBestCont = document.getElementById('guided-best-cont');
+    this.elGuidedBestLine = document.getElementById('guided-best-line');
+    this.elTryAgainPanel = document.getElementById('try-again-panel');
+    this.elTryAgainCopy = document.getElementById('try-again-copy');
+    this.elTryAgainResult = document.getElementById('try-again-result');
+    this.elTryAgainSolution = document.getElementById('btn-try-again-solution');
+    this.elTryAgainDone = document.getElementById('btn-try-again-done');
+    this.elTryAgainClose = document.getElementById('btn-try-again-close');
+    this.elBtnReviewStartGuided = document.getElementById('btn-review-start-guided');
+    this.elBtnReviewSelf = document.getElementById('btn-review-self');
+    this.elBtnReviewPlayAgain = document.getElementById('btn-review-play-again');
 
     this.elPgnModal = document.getElementById('pgn-modal');
     // PGN input is selected dynamically from the modal import-tool.
@@ -4189,12 +4223,8 @@ if (this.elAnticheatReportStatus) {
       this._setAnticheatStatus('Anticheat is a Plans feature.', 'error');
       return;
     }
-    if (this.authState.plan?.plan !== 'max') {
-      this._setAnticheatStatus('Background anticheat reviews are a Max feature. Run it with the tab open (Boost), or upgrade to Max.', 'error');
-      return;
-    }
     if (this._isOutOfUsage('anticheat')) {
-      this._setAnticheatStatus('Weekly anticheat limit reached. It resets Monday — or upgrade to Max.', 'error');
+      this._setAnticheatStatus('Weekly anticheat limit reached. It resets Monday — or upgrade to Max for 100 games/week.', 'error');
       return;
     }
     this._setAnticheatChecking(true);
@@ -5192,6 +5222,31 @@ if (this.elBtnAnticheatRefresh) {
     this.elBtnPrev.addEventListener('click', () => this._goToMove(this.currentMoveIndex - 1));
     this.elBtnNext.addEventListener('click', () => this._goToMove(this.currentMoveIndex + 1));
     this.elBtnLast.addEventListener('click', () => this._goToMove(this.gameMoves.length - 1));
+
+    // Interactive evaluation graph: click/hover to navigate and inspect.
+    const bindEvalGraph = () => {
+      if (!this.elEvalGraph) return;
+      const toIndexFromX = (clientX) => {
+        const rect = this.elEvalGraph.getBoundingClientRect();
+        const x = clientX - rect.left;
+        if (rect.width <= 0) return -1;
+        const n = this.analysisResults ? this.analysisResults.length : this.liveEvalHistory.length;
+        if (n <= 0) return -1;
+        const frac = Math.max(0, Math.min(1, x / rect.width));
+        return Math.round(frac * (n - 1));
+      };
+      this.elEvalGraph.addEventListener('click', (e) => {
+        const idx = toIndexFromX(e.clientX);
+        if (idx >= 0 && this.analysisResults && idx < this.analysisResults.length) this._goToMove(idx);
+      });
+      this.elEvalGraph.addEventListener('mousemove', (e) => {
+        const idx = toIndexFromX(e.clientX);
+        this._updateEvalGraphHover(idx, e.clientX);
+      });
+      this.elEvalGraph.addEventListener('mouseleave', () => this._hideEvalGraphHover());
+    };
+    bindEvalGraph();
+    this._bindReviewModeControls();
 
     document.addEventListener('keydown', (e) => {
       if (e.defaultPrevented || document.body.classList.contains('modal-open') || document.body.classList.contains('nav-open')) return;
@@ -8308,16 +8363,10 @@ _showPuzzleSuccessOverlay() {
 		            <label class="select-row-item"><input type="radio" name="swal-anticheat-limit" value="15"><span>15</span></label>
 		          </div>
 		        </div>
-		        ${this.authState.plan?.plan === 'max'
-		          ? `
 		        <label class="anticheat-popup-background">
-		          <input id="swal-anticheat-background" type="checkbox">
-		          <span>Run in background — I'll get a notification when it's done</span>
-		        </label>`
-		          : `
-		        <p class="anticheat-popup-background anticheat-popup-maxnote">
-		          Run in background is a <strong>Max</strong> feature — with Max, review up to 100 games/week without keeping this tab open.
-		        </p>`}
+		          <input id="swal-anticheat-background" type="checkbox" checked>
+		          <span>Run in the background — I'll get a notification when it's done</span>
+		        </label>
 		      </div>
 		    `;
 		    const result = await this._showPopup({
@@ -8364,17 +8413,14 @@ _showPuzzleSuccessOverlay() {
 		    if (this.elAnticheatLimit) this.elAnticheatLimit.value = String(result.value.limit);
 		    if (this.elAnticheatUsername) this.elAnticheatUsername.value = result.value.username || '';
 		    if (this.elAnticheatPgn) this.elAnticheatPgn.value = result.value.pgn || '';
-		    if (result.value.background) {
-		      // Background path: charge quota + write a job record server-side,
-		      // then show the "we'll let you know" status. The user can keep
-		      // using the app; the bell + system Notification fire on completion.
-		      const payload = { source: result.value.source, limit: result.value.limit };
-		      if (result.value.pgn) payload.pgn = result.value.pgn;
-		      if (result.value.username) payload.username = result.value.username;
-		      await this._startBackgroundAnticheat(result.value.source, payload);
-		      return;
-		    }
-		    await this._startAnticheatCheck();
+		    // All anticheat runs are now background jobs: charge quota + write a
+		    // job record server-side, then show the "we'll let you know" status.
+		    // The user can keep using the app; the bell + system Notification fire
+		    // on completion. Available on Boost and Max.
+		    const payload = { source: result.value.source, limit: result.value.limit };
+		    if (result.value.pgn) payload.pgn = result.value.pgn;
+		    if (result.value.username) payload.username = result.value.username;
+		    await this._startBackgroundAnticheat(result.value.source, payload);
 		  }
 
 		  async _startAnticheatCheck() {
@@ -10476,6 +10522,25 @@ _saveGameState() {
 		    if (!this.isAnalyzing) this._saveGameState();
 		  }
 
+  _updateEvalGraphHover(idx, clientX) {
+    if (!this.elEvalGraphHover || !this.elEvalGraphWrap) return;
+    const result = this.analysisResults?.[idx];
+    if (!result) { this.elEvalGraphHover.style.display = 'none'; return; }
+    const rect = this.elEvalGraph.getBoundingClientRect();
+    const label = this.analyzer
+      ? `${result.moveSan || `Move ${idx + 1}`}  ·  ${this.analyzer.formatScore(result.evalAfter != null ? result.evalAfter : (result.evalBefore != null ? result.evalBefore : 0))}`
+      : (result.moveSan || `Move ${idx + 1}`);
+    this.elEvalGraphHover.textContent = label;
+    this.elEvalGraphHover.style.display = 'block';
+    const wrapRect = this.elEvalGraphWrap.getBoundingClientRect();
+    const left = Math.min(Math.max(clientX - wrapRect.left, 4), wrapRect.width - 80);
+    this.elEvalGraphHover.style.left = `${Math.round(left)}px`;
+    this.elEvalGraphHover.style.top = '2px';
+  }
+  _hideEvalGraphHover() {
+    if (this.elEvalGraphHover) this.elEvalGraphHover.style.display = 'none';
+  }
+
   _drawEvalGraph() {
     const ctx = this.evalGraphCtx;
     const w = this.elEvalGraph.width;
@@ -10490,7 +10555,10 @@ _saveGameState() {
       ? this.analysisResults.map((entry) => entry.evalAfter)
       : this.liveEvalHistory;
 
-    if (!series || series.length === 0) return;
+    if (!series || series.length === 0) {
+      this._hideEvalGraphHover();
+      return;
+    }
 
     let min = 9999;
     let max = -9999;
@@ -10501,50 +10569,87 @@ _saveGameState() {
 
     min = Math.max(min, -1000);
     max = Math.min(max, 1000);
-    if (min === max) {
-      min -= 1;
-      max += 1;
-    }
+    if (min === max) { min -= 1; max += 1; }
+    // Keep the zero line visible so white/black advantage reads naturally.
+    if (min > 0) min = 0;
+    if (max < 0) max = 0;
 
+    const yOf = (v) => h - ((v - min) / (max - min)) * h;
+    const zeroY = yOf(0);
+
+    // White / black advantage background zones (subtle).
+    ctx.fillStyle = token('--white', '#e8e6e3') + '';
+    ctx.globalAlpha = 0.06;
+    ctx.fillRect(0, 0, w, zeroY);
+    ctx.fillStyle = token('--dark', '#1e1e1e') + '';
+    ctx.fillRect(0, zeroY, w, h - zeroY);
+    ctx.globalAlpha = 1;
+
+    // Midline.
     ctx.strokeStyle = token('--border-color', '#363b37');
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(0, h / 2);
-    ctx.lineTo(w, h / 2);
+    ctx.moveTo(0, zeroY);
+    ctx.lineTo(w, zeroY);
     ctx.stroke();
 
-    ctx.strokeStyle = token('--accent', '#a6c77a');
-    ctx.lineWidth = 2;
+    // Evaluation curve + soft area fill. Draw the polyline in the accent color
+    // so the white/black trend is clear, then a translucent fill to the zero line.
+    const xs = series.map((_, i) => (series.length === 1 ? w : (i / (series.length - 1)) * w));
+    const ys = series.map(yOf);
+
     ctx.beginPath();
-
-    if (series.length === 1) {
-      const y = h - ((series[0] - min) / (max - min)) * h;
-      ctx.moveTo(0, y);
-      ctx.lineTo(w, y);
-    } else {
-      for (let i = 0; i < series.length; i++) {
-        const y = h - ((series[i] - min) / (max - min)) * h;
-        const x = (i / (series.length - 1)) * w;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
+    for (let i = 0; i < xs.length; i++) {
+      if (i === 0) ctx.moveTo(xs[i], ys[i]);
+      else ctx.lineTo(xs[i], ys[i]);
     }
+    ctx.strokeStyle = token('--text-primary', '#dce2d8');
+    ctx.lineWidth = 2;
     ctx.stroke();
 
+    // Area fill under the curve (to the zero line), clipped so it never reads as noise.
+    ctx.beginPath();
+    ctx.moveTo(xs[0], zeroY);
+    for (let i = 0; i < xs.length; i++) ctx.lineTo(xs[i], ys[i]);
+    ctx.lineTo(xs[xs.length - 1], zeroY);
+    ctx.closePath();
+    ctx.fillStyle = token('--accent', '#a6c77a');
+    ctx.globalAlpha = 0.18;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Turning-point markers for critical moments (when reviewing).
+    const criticalIdx = new Set();
+    if (this.analysisResults && this.analysisResults.length) {
+      try {
+        const moments = this.analyzer?.getCriticalMoments ? this.analyzer.getCriticalMoments(this.analysisResults, 9) : [];
+        moments.forEach((m) => criticalIdx.add(m.moveIndex));
+      } catch (_e) {}
+    }
+    for (const idx of criticalIdx) {
+      if (idx < 0 || idx >= xs.length) continue;
+      const cx = xs[idx];
+      ctx.beginPath();
+      ctx.arc(cx, ys[idx], 3, 0, Math.PI * 2);
+      ctx.fillStyle = token('--text-warning', '#F7C631');
+      ctx.fill();
+    }
+
+    // Current-move marker.
     if (this.analysisResults && this.currentMoveIndex >= 0 && this.currentMoveIndex < this.analysisResults.length) {
-      const x = this.analysisResults.length === 1
-        ? w
-        : (this.currentMoveIndex / (this.analysisResults.length - 1)) * w;
-      ctx.strokeStyle = token('--text-muted', '#929a91');
-      ctx.lineWidth = 1;
+      const idx = this.currentMoveIndex;
+      const x = xs[idx] != null ? xs[idx] : (this.analysisResults.length === 1 ? w : (idx / (this.analysisResults.length - 1)) * w);
+      ctx.strokeStyle = token('--text-primary', '#dce2d8');
+      ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(x, 0);
-      ctx.lineTo(x, h);
+      ctx.lineTo(x + 1, h);
       ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x, ys[idx], 4, 0, Math.PI * 2);
+      ctx.fillStyle = token('--text-primary', '#dce2d8');
+      ctx.fill();
     } else if (!this.analysisResults && this.liveEvalHistory.length > 0) {
-      // Track the latest live-eval sample (rightmost) instead of always
-      // pinning to the right edge. With one sample it's at the edge; with
-      // more it follows the most recent move's proportional position.
       const idx = this.liveEvalHistory.length - 1;
       const denom = Math.max(1, this.liveEvalHistory.length - 1);
       const x = (idx / denom) * w;
@@ -10554,6 +10659,253 @@ _saveGameState() {
       ctx.moveTo(x, 0);
       ctx.lineTo(x, h);
       ctx.stroke();
+    }
+  }
+
+  // ---- Review-mode switcher: Game Summary / Guided Review / Self Analysis ----
+  _revealGuidedReview() {
+    if (!this.analysisResults || !this.analysisResults.length) return;
+    this._buildGuidedKeyMoves();
+    if (this.elReviewModeBar) this.elReviewModeBar.hidden = false;
+    // Default to the summary mode once analysis completes.
+    this._setReviewMode('summary');
+  }
+
+  _playAgainFromReview() {
+    // Return to online play so the reviewer can jump into another game.
+    if (window.PlayFairPlay && typeof window.PlayFairPlay.attachedToPlay === 'boolean') { /* play module checks activation itself */ }
+    this._navigateTo('/play');
+  }
+
+  _bindReviewModeControls() {
+    (this.elReviewModeBtns || []).forEach((btn) => {
+      btn.addEventListener('click', () => this._setReviewMode(btn.dataset.reviewMode));
+    });
+    if (this.elGuidedPrevKey) this.elGuidedPrevKey.addEventListener('click', () => this._guidedStep(-1));
+    if (this.elGuidedNextKey) this.elGuidedNextKey.addEventListener('click', () => this._guidedStep(1));
+    if (this.elGuidedTryAgain) this.elGuidedTryAgain.addEventListener('click', () => this._startTryAgain());
+    if (this.elGuidedBestLineBtn) this.elGuidedBestLineBtn.addEventListener('click', () => this._toggleGuidedBestLine());
+    if (this.elTryAgainClose) this.elTryAgainClose.addEventListener('click', () => this._exitTryAgain());
+    if (this.elTryAgainDone) this.elTryAgainDone.addEventListener('click', () => this._exitTryAgain());
+    if (this.elTryAgainSolution) this.elTryAgainSolution.addEventListener('click', () => this._revealTryAgainSolution());
+    if (this.elBtnReviewStartGuided) this.elBtnReviewStartGuided.addEventListener('click', () => this._setReviewMode('guided'));
+    if (this.elBtnReviewSelf) this.elBtnReviewSelf.addEventListener('click', () => this._setReviewMode('self'));
+    if (this.elBtnReviewPlayAgain) this.elBtnReviewPlayAgain.addEventListener('click', () => this._playAgainFromReview());
+  }
+
+  _setReviewMode(mode) {
+    if (!['summary', 'guided', 'self'].includes(mode)) mode = 'summary';
+    this.reviewMode = mode;
+    (this.elReviewModeBtns || []).forEach((btn) => {
+      const active = btn.dataset.reviewMode === mode;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', String(active));
+    });
+    if (this.elReviewSummary) this.elReviewSummary.style.display = mode === 'summary' ? 'block' : 'none';
+    if (this.elCriticalMoments) this.elCriticalMoments.style.display = mode === 'summary' && this.analysisResults ? 'block' : 'none';
+    if (this.elGuidedReview) this.elGuidedReview.hidden = mode !== 'guided';
+    if (this.elTryAgainPanel) this.elTryAgainPanel.hidden = mode !== 'guided' || !this.tryAgainState;
+    if (mode === 'guided') {
+      if (!this.guidedKeyMoves.length) this._buildGuidedKeyMoves();
+      if (this.guidedIndex < 0 && this.guidedKeyMoves.length) { this.guidedIndex = 0; this._renderGuidedMove(); }
+      else if (this.guidedKeyMoves.length) this._renderGuidedMove();
+      else this._renderGuidedEmpty();
+    }
+    this._drawEvalGraph();
+  }
+
+  _buildGuidedKeyMoves() {
+    this.guidedKeyMoves = [];
+    if (!this.analysisResults || !this.analysisResults.length) return;
+    const results = this.analysisResults;
+    const isErrorKey = (k) => ['INACCURACY', 'MISTAKE', 'BLUNDER', 'MISS'].includes(k);
+    const goodKey = (k) => ['BRILLIANT', 'GREAT', 'BEST', 'EXCELLENT'].includes(k);
+    const scored = results
+      .filter((m) => m && !m.isCoachMove && m.moveIndex >= 0)
+      .map((m) => {
+        const key = m.classificationKey || this._classificationKey(m.classification) || '';
+        let score = 0;
+        // Mistakes and missed opportunities rank highest.
+        if (isErrorKey(key)) score += (m.severityScore || 0) * 3;
+        // Severe evaluation swings are always worth revisiting.
+        score += Math.min(12, Math.abs(m.cpLoss || 0) / 40);
+        // Tactical motifs (misses, mate threats) matter.
+        if (key === 'MISS') score += 10;
+        if (key === 'BLUNDER') score += 6;
+        if (key === 'MISTAKE') score += 4;
+        if (m.isCriticalMoment) score += 6;
+        // Big swings that changed who was winning.
+        if ((m.playerEdgeBefore || 0) !== null && (m.playerEdgeAfter || 0) !== null) {
+          score += Math.min(8, Math.abs((m.playerEdgeAfter || 0) - (m.playerEdgeBefore || 0)) * 2);
+        }
+        // Key good moves (turning point wins) are worth surfacing too.
+        if (goodKey(key)) score += Math.min(6, (m.swing || 0) > 0 ? 3 : 0) + (m.isCriticalMoment ? 3 : 0);
+        return { move: m, score };
+      })
+      .filter((entry) => entry.score >= 6)
+      .sort((a, b) => b.score - a.score);
+
+    // Deterministic: primary sort by score, secondary by move order.
+    this.guidedKeyMoves = scored
+      .sort((a, b) => b.score - a.score || a.move.moveIndex - b.move.moveIndex)
+      .slice(0, 12)
+      .map((entry) => entry.move);
+  }
+
+  _renderGuidedEmpty() {
+    if (this.elGuidedProgress) this.elGuidedProgress.textContent = 'No key moments were found in this game.';
+    if (this.elGuidedCount) this.elGuidedCount.textContent = '0';
+    if (this.elGuidedMoveSan) this.elGuidedMoveSan.textContent = '—';
+    if (this.elGuidedWhy) this.elGuidedWhy.textContent = '';
+    if (this.elGuidedExplanation) this.elGuidedExplanation.textContent = 'Move through the whole game in Self Analysis, or flip to the Moves tab to inspect every move.';
+    if (this.elGuidedClassBadge) this.elGuidedClassBadge.innerHTML = '';
+  }
+
+  _renderGuidedMove() {
+    const move = this.guidedKeyMoves[this.guidedIndex];
+    if (!move) { this._renderGuidedEmpty(); return; }
+    if (this.elGuidedProgress) this.elGuidedProgress.textContent = `Key moment ${this.guidedIndex + 1} of ${this.guidedKeyMoves.length}`;
+    if (this.elGuidedCount) this.elGuidedCount.textContent = `${this.guidedIndex + 1}/${this.guidedKeyMoves.length}`;
+    if (this.elGuidedMoveNumber) this.elGuidedMoveNumber.textContent = `${move.moveNumber}${move.isWhite ? '.' : '...'}`;
+    if (this.elGuidedMoveSan) this.elGuidedMoveSan.textContent = move.moveSan || '';
+    const key = this._classificationKey(move.classification) || '';
+    if (this.elGuidedClassBadge) this.elGuidedClassBadge.innerHTML = this._classificationIconHtml(move.classification, 'guided-class-badge');
+    if (this.elGuidedWhy) {
+      this.elGuidedWhy.textContent = move.classification?.name || key.charAt(0) + key.slice(1).toLowerCase() || '';
+    }
+    // Explanation.
+    let explanation = null;
+    try { explanation = this.analyzer?.explainResult ? this.analyzer.explainResult(move) : (move.coachText || null); }
+    catch (_e) { explanation = move.coachText || null; }
+    if (this.elGuidedExplanation) this.elGuidedExplanation.textContent = explanation || (move.coachText || '');
+    // Best move + continuation.
+    if (this.elGuidedBestLine) {
+      const bestSan = move.bestMoveSan || move.opponentBestMoveSan || '';
+      const line = move.bestMovePvSan || move.opponentPvSan || '';
+      this.elGuidedBestLine.textContent = bestSan ? `${bestSan}${line && !bestSan ? '' : line ? ` — ${line}` : ''}` : (line || '');
+    }
+    if (this.elGuidedBestCont) this.elGuidedBestCont.hidden = true;
+    // Navigate the board to this move.
+    this._goToMove(move.moveIndex);
+  }
+
+  _guidedStep(dir) {
+    if (!this.guidedKeyMoves.length) return;
+    const next = (this.guidedIndex + dir + this.guidedKeyMoves.length) % this.guidedKeyMoves.length;
+    this.guidedIndex = next;
+    this._renderGuidedMove();
+  }
+
+  _toggleGuidedBestLine() {
+    if (!this.elGuidedBestCont) return;
+    this.elGuidedBestCont.hidden = !this.elGuidedBestCont.hidden;
+  }
+
+  // ---- Try Again: return to a position, hide best move, try a better one ----
+  _startTryAgain() {
+    if (this.tryAgainState) { this._exitTryAgain(); return; }
+    const move = this.guidedKeyMoves[this.guidedIndex];
+    if (!move || !['INACCURACY', 'MISTAKE', 'BLUNDER', 'MISS'].includes(this._classificationKey(move.classification))) return;
+    // The move BEFORE the error is the position to retry from.
+    const idx = move.moveIndex;
+    const beforeIndex = idx - 1;
+    if (beforeIndex < 0) return;
+    this.tryAgainState = { moveIndex: idx, beforeIndex, targetMoveSan: move.moveSan, bestMove: move.bestMove, attempts: 0, improved: false };
+    this._guidingDuringTryAgain = true;
+    // Go to the pre-mistake position.
+    this._goToMove(beforeIndex);
+    // Hide the best-move arrow for the retry position and let the user play.
+    this.board.clearBestMoveArrow();
+    this.board.interactive = true;
+    this._prevOnMove = this.board.onMove;
+    this.board.onMove = (from, to) => { this._onTryAgainMove({ from, to }); return false; };
+    if (this.elTryAgainPanel) { this.elTryAgainPanel.hidden = false; }
+    if (this.elTryAgainCopy) this.elTryAgainCopy.textContent = `The move ${this.tryAgainState.targetMoveSan} allowed an advantage to slip. Play a better move from this position.`;
+    if (this.elTryAgainResult) { this.elTryAgainResult.hidden = true; this.elTryAgainResult.innerHTML = ''; }
+    this._syncPlayerNameplates();
+  }
+
+  _exitTryAgain() {
+    this.tryAgainState = null;
+    this._guidingDuringTryAgain = false;
+    if (this.board) {
+      this.board.interactive = false;
+      this.board.clearBestMoveArrow();
+      this.board.onMove = this._prevOnMove || ((from, to) => this._handleBoardMove(from, to));
+      this._prevOnMove = null;
+    }
+    if (this.elTryAgainPanel) this.elTryAgainPanel.hidden = true;
+    if (this.guidedKeyMoves.length && this.guidedIndex >= 0) this._goToMove(this.guidedKeyMoves[this.guidedIndex].moveIndex);
+    else if (this.analysisResults?.length) this._goToMove(Math.min(this.currentMoveIndex, this.analysisResults.length - 1));
+  }
+
+  _onTryAgainMove(detail) {
+    if (!this.tryAgainState || !detail) return;
+    const { from, to } = detail;
+    this.tryAgainState.attempts += 1;
+    const target = this.tryAgainState;
+    const playedMove = `${from}${to}`;
+    // Try to apply the move so the board shows the consequence.
+    try {
+      const move = this.chess.move({ from, to });
+      this.board.setChessInstance(this.chess);
+      this.board.animateNextUpdate();
+      this._updateBoard();
+    } catch (_e) { /* illegal move — ignore */ }
+    // Find the analysis result for the retry position (beforeIndex) to compare.
+    const beforeResult = this.analysisResults?.[target.beforeIndex];
+    const best = beforeResult?.bestMove || '';
+    const isBest = !!(best && playedMove === best);
+    const cpBefore = beforeResult?.evalBefore != null ? beforeResult.evalBefore : null;
+    let verdict = '';
+    if (isBest) {
+      verdict = `Good — that's the engine's best move. This keeps the position strong (evaluation ${this._cpText(cpBefore)}).`;
+      target.improved = true;
+    } else if (beforeResult?.alternatives?.length) {
+      // Check if the played move is among the engine's alternatives.
+      const alt = beforeResult.alternatives.find((a) => a.moveUci === playedMove);
+      if (alt) {
+        const diff = cpBefore != null && alt.eval != null ? Math.abs(cpBefore - alt.eval) : null;
+        verdict = diff != null && diff <= 60
+          ? `A reasonable move — it improves on the blunder and keeps close to the best play.`
+          : `This is better than the move played — a solid step up. Booking this pattern is a win.`;
+        target.improved = true;
+      } else {
+        verdict = `That move isn't one of the engine's top alternatives here. Try another, or press Show Solution.`;
+        target.improved = false;
+      }
+    } else {
+      verdict = `That isn't the engine's best line here. Keep looking — or press Show Solution.`;
+      target.improved = false;
+    }
+    if (this.elTryAgainResult) {
+      this.elTryAgainResult.hidden = false;
+      this.elTryAgainResult.className = 'try-again-result' + (target.improved ? ' good' : ' bad');
+      this.elTryAgainResult.innerHTML = `<span class="material-symbols-outlined" aria-hidden="true">${target.improved ? 'check_circle' : 'error'}</span><span>${verdict}</span>`;
+    }
+    return false;
+  }
+
+  _cpText(cp) {
+    if (cp == null) return '0.0';
+    if (Math.abs(cp) >= 9000) return cp > 0 ? 'mate' : '-mate';
+    return ((cp / 100).toFixed(1));
+  }
+
+  _revealTryAgainSolution() {
+    if (!this.tryAgainState) return;
+    const beforeResult = this.analysisResults?.[this.tryAgainState.beforeIndex];
+    const best = beforeResult?.bestMove || '';
+    if (best && this.elTryAgainResult) {
+      this.elTryAgainResult.hidden = false;
+      this.elTryAgainResult.className = 'try-again-result good';
+      const bestSan = beforeResult.bestMoveSan || best;
+      const line = beforeResult.bestMovePvSan || '';
+      this.elTryAgainResult.innerHTML = `<span class="material-symbols-outlined" aria-hidden="true">psychology</span><span>The best move is <strong>${bestSan}</strong>.${line ? ` Best continuation: ${line}` : ''}</span>`;
+      // Show the best-move arrow on the retry position.
+      if (this.board && beforeResult.moveIndex === this.tryAgainState.beforeIndex) {
+        this.board.setBestMoveArrow(best);
+      }
     }
   }
 
@@ -11285,6 +11637,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
 	      this._renderCriticalMoments();
 	      this._renderPostReviewEvalPanel();
 	      this._goToMove(0);
+	      this._revealGuidedReview();
 	      this._saveGameState();
 	    } catch (err) {
 	      console.error('Analysis error:', err);

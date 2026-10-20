@@ -546,8 +546,13 @@ export class PlayExperience {
   }
   async review(id) {
     let pgn, orientation = this.preferences.reviewOrientation;
+    // Determine the side the player (you) actually played so the review board
+    // auto-orients to YOUR side at the bottom. This overrides the manual
+    // White/Black "Review orientation" preference for played games.
+    let playerColor = this.color;
     if (this.full?.id === id) { if (!isFinished(this.state?.status)) throw new Error('Review is available after the game ends.'); pgn = this.completionData?.[id]?.pgn || this.savedGames().find(game => game.id === id)?.pgn || completedPgn(this.full, this.state); }
-    else pgn = this.savedGames().find(game => game.id === id)?.pgn;
+    else { const record = this.savedGames().find(game => game.id === id); pgn = record?.pgn; if (record?.playerColor) playerColor = record.playerColor; }
+    if (playerColor === 'white' || playerColor === 'black') orientation = playerColor;
     if (!pgn) { this.message('Opening your game…'); const data = await this.api.request(`/game/${encodeURIComponent(id)}/pgn`); pgn = data.pgn; }
     if (!pgn) throw new Error('The completed game could not be loaded. Please try again.');
     await this.app.openPlayReview({ pgn, gameId: id, orientation }); this.message('');

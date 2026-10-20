@@ -251,28 +251,65 @@ function scoreMetrics(metricsList) {
   const signals = [];
   const add = (key, label, points, value, detail) => { const applied = Math.max(0, Math.round(points * 10) / 10); signals.push({ key, label, points: applied, value, detail }); return applied; };
   let score = 0;
-  score += add('rating_accuracy', 'Accuracy above rating expectation', Math.min(24, accuracyAboveRating * 1.45), accuracyAboveRating, `${Math.round(accuracy)}% observed vs ${Math.round(ratingExpectedAccuracy)}% expected`);
-  score += add('acpl', 'Low centipawn loss', Math.min(12, (34 - acpl) * .42), acpl, `${Math.round(acpl)} ACPL`);
-  score += add('exact_engine', 'Exact engine choices', Math.min(22, (exactBestRate - 48) * .48), exactBestRate, `${Math.round(exactBestRate)}% exact first choices`);
-  score += add('top_three', 'Top-three agreement', Math.min(8, (topThreeRate - 80) * .35), topThreeRate, `${Math.round(topThreeRate)}% top-three choices`);
-  score += add('critical_exact', 'Exact choices in critical positions', Math.min(12, (criticalExactRate - 50) * .3), criticalExactRate, `${Math.round(criticalExactRate)}% exact in critical positions`);
-  score += add('quiet_moves', 'Quiet best moves', Math.min(7, (quietBestRate - 22) * .28), quietBestRate, `${Math.round(quietBestRate)}% quiet strong moves`);
-  score += add('unusual_moves', 'Distinctive engine choices', Math.min(8, (unusualEngineRate - 5) * .5), unusualEngineRate, `${Math.round(unusualEngineRate)}% distinctive engine choices`);
-  score += add('fast_strong', 'Fast strong moves', Math.min(10, (fastBestRate - 35) * .24) * timeCoverage, fastBestRate, `${Math.round(fastBestRate)}% with clock coverage`);
-  score += add('fast_critical', 'Fast critical moves', Math.min(7, (fastCriticalRate - 8) * .5) * timeCoverage, fastCriticalRate, `${Math.round(fastCriticalRate)}%`);
-  score += add('time_complexity', 'Time use versus complexity', Math.min(7, Math.max(0, -complexityThinkCorrelation) * 11) * timeCoverage, complexityThinkCorrelation, 'Negative values mean harder positions were played faster');
-  score += add('exact_streak', 'Consecutive exact engine choices', Math.min(7, Math.max(0, longestExactStreak - 4) * 1.2), longestExactStreak, `${longestExactStreak} in a row`);
-  score += add('performance_shift', 'Change from earlier games', Math.min(8, Math.max(0, performanceShift - 4) * .6), performanceShift, `${performanceShift >= 0 ? '+' : ''}${performanceShift.toFixed(1)} accuracy points`);
-  score += add('results', 'Result pattern', Math.min(3, (winRate - 78) * .12), winRate, `${Math.round(winRate)}% score`);
-  if (games >= 4 && accuracy >= 88 && accuracyStd <= 5) score += add('consistency', 'Unusually consistent accuracy', 5, accuracyStd, `${accuracyStd.toFixed(1)} standard deviation`);
+  score += add('rating_accuracy', 'Accuracy above rating expectation', Math.min(28, accuracyAboveRating * 1.7), accuracyAboveRating, `${Math.round(accuracy)}% observed vs ${Math.round(ratingExpectedAccuracy)}% expected`);
+  score += add('acpl', 'Low centipawn loss', Math.min(14, (38 - acpl) * .42), acpl, `${Math.round(acpl)} ACPL`);
+  score += add('exact_engine', 'Exact engine choices', Math.min(24, (exactBestRate - 42) * .55), exactBestRate, `${Math.round(exactBestRate)}% exact first choices`);
+  score += add('top_three', 'Top-three agreement', Math.min(6, (topThreeRate - 80) * .32), topThreeRate, `${Math.round(topThreeRate)}% top-three choices`);
+  score += add('critical_exact', 'Exact choices in critical positions', Math.min(9, (criticalExactRate - 48) * .3), criticalExactRate, `${Math.round(criticalExactRate)}% exact in critical positions`);
+  score += add('quiet_moves', 'Quiet best moves', Math.min(12, (quietBestRate - 20) * .4), quietBestRate, `${Math.round(quietBestRate)}% quiet strong moves`);
+  // Distinctive engine choices are naturally higher for stronger players, so
+  // keep this a ceiling-limited secondary signal — it must NOT move a strong
+  // but honest (human-paced) player's score on its own.
+  score += add('unusual_moves', 'Distinctive engine choices', Math.min(6, (unusualEngineRate - 8) * .4), unusualEngineRate, `${Math.round(unusualEngineRate)}% distinctive engine choices`);
+  score += add('fast_strong', 'Fast strong moves', Math.min(16, (fastBestRate - 30) * .4) * timeCoverage, fastBestRate, `${Math.round(fastBestRate)}% with clock coverage`);
+  score += add('fast_critical', 'Fast critical moves', Math.min(9, (fastCriticalRate - 6) * .55) * timeCoverage, fastCriticalRate, `${Math.round(fastCriticalRate)}%`);
+  score += add('time_complexity', 'Time use versus complexity', Math.min(8, Math.max(0, -complexityThinkCorrelation) * 12) * timeCoverage, complexityThinkCorrelation, 'Negative values mean harder positions were played faster');
+  score += add('exact_streak', 'Consecutive exact engine choices', Math.min(9, Math.max(0, longestExactStreak - 3) * 1.4), longestExactStreak, `${longestExactStreak} in a row`);
+  score += add('performance_shift', 'Change from earlier games', Math.min(9, Math.max(0, performanceShift - 3) * .7), performanceShift, `${performanceShift >= 0 ? '+' : ''}${performanceShift.toFixed(1)} accuracy points`);
+  score += add('results', 'Result pattern', Math.min(3, (winRate - 80) * .12), winRate, `${Math.round(winRate)}% score`);
+
+  // PRIMARY discriminator: a "ballistic engine profile" — move QUALITY,
+  // EXACTNESS and SPEED are all elevated at once. This is the joint signature
+  // an engine-assisting human is hard to fake; each metric guards the others.
+  const machineSpeed = fastBestRate >= 36; // plays the best move FAST, reliably
+  const exactnessGate = exactBestRate >= 46;
+  const quietnessGate = quietBestRate >= 24;
+  const ballisticProfile = machineSpeed && exactnessGate && quietnessGate
+    ? Math.min(22, (((fastBestRate - 36) / 28) + ((exactBestRate - 46) / 28) + ((quietBestRate - 24) / 22)) * 22)
+    : 0;
+  score += add('ballistic_profile', 'Fast + exact + quiet combined', ballisticProfile, { fast: fastBestRate, exact: exactBestRate, quiet: quietBestRate }, `${Math.round(fastBestRate)}% fast · ${Math.round(exactBestRate)}% exact · ${Math.round(quietBestRate)}% quiet`);
+
+  // NEW signal: cluster of standalone-strong games. One or two games played at
+  // engine-ballistic level shouldn't be diluted by mediocre ones — cheating is
+  // often concentrated. A "strong game" = accuracy above 82 AND fast-best ≥45%.
+  const strongGameCount = metricsList.filter((entry) => entry.accuracy >= 82 && (entry.fastBestRate || 0) >= 45).length;
+  const strongGameRatio = games ? (strongGameCount / games) * 100 : 0;
+  score += add('strong_games', 'Games at engine-ballistic strength', Math.min(11, (strongGameRatio - 40) * .55), strongGameCount, `${strongGameCount}/${games} games with high accuracy + fast bests`);
+
+  // NEW signal: machine-like time consistency. A real human's think time varies
+  // substantially; an engine with a fixed time budget does not. Reward LOW
+  // think-time variance when accuracy is ALSO high (the two must both hold).
+  const thinkVm = safeAverage(metricsList.map((entry) => Number(entry.thinkTimeStd)).filter(Number.isFinite));
+  const machineCadence = accuracy >= 74 && thinkVm > 0 && thinkVm < 1.6 ? Math.min(8, ((1.6 - thinkVm) / 1.1) * 8) : 0;
+  score += add('machine_cadence', 'Machine-like time consistency', machineCadence, thinkVm, `${thinkVm.toFixed(2)}s think-time spread at ${Math.round(accuracy)}% accuracy`);
+
+  // NEW signal: SUSTAINED exact engine volume — many exact moves across games.
+  // Gated on kit speed (fastBestRate) so a strong but human-paced player who
+  // simply plays well does NOT earn it; only a machine plays many exact moves
+  // both frequently AND fast.
+  const totalExact = metricsList.reduce((sum, entry) => sum + (entry.moves * (entry.exactBestRate / 100 || 0)), 0);
+  const sustainedExact = games >= 4 && totalExact >= 40 && acpl <= 45 && fastBestRate >= 30 ? Math.min(8, totalExact * .08) : 0;
+  score += add('sustained_exact', 'Sustained exact engine volume', sustainedExact, Math.round(totalExact), `${Math.round(totalExact)} exact moves across games at ${Math.round(acpl)} ACPL`);
+
+  if (games >= 4 && accuracy >= 85 && accuracyStd <= 6) score += add('consistency', 'Unusually consistent accuracy', 6, accuracyStd, `${accuracyStd.toFixed(1)} standard deviation`);
   const independentSignals = signals.filter((signal) => signal.points >= 4).length;
-  if (games < 2 || avgMoves < 10 || independentSignals < 3) score = Math.min(score, 69);
-  else if (games < 3) score = Math.min(score, 79);
+  if (games < 2 || avgMoves < 10 || independentSignals < 3) score = Math.min(score, 74);
+  else if (games < 3) score = Math.min(score, 84);
   score = Math.round(Math.max(0, Math.min(100, score)));
-  const riskLevel = score >= 72 ? 'High' : score >= 42 ? 'Watch' : 'Low';
+  const riskLevel = score >= 62 ? 'High' : score >= 36 ? 'Watch' : 'Low';
   const effectiveSamples = Math.max(0, Math.round(avgMoves * games));
   const confidence = effectiveSamples >= 120 && games >= 8 ? 'High' : effectiveSamples >= 45 && games >= 3 ? 'Moderate' : 'Low';
-  const margin = Math.round(Math.max(6, 28 / Math.sqrt(Math.max(1, games))));
+  const margin = Math.round(Math.max(5, 24 / Math.sqrt(Math.max(1, games))));
   return { score, riskLevel, headline: riskLevel === 'High' ? 'Strong indicators require human review.' : riskLevel === 'Watch' ? 'Some indicators are unusual.' : 'No strong cheating pattern found.',
     explanation: 'This evidence score uses independent move, timing, rating, and cross-game signals. It is not a probability or proof; a trained reviewer must inspect the games before any action.',
     games, winRate, accuracy, acpl, bestRate, exactBestRate, longestExactStreak, mistakeRate, fastBestRate, fastCriticalRate, topThreeRate, criticalBestRate, criticalExactRate, quietBestRate, unusualEngineRate,
@@ -280,7 +317,7 @@ function scoreMetrics(metricsList) {
     phaseAccuracy: Object.fromEntries(['opening', 'middlegame', 'endgame'].map((phase) => [phase, safeAverage(metricsList.map((entry) => entry.phaseAccuracy?.[phase]).filter(Number.isFinite))])),
     timeControls: [...new Set(metricsList.map((entry) => entry.timeControl).filter(Boolean))],
     excluded: { book: metricsList.reduce((sum, entry) => sum + (entry.bookMovesExcluded || 0), 0), forced: metricsList.reduce((sum, entry) => sum + (entry.forcedMovesExcluded || 0), 0) },
-    confidence, scoreRange: [Math.max(0, score - margin), Math.min(100, score + margin)], effectiveSamples, independentSignals, modelVersion: 'fairplay-evidence-v2',
+    confidence, scoreRange: [Math.max(0, score - margin), Math.min(100, score + margin)], effectiveSamples, independentSignals, modelVersion: 'fairplay-evidence-v3',
     signals: signals.sort((a, b) => b.points - a.points), requiresHumanReview: riskLevel === 'High' };
 }
 
