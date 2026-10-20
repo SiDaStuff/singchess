@@ -3,6 +3,16 @@ import { friendlyAuthError, validEmail } from './auth-errors.js';
 import { BoardSounds } from './board-sounds.js';
 import { onReady } from './ui/ready.js';
 import { loadEngine, loadBoost, loadRecaptcha } from './application.js';
+// Engine catalog data + helpers live in an eager module (not the lazy engine.js
+// chunk) so the constructor can read them synchronously at boot.
+import {
+  ENGINE_CATALOG,
+  REVIEW_PROFILES,
+  REVIEW_STRENGTH_TIERS,
+  getEngineModules,
+  getEngineModuleConfig,
+  getReviewStrengthTier,
+} from './engine-catalog.js';
 class ChessReviewApp {
   constructor() {
     this.board = new ChessBoard('chess-board');
