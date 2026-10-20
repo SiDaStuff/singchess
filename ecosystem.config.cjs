@@ -3,6 +3,7 @@
  * - Runs the Node server (server/index.cjs): API + serves the built frontend.
  * - One worker: Play shares one Lichess account stream across browser tabs.
  *   Multiple workers require a shared stream broker before enabling Play.
+ *   This is intentional for the production VM's 2 vCPU / 4 GiB budget.
  * - Environment is loaded from the REPO-ROOT .env (server/index.cjs calls
  *   dotenv on it) — NOT server/.env. Put all secrets (SERVICE_ACCOUNT, LLM
  *   keys) in the root .env, or better, inject them via your host's secret store.

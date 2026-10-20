@@ -89,7 +89,9 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       assetsDir: 'assets',
-      sourcemap: true,
+      // Source maps are not needed by the browser and add ~2 MB to every
+      // production deploy. Keep the public CDN focused on runtime assets.
+      sourcemap: false,
       target: 'es2022',
       modulePreload: false,
       rollupOptions: {

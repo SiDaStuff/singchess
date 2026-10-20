@@ -187,7 +187,11 @@ morgan.token('url-redacted', (req) => {
   return url.replace(/([?&])(token|idToken|key|secret|access_token|refresh_token|code|state)=([^&]*)/gi,
     '$1$2=REDACTED');
 });
-app.use(morgan(':method :url-redacted :status :res[content-length] - :response-time ms'));
+app.use(morgan(':method :url-redacted :status :res[content-length] - :response-time ms', {
+  // Health probes and immutable engine assets are high-volume, low-value
+  // access-log entries on a small VM. Keep application/API errors visible.
+  skip: (req) => req.path === '/health' || req.path.startsWith('/vendor/'),
+}));
 app.use(deviceCookieMiddleware);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -500,7 +504,7 @@ app.use((err, req, res, _next) => {
   }
 });
 
-app.listen(PORT, () => {
+const httpServer = app.listen(PORT, () => {
   require('./api/_lib/max-auto-review').startScheduler();
   const mode = serveStatic ? 'web/API' : 'API';
   console.log(`${mode} server listening at http://localhost:${PORT}`);
@@ -534,3 +538,11 @@ app.listen(PORT, () => {
     }
   });
 });
+
+// Keep normal API bursts on one socket without retaining idle connections for
+// too long. Long-lived SSE responses send their own heartbeats and are covered
+// by the longer request timeout; this also prevents Node's five-minute default
+// from terminating a quiet analysis stream.
+httpServer.keepAliveTimeout = 15 * 1000;
+httpServer.headersTimeout = 30 * 1000;
+httpServer.requestTimeout = 15 * 60 * 1000;
