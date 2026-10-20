@@ -2,6 +2,18 @@
 // available, falling back to clean synthesis. No third-party licenses.
 // The AudioContext is created only during a user gesture, and the volume
 // preference is applied on a shared master bus.
+// Real sound files on disk, keyed by the logical play() type. play() uses
+// 'promotion' but the file on disk is named 'promote.mp3'; any type missing
+// from this map (e.g. lowTime) intentionally falls back to synthesis.
+const SOUND_FILES = {
+  move: 'move',
+  capture: 'capture',
+  castle: 'castle',
+  check: 'check',
+  promotion: 'promote',
+  start: 'start',
+  end: 'end',
+};
 export class BoardSounds {
   constructor(preferences = {}) {
     this.preferences = { sounds: true, volume: .45, ...preferences };
@@ -23,7 +35,7 @@ export class BoardSounds {
     this._preloadPromise = (async () => {
       const ctx = await this._audioContext();
       if (!ctx) return;
-      const types = ['move', 'capture', 'castle', 'check', 'promotion', 'start', 'end', 'lowTime'];
+      const types = Object.keys(SOUND_FILES);
       await Promise.all(types.map(type => this._loadBuffer(ctx, type)));
     })();
     return this._preloadPromise;
@@ -42,7 +54,9 @@ export class BoardSounds {
 
   async _loadBuffer(ctx, type) {
     try {
-      const res = await fetch(`/sounds/${type}.mp3`);
+      const file = SOUND_FILES[type];
+      if (!file) return;
+      const res = await fetch(`/sounds/${file}.mp3`);
       if (!res.ok) return;
       const arrayBuffer = await res.arrayBuffer();
       const audioBuffer = await ctx.decodeAudioData(arrayBuffer);

@@ -923,32 +923,51 @@ class ChessBoard {
     this.arrowLayer.setAttribute('width', width);
     this.arrowLayer.setAttribute('height', height);
 
-    const bestColor = this.bestMoveArrow?.color || '#77c75d';
-    const userColor = this._annotationArrowColor();
-    const parts = [
-      '<defs>',
-      `<marker id="best-move-arrowhead" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto" markerUnits="strokeWidth"><path d="M 0 0 L 7 3.5 L 0 7 z" fill="${bestColor}"></path></marker>`,
-      `<marker id="user-arrowhead" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto" markerUnits="strokeWidth"><path d="M 0 0 L 7 3.5 L 0 7 z" fill="${userColor}"></path></marker>`,
-      '</defs>',
-    ];
+    // Build the arrow SVG with DOM APIs instead of innerHTML: the app's Trusted
+    // Types default policy runs innerHTML through DOMPurify, which strips
+    // marker/line/circle/path/defs tags — silently killing arrows wherever
+    // require-trusted-types-for is enforced (production). DOM construction is
+    // not a Trusted Types sink, so arrows render under CSP.
+    const NS = 'http://www.w3.org/2000/svg';
+    const frag = document.createDocumentFragment();
+
+    const defs = document.createElementNS(NS, 'defs');
+    const addMarker = (id, fill) => {
+      const marker = document.createElementNS(NS, 'marker');
+      marker.setAttribute('id', id);
+      marker.setAttribute('markerWidth', '7');
+      marker.setAttribute('markerHeight', '7');
+      marker.setAttribute('refX', '5.5');
+      marker.setAttribute('refY', '3.5');
+      marker.setAttribute('orient', 'auto');
+      marker.setAttribute('markerUnits', 'strokeWidth');
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute('d', 'M 0 0 L 7 3.5 L 0 7 z');
+      path.setAttribute('fill', fill);
+      marker.appendChild(path);
+      defs.appendChild(marker);
+    };
+    addMarker('best-move-arrowhead', this.bestMoveArrow?.color || '#77c75d');
+    addMarker('user-arrowhead', this._annotationArrowColor());
+    frag.appendChild(defs);
 
     for (const arrow of this.userArrows) {
-      parts.push(this._arrowHtml(arrow, 'user-arrowhead', 0.78, 5));
+      this._appendArrowElement(frag, arrow, 'user-arrowhead', 0.78, 5);
     }
 
     if (this.bestMoveArrow) {
-      parts.push(this._arrowHtml(this.bestMoveArrow, 'best-move-arrowhead', 0.55, 4));
+      this._appendArrowElement(frag, this.bestMoveArrow, 'best-move-arrowhead', 0.55, 4);
     }
 
-    this.arrowLayer.innerHTML = parts.join('');
+    this.arrowLayer.replaceChildren(frag);
   }
 
-  _arrowHtml(arrow, markerId, opacity = 0.6, strokeWidth = 4) {
-    if (!arrow) return '';
+  _appendArrowElement(frag, arrow, markerId, opacity = 0.6, strokeWidth = 4) {
+    if (!arrow) return;
 
     const from = this._squareCenter(arrow.from);
     const to = this._squareCenter(arrow.to);
-    if (!from || !to) return '';
+    if (!from || !to) return;
 
     const dx = to.x - from.x;
     const dy = to.y - from.y;
@@ -960,22 +979,28 @@ class ChessBoard {
     const endX = to.x - (dx / distance) * endTrim;
     const endY = to.y - (dy / distance) * endTrim;
     const color = arrow.color || '';
+    const NS = 'http://www.w3.org/2000/svg';
 
-    return `
-      <line
-        x1="${startX}"
-        y1="${startY}"
-        x2="${endX}"
-        y2="${endY}"
-        stroke="${color}"
-        stroke-width="${strokeWidth}"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        marker-end="url(#${markerId})"
-        opacity="${opacity}"
-      ></line>
-      <circle cx="${from.x}" cy="${from.y}" r="3" fill="${color}" opacity="${opacity}"></circle>
-    `;
+    const line = document.createElementNS(NS, 'line');
+    line.setAttribute('x1', startX);
+    line.setAttribute('y1', startY);
+    line.setAttribute('x2', endX);
+    line.setAttribute('y2', endY);
+    line.setAttribute('stroke', color);
+    line.setAttribute('stroke-width', strokeWidth);
+    line.setAttribute('stroke-linecap', 'round');
+    line.setAttribute('stroke-linejoin', 'round');
+    line.setAttribute('marker-end', `url(#${markerId})`);
+    line.setAttribute('opacity', opacity);
+    frag.appendChild(line);
+
+    const circle = document.createElementNS(NS, 'circle');
+    circle.setAttribute('cx', from.x);
+    circle.setAttribute('cy', from.y);
+    circle.setAttribute('r', '3');
+    circle.setAttribute('fill', color);
+    circle.setAttribute('opacity', opacity);
+    frag.appendChild(circle);
   }
 
   _updateLoadingOverlay() {

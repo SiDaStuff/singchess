@@ -18,6 +18,10 @@
 .insight-coach-result, .summary-coach .insight-coach-result { margin-top: 8px; padding: 10px 12px; background: var(--bg-panel); border: 1px solid var(--border-soft); border-radius: 8px; }
 .insight-coach-result[hidden] { display: none; }
 .coach-skeleton { display: flex; flex-direction: column; gap: 8px; }
+/* Base skeleton line used by app._renderSkeletonLines() and static templates.
+   Width comes from the --skeleton-width custom property, defaulting to full. */
+.skeleton-line { display: block; width: var(--skeleton-width, 100%); height: 12px; border-radius: 6px; background: var(--border-color); position: relative; overflow: hidden; }
+.skeleton-line::after { content: ''; position: absolute; inset: 0; background: var(--bg-elevated); opacity: .55; animation: skeleton-sweep 1.05s linear infinite; }
 .coach-skeleton-line { display: block; height: 12px; border-radius: 6px; background: var(--bg-muted); position: relative; overflow: hidden; }
 .coach-skeleton-line::after { content: ''; position: absolute; inset: 0; background: var(--bg-elevated); animation: skeleton-sweep 1.05s linear infinite; }
 .coach-overview-text { font-size: 12px; line-height: 1.5; color: var(--text-primary); }

@@ -265,7 +265,13 @@
           <p>Profile, puzzle progress, and plan usage.</p>
         </div>
         <div id="account-loading" class="account-loading" hidden aria-live="polite" role="status">
-          <p>Loading your account…</p>
+          <span class="sr-only">Loading your account…</span>
+          <div class="account-skeleton" aria-hidden="true">
+            <span class="skeleton-line" style="--skeleton-width:34%"></span>
+            <span class="skeleton-line" style="--skeleton-width:92%"></span>
+            <span class="skeleton-line" style="--skeleton-width:76%"></span>
+            <span class="skeleton-line" style="--skeleton-width:58%"></span>
+          </div>
         </div>
         <div id="account-signed-out-page" hidden>
           <div class="account-hero">
@@ -840,7 +846,21 @@
 <section role="main" id="page-profile" class="page-panel" hidden>
       <div class="card panel-wide page-card profile-page-card" id="profile-card">
         <div id="profile-loading" class="profile-loading" aria-live="polite" role="status">
-          <p>Loading profile…</p>
+          <span class="sr-only">Loading profile…</span>
+          <div class="profile-skeleton" aria-hidden="true">
+            <div class="profile-skeleton-header">
+              <div class="skeleton-shape profile-skeleton-avatar"></div>
+              <span class="skeleton-line" style="--skeleton-width:40%"></span>
+            </div>
+            <span class="skeleton-line profile-skeleton-label" style="--skeleton-width:26%"></span>
+            <div class="profile-skeleton-stats">
+              <div class="skeleton-shape profile-skeleton-stat"></div>
+              <div class="skeleton-shape profile-skeleton-stat"></div>
+              <div class="skeleton-shape profile-skeleton-stat"></div>
+              <div class="skeleton-shape profile-skeleton-stat"></div>
+            </div>
+            <span class="skeleton-line profile-skeleton-label" style="--skeleton-width:56%"></span>
+          </div>
         </div>
         <div id="profile-not-found" hidden>
           <div class="page-card-head">

@@ -771,3 +771,10 @@ function createEngineController({ source, module }) {
 window.UciEngine = UciEngine;
 window.BrowserStockfishEngine = BrowserStockfishEngine;
 window.createEngineController = createEngineController;
+
+// Named exports for lazy consumers: `loadEngine()` (application.js) resolves
+// to this module's namespace, and app.js does
+// `const { createEngineController } = await loadEngine()`. Without these
+// exports that import yields an empty namespace object and the destructured
+// binding is `undefined` ("… is not a function").
+export { UciEngine, BrowserStockfishEngine, createEngineController };
