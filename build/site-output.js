@@ -107,7 +107,7 @@ export function siteOutputPlugin() {
       this.emitFile({ type: 'asset', fileName: '_headers', source: `/*\n  Content-Security-Policy: ${policy}\n  Link: </llms.txt>; rel="describedby"; type="text/markdown"\n` });
       // The isolated worker imports only blobs created from its validated
       // Stockfish build. It has no DOM sinks and needs its own script policy.
-      const workerPolicy = `default-src 'none'; script-src 'self' blob: 'wasm-unsafe-eval'; connect-src 'self' ${[...origins].join(' ')}; worker-src 'self' blob:`;
+      const workerPolicy = `default-src 'none'; script-src 'self' blob: 'wasm-unsafe-eval'; connect-src 'self' ${[...origins].join(' ')}; worker-src 'self' blob:; require-trusted-types-for 'script'; trusted-types singchess-worker-script`;
       this.emitFile({ type: 'asset', fileName: 'security-policy.json', source: JSON.stringify({ policy, workerPolicy }) });
       const catalog = fs.readFileSync('public/.well-known/ard.json', 'utf8');
       for (const fileName of ['ai-catalog.json', '.well-known/ai-catalog.json']) this.emitFile({ type: 'asset', fileName, source: catalog });

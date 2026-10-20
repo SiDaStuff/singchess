@@ -38,6 +38,23 @@ function dbg(msg) {
   try { originalPostMessage({ type: 'DEBUG', payload: String(msg) }); } catch (_) {}
 }
 
+// Wrap a script URL for the worker's TrustedScriptURL sink (importScripts).
+// Under require-trusted-types-for 'script', importScripts must receive a
+// TrustedScriptURL, not a raw string. This worker only ever loads a blob: URL
+// it built itself (never a configurable remote path), so the policy can return
+// it unchanged. Falls back to the raw URL when Trusted Types is unavailable.
+function makeTrustedScriptUrl(url) {
+  try {
+    if (self.trustedTypes && self.trustedTypes.createPolicy) {
+      const policy = self.trustedTypes.createPolicy('singchess-worker-script', {
+        createScriptURL: (input) => input,
+      });
+      return policy.createScriptURL(String(url));
+    }
+  } catch (_e) { /* policy already created or TT unavailable — fall through */ }
+  return url;
+}
+
 function handleStdout(line) {
   if (typeof line !== 'string') line = String(line);
   // Split multi-line stdout (Emscripten sometimes batches) and process each line.
@@ -349,8 +366,12 @@ async function initStockfish(config) {
     // installed). We save the stockfish handler afterwards at line ~286.
     self.onmessage = null;
     // importScripts only ever receives a same-origin blob: URL we created,
-    // never the configurable jsPath directly.
-    importScripts(jsBlobUrl);
+    // never the configurable jsPath directly. Under require-trusted-types-for
+    // 'script', importScripts is a TrustedScriptURL sink, so wrap the blob URL
+    // in a TrustedScriptURL produced by an in-worker policy. The worker builds
+    // this blob URL itself, so returning it unchanged is safe (no third-party
+    // script URL is ever involved).
+    importScripts(makeTrustedScriptUrl(jsBlobUrl));
   } catch (err) {
     dbg('importScripts threw: ' + (err && err.message ? err.message : String(err)));
     clearTimeout(outputMonitor);
