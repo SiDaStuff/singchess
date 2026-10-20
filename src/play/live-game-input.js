@@ -129,7 +129,7 @@ export class LiveGameInput {
     this._paint();
   }
   _canSelect(square) {
-    return this.interactive && (!this.pending || !!this.optimisticFen && this.preferences.premoves) && this.inputChess.get(square)?.color === this.playerColor &&
+    return this.interactive && !this.renderer.drawMode && (!this.pending || !!this.optimisticFen && this.preferences.premoves) && this.inputChess.get(square)?.color === this.playerColor &&
       (!this.planning || this.preferences.premoves);
   }
   _legalMove(from, to, promotion) {
@@ -233,7 +233,11 @@ export class LiveGameInput {
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
       }
     });
-    overlay.addEventListener('pointerdown', event => event.stopPropagation());
+    overlay.addEventListener('pointerdown', event => {
+      // Clicking the dimmed backdrop (outside the panel) dismisses the dialog.
+      if (event.target === overlay) this._closeDialog(true);
+      else event.stopPropagation();
+    });
     return panel;
   }
   _closeDialog(refocus = false) {
@@ -259,9 +263,23 @@ export class LiveGameInput {
     panel.append(choices, cancel); choices.firstChild.focus();
   }
   _confirm(from, to, promotion) {
+    const submit = () => this._submit(from + to + (promotion || ''));
+    if (window.Swal?.fire) {
+      this._closeDialog(true);
+      window.Swal.fire({
+        icon: 'question',
+        title: `Play ${from} to ${to}?`,
+        showCancelButton: true,
+        confirmButtonText: 'Play move',
+        cancelButtonText: 'Cancel',
+        allowOutsideClick: true,
+        reverseButtons: false,
+      }).then(result => { if (result.isConfirmed && this.container.isConnected) submit(); this._paint(); });
+      return;
+    }
     const panel = this._openDialog(`Play ${from} to ${to}?`);
     const confirm = document.createElement('button'); confirm.type = 'button'; confirm.textContent = 'Play move';
-    confirm.addEventListener('click', () => { this._closeDialog(true); this._submit(from + to + (promotion || '')); });
+    confirm.addEventListener('click', () => { this._closeDialog(true); submit(); });
     const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel';
     cancel.addEventListener('click', () => this._closeDialog(true)); panel.append(confirm, cancel); confirm.focus();
   }

@@ -23,6 +23,13 @@ body[data-board-theme=rose] { --sq-light: #f7e2df; --sq-dark: #b56a72; --sq-high
 .square:focus-visible { outline: 3px solid #395744; outline-offset: -3px; z-index: 2; }
 .square .piece { position: absolute; width: 94%; height: 94%; inset: 3%; pointer-events: none; z-index: 1; }
 .square .coord-label { position: absolute; font: 500 clamp(8px, .8vw, 11px) var(--font-mono); z-index: 2; pointer-events: none; }
+.square .piece { filter: drop-shadow(0 3px 2px rgba(0, 0, 0, .22)); }
+.piece-arrive { animation: piece-arrive .16s cubic-bezier(.2, .85, .3, 1.25) both; }
+@keyframes piece-arrive {
+  0% { transform: scale(.6); opacity: .35; }
+  70% { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
 .square .coord-file { right: 4px; bottom: 2px; }
 .square .coord-rank { left: 4px; top: 2px; }
 .square.light .coord-label { color: #59684e; }

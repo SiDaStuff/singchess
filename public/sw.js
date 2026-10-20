@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sing-chess-shell-v1';
+const CACHE_NAME = 'sing-chess-shell-v2';
 const SHELL_URLS = [
   '/',
   '/site.webmanifest',
@@ -45,12 +45,15 @@ self.addEventListener('fetch', event => {
 
   if (new URL(request.url).origin !== self.location.origin) return;
   event.respondWith(
-    caches.match(request).then(cached => cached || fetch(request).then(response => {
-      if (response.ok && request.url.includes('/assets/')) {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
-      }
-      return response;
-    }))
+    caches.match(request).then(cached => {
+      if (cached) return cached;
+      return fetch(request).then(response => {
+        if (response.ok && request.url.includes('/assets/')) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(request, copy)).catch(() => {});
+        }
+        return response;
+      }).catch(() => cached || new Response('', { status: 503 }));
+    })
   );
 });

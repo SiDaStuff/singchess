@@ -5183,26 +5183,27 @@ if (this.elBtnAnticheatRefresh) {
     document.addEventListener('keydown', (e) => {
       if (e.defaultPrevented || document.body.classList.contains('modal-open') || document.body.classList.contains('nav-open')) return;
       if (document.body.classList.contains('menu-active') || document.body.classList.contains('in-app-route')) return;
+      if (document.querySelector('dialog[open]')) return;
       if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-      switch (e.key) {
-        case 'ArrowLeft':
-          e.preventDefault();
-          this._goToMove(this.currentMoveIndex - 1);
-          break;
-        case 'ArrowRight':
-          e.preventDefault();
-          this._goToMove(this.currentMoveIndex + 1);
-          break;
-        case 'Home':
-          e.preventDefault();
-          this._goToMove(-1);
-          break;
-        case 'End':
-          e.preventDefault();
-          this._goToMove(this.gameMoves.length - 1);
-          break;
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') {
+        // Arrow keys ALWAYS move the review cursor. Capture + stop the event
+        // here so the board's square-focus navigation and native tab/slider
+        // roving never also move focus and highlight buttons while you browse.
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const active = document.activeElement;
+        if (active && active !== document.body && typeof active.blur === 'function'
+          && active.closest?.('.move-cell, .sub-line-move, button, [role="button"], [role="tab"], .square')) {
+          active.blur();
+        }
+        switch (e.key) {
+          case 'ArrowLeft': this._goToMove(this.currentMoveIndex - 1); break;
+          case 'ArrowRight': this._goToMove(this.currentMoveIndex + 1); break;
+          case 'Home': this._goToMove(-1); break;
+          case 'End': this._goToMove(this.gameMoves.length - 1); break;
+        }
       }
-	    });
+	    }, true);
 	  }
 
 		  _enterReviewMode() {
@@ -7299,7 +7300,16 @@ _showPuzzleSuccessOverlay() {
       }
       moves = replay.history({ verbose: true });
     }
-    moves.push(...this.chess.history({ verbose: true }));
+    let mainMoves = this.chess.history({ verbose: true });
+    if (!mainMoves.length && this.currentMoveIndex >= 0) {
+      // _goToMove now restores positions from the memoized FEN cache, which
+      // leaves chess.history() empty. Reconstruct the played main line from the
+      // cached move objects so captured-piece counts stay accurate.
+      mainMoves = (this._positionCache?.()?.steps || [])
+        .slice(0, Math.min(this.currentMoveIndex + 1, this.gameMoves.length))
+        .map(step => step.move);
+    }
+    moves.push(...mainMoves);
     for (const move of moves) {
       if (move.captured && captured[move.color]) captured[move.color].push(move.captured);
     }
@@ -9473,8 +9483,56 @@ _showPuzzleSuccessOverlay() {
    * user navigates away, resets, or a new live evaluation begins.
    */
   _cancelLiveDeepening() {
+    clearTimeout(this._deepenTimer);
+    this._deepenTimer = null;
+    clearTimeout(this._insightsTimer);
+    this._insightsTimer = null;
     this.liveDepthToken += 1;
     this.engine?.interrupt?.();
+  }
+
+  // Memoized position FENs for the main line. Rapid arrow navigation turns
+  // `_goToMove` into an O(1) lookup instead of replaying every prior move.
+  _positionCache() {
+    const signature = `${this.initialFen}\u0000${this.gameMoves.join(' ')}`;
+    if (this._positionCacheSig === signature) return this._positionCacheData;
+    const chess = new Chess(this.initialFen);
+    const steps = [];
+    for (const san of this.gameMoves) {
+      const move = chess.move(san, { sloppy: true });
+      if (!move) break;
+      steps.push({ move, fenAfter: chess.fen() });
+    }
+    this._positionCacheSig = signature;
+    this._positionCacheData = { steps };
+    return this._positionCacheData;
+  }
+
+  // Debounce the Move Feedback render while the user is ratcheting through
+  // moves with the arrow keys: the board updates instantly, the explanation
+  // panel follows once they settle on a move.
+  _scheduleInsights(result) {
+    clearTimeout(this._insightsTimer);
+    if (!result) { this._renderMoveInsights(null); return; }
+    const moveIndex = result.moveIndex;
+    this._insightsTimer = setTimeout(() => {
+      this._insightsTimer = null;
+      if (this.currentMoveIndex === moveIndex) this._renderMoveInsights(result);
+    }, 120);
+  }
+
+  // Debounce deepening so holding an arrow key never thrashes the engine. A
+  // climb only starts once the user has paused on a move for a beat.
+  _scheduleLiveDeepening(context, depth) {
+    clearTimeout(this._deepenTimer);
+    const moveIndex = context.moveIndex, fenAfter = context.fenAfter;
+    this._deepenTimer = setTimeout(() => {
+      this._deepenTimer = null;
+      if (this.currentMoveIndex !== moveIndex) return;
+      if (this.chess.fen() !== fenAfter) return;
+      if (this.analysisResults && !this.exploreLineMode) return;
+      this._deepenLiveEvaluation(context, depth);
+    }, 400);
   }
 
   _applyLiveResultToUI(liveResult, { context = null } = {}) {
@@ -10279,22 +10337,15 @@ _saveGameState() {
 
     this.liveEvalToken += 1;
     this.currentMoveIndex = index;
+    const cache = this._positionCache();
+    const step = index >= 0 ? cache.steps[index] : null;
     this.chess = new Chess(this.initialFen);
+    if (step) this.chess.load(step.fenAfter);
 
-    let lastMoveFrom = null;
-    let lastMoveTo = null;
-    let lastMoveObj = null;
-    let lastFenBefore = null;
-
-    for (let i = 0; i <= index; i++) {
-      lastFenBefore = this.chess.fen();
-      const move = this.chess.move(this.gameMoves[i], { sloppy: true });
-      if (move) {
-        lastMoveFrom = move.from;
-        lastMoveTo = move.to;
-        lastMoveObj = move;
-      }
-    }
+    const lastMoveObj = step?.move || null;
+    const lastMoveFrom = lastMoveObj?.from || null;
+    const lastMoveTo = lastMoveObj?.to || null;
+    const lastFenBefore = index >= 0 ? (cache.steps[index - 1]?.fenAfter || this.initialFen) : this.initialFen;
 
     this.board.setChessInstance(this.chess);
     this.board.animateNextUpdate();
@@ -10347,14 +10398,14 @@ _saveGameState() {
 	        } else {
 	          this.elMoveBadge.style.display = 'none';
 	        }
-	        this._renderMoveInsights(result);
+	        this._scheduleInsights(result);
 	      }
 	      this._showEngineLine(result);
 	      this._playMoveSound(lastMoveObj, index);
 	      // Keep sharpening while the user sits here: cancel any prior deepening
 	      // and start a new climb from this move's current depth.
 	      if (!result.isCoachMove && lastMoveObj) {
-	        this._deepenLiveEvaluation({
+	        this._scheduleLiveDeepening({
 	          fenBefore: lastFenBefore, fenAfter: this.chess.fen(),
 	          moveObj: lastMoveObj, moveIndex: index,
 	        }, result.depth || 0);
@@ -12009,6 +12060,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
 
 	  _resetInsightPanel() {
     window.MoveExplanationUI?.clear();
+    this._lastInsightKey = null;
 	    if (this.elMoveInsights) this.elMoveInsights.hidden = !this.explorerReturnState;
 	    if (this.elInsightEmpty) {
         this.elInsightEmpty.style.display = 'block';
@@ -12052,6 +12104,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
   _renderMoveInsights(result) {
     window.MoveExplanationUI?.clear();
     if (!result) {
+      this._lastInsightKey = null;
       this._resetInsightPanel();
       return;
     }
@@ -12059,6 +12112,15 @@ _showMoveBadge(classification, targetSquare, options = {}) {
     if (result.isCoachMove) {
       return;
     }
+
+    // Fast path: rapid arrow navigation re-renders the SAME insights for a move
+    // the panel already shows — skip the DOM/markdown work entirely.
+    const key = `${result.moveIndex}:${result.evalAfter}:${result.bestMove || ''}:${result.classificationKey || (result.classification && result.classification.name) || ''}`;
+    if (this._lastInsightKey === key) {
+      if (this.elMoveInsights) this.elMoveInsights.hidden = false;
+      return;
+    }
+    this._lastInsightKey = key;
 
     if (!this.analyzer.matchesExplanationPosition(result, this.chess.fen())) {
       this._resetInsightPanel();

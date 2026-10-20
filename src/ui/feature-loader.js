@@ -1,4 +1,4 @@
-let playTask, coachTask, adminTask, teachingTask;
+let playChunks, coachTask, adminTask, teachingTask;
 function loadTeaching() {
   return teachingTask ||= import('../tactics-coach.js')
     .then(() => Promise.all([import('../tactics-advanced.js'), import('./move-explanation.js'), import('./tactical-coach.css')]))
@@ -6,7 +6,14 @@ function loadTeaching() {
     .catch(error => { teachingTask = null; throw error; });
 }
 export function loadPlay() {
-  return playTask ||= import('../play/index.js').then(module => module.mountPlay()).catch(error => { playTask = null; throw error; });
+  // The #play-page section is an EMPTY container that mountPlay fills async.
+  // route-pages prunes hidden page panels out of the live DOM, so an import
+  // that happens to resolve while the container is detached would mount into
+  // "nothing" and - because the chunk promise is cached - never retry. Cache
+  // only the chunk fetch and re-run the (idempotent) mount on every warm so
+  // it succeeds the moment #play-page is back in the DOM.
+  if (!playChunks) playChunks = import('../play/index.js').catch(error => { playChunks = null; throw error; });
+  return playChunks.then(module => module.mountPlay());
 }
 export function loadCoach() {
   return coachTask ||= Promise.all([import('../coach-chat.js'), window.loadChessMarkdown()]).then(() => window.CoachChat)

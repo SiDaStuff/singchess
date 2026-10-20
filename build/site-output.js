@@ -15,14 +15,13 @@ export function siteOutputPlugin() {
       // emitted bytes, and normalize HTML newlines as the browser does.
       let html = fs.readFileSync(indexPath, 'utf8').replace(/\r\n?/g, '\n');
       const hashes = [];
-      const integrity = {};
       for (const file of fs.readdirSync(path.join(directory, 'assets'))) {
         if (!file.endsWith('.js')) continue;
-        integrity[`/assets/${file}`] = digest(fs.readFileSync(path.join(directory, 'assets', file)));
-        hashes.push(`'${integrity[`/assets/${file}`]}'`);
+        hashes.push(`'${digest(fs.readFileSync(path.join(directory, 'assets', file)))}'`);
       }
+      // A previous build may have injected an import map. Strip it (and any
+      // other import map) so stale hashed entries can't block module loads.
       html = html.replace(/<script type="importmap">[\s\S]*?<\/script>\s*/g, '');
-      html = html.replace(/<script type="module"/, `<script type="importmap">${JSON.stringify({ integrity })}</script>\n<script type="module"`);
       html = html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/g, (tag, attrs, body) => {
         const file = attrs.match(/src="\/([^"]+)"/)?.[1];
         if (file) {

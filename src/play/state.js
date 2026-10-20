@@ -20,13 +20,14 @@ export function playUci(chess, uci) {
 export function reconstructGame(full, state = full?.state) {
   const chess = full?.initialFen && full.initialFen !== 'startpos' ? new Chess(full.initialFen) : new Chess();
   const tokens = (state?.moves || '').trim().split(/\s+/).filter(Boolean);
-  const moves = [];
+  const moves = [], fens = [chess.fen()];
   for (const uci of tokens) {
     const move = playUci(chess, uci);
     if (!move) throw new Error('The game position could not be synchronized. Reconnecting…');
     moves.push({ ...move, uci: move.from + move.to + (move.promotion || '') });
+    fens.push(chess.fen());
   }
-  return { chess, moves, ply: tokens.length, lastMove: moves.at(-1)?.uci || null };
+  return { chess, moves, fens, ply: tokens.length, lastMove: moves.at(-1)?.uci || null };
 }
 export function resultFor(full, state, color) {
   const draw = !state.winner && !['aborted', 'noStart'].includes(state.status);

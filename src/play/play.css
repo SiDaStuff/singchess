@@ -94,7 +94,16 @@
 .play-moves { display: grid; grid-template-columns: 35px 1fr 1fr; align-content: start; gap: 3px; padding-top: 20px; margin-bottom: 22px; min-height: 130px; max-height: min(35dvh, 350px); overflow-y: auto; font-family: var(--font-mono); font-size: 12px; }
 .play-move-number { color: var(--text-muted); padding: 7px 3px; font-size: 12px; }
 .play-move { padding: 6px 9px; border-radius: 4px; }
+.play-move { background: transparent; border: 1px solid transparent; cursor: pointer; color: inherit; font: inherit; text-align: left; white-space: nowrap; }
+.play-move:hover { background: var(--bg-elevated); }
+.play-move:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .play-move.is-last { background: var(--surface-selected); color: var(--accent); }
+.play-move.is-current { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
+.play-replay-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; margin-top: 14px; border: 1px solid var(--border-soft); border-radius: 7px; background: var(--bg-elevated); }
+.play-replay-bar span { color: var(--text-secondary); font-size: 11px; }
+.play-replay-bar .btn { min-height: 28px; padding: 4px 9px; font-size: 11px; }
+.play-draw-mode [data-action="toggle-draw"] { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.play-draw-mode [data-action="toggle-draw"]::after { content: 'Arrow mode'; font-size: 10px; margin-left: -4px; }
 .play-game-actions { display: flex; flex-wrap: wrap; gap: 5px; padding-top: 16px; border-top: 1px solid var(--border-soft); }
 .play-confirm, .play-draw-offer { padding: 12px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11px; }
 .play-confirm > span, .play-draw-offer > strong { width: 100%; }

@@ -203,21 +203,23 @@ try {
       assert.ok(!(await modal.isVisible()));
     });
 
-    await check(`${width}px analysis tabs and keyboard focus`, async () => {
+    await check(`${width}px analysis tabs and keyboard moves`, async () => {
       const tabs = page.locator('#analysis-tabs');
       await tabs.locator('[data-panel="moves"]').click();
       assert.ok(await page.locator('#move-list-container').isVisible());
       assert.ok(!(await page.locator('#eval-graph-card').isVisible()));
       const move = await page.evaluate(() => window.app.currentMoveIndex);
+      // Arrow keys ALWAYS advance the review cursor — they never rove focus
+      // across the tabs or board squares or highlight other buttons.
+      await tabs.locator('[data-panel="moves"]').focus();
       await page.keyboard.press('ArrowRight');
-      assert.equal(await tabs.locator('[data-panel="graph"]').getAttribute('aria-selected'), 'true');
-      assert.equal(await page.evaluate(() => window.app.currentMoveIndex), move, 'Switching tabs must preserve board position');
-      assert.ok(await page.locator('#eval-graph-card').isVisible());
-      await tabs.locator('[data-panel="feedback"]').click();
+      assert.equal(await tabs.locator('[data-panel="graph"]').getAttribute('aria-selected'), 'false', 'Arrow keys never switch analysis tabs');
+      assert.equal(await page.evaluate(() => window.app.currentMoveIndex), move + 1, 'ArrowRight advances to the next move even with a tab focused');
       await page.locator('#chess-board [data-square="e2"]').focus();
       await page.keyboard.press('ArrowRight');
-      assert.equal(await page.evaluate(() => document.activeElement.dataset.square), 'f2');
-      assert.equal(await page.evaluate(() => window.app.currentMoveIndex), move, 'Moving square focus must preserve board position');
+      assert.equal(await page.evaluate(() => window.app.currentMoveIndex), move + 2, 'Arrow on a focused square advances the review cursor');
+      assert.ok(await page.evaluate(() => document.activeElement === document.body), 'Arrow navigation drops focus so no button/square stays highlighted');
+      assert.ok(await page.locator('#eval-graph-card').isHidden(), 'Tab panel is unchanged by arrow navigation');
     });
 
     await check(`${width}px illegal and legal chess moves`, async () => {

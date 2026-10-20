@@ -308,7 +308,16 @@ export function installQualityOfLife(app) {
     if (state.preferences.firstMistake) { const first = nextMistake(app.analysisResults, -1); if (first != null) app._goToMove(first); }
     cacheReview(); updateReviewTools();
   });
-  wrap(app, '_goToMove', original => (...args) => { const value = original(...args); updateReviewTools(); saveDraft(); return value; });
+  wrap(app, '_goToMove', original => (...args) => {
+    const value = original(...args);
+    updateReviewTools();
+    // Rapid arrow-key navigation would stringify the whole review on every
+    // keystroke. Coalesce the persisted draft to after the tick settles; route
+    // changes, beforeunload and tab-hide still flush synchronously.
+    clearTimeout(state.draftTimer);
+    state.draftTimer = setTimeout(() => { state.draftTimer = null; saveDraft(); }, 500);
+    return value;
+  });
   wrap(app, '_renderMoveList', original => (...args) => { const value = original(...args); filterMoves(); return value; });
 
   const puzzleTools = $('.puzzle-controls-secondary');
@@ -508,7 +517,6 @@ export function installQualityOfLife(app) {
     const play = window.Play; if (!play || play.qolInstalled) return;
     play.qolInstalled = true;
     wrap(play.board.renderer, 'flip', original => (...args) => { const value = original(...args); writeJson('sidastuff.orientation.play', play.board.renderer.flipped); return value; });
-    wrap(play.board, 'setOrientation', original => color => { const remembered = readJson('sidastuff.orientation.play'); return original(typeof remembered === 'boolean' ? remembered ? 'black' : 'white' : color); });
     const mute = button('Mute', () => save({ sounds: !state.preferences.sounds }), 'Mute game sounds (M)'); mute.dataset.qolMute = '';
     play.root.querySelector('.play-board-toolbar > div')?.prepend(mute);
     const latency = el('span', '', { class: 'qol-health', 'aria-label': 'Last request round trip' }); play.root.querySelector('.play-board-toolbar')?.append(latency);

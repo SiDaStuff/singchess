@@ -16,7 +16,10 @@ export function createFairPlayGuard(host) {
   };
   try { games = readGames(host.localStorage?.getItem(storageKey)); } catch (_) {}
 
-  const isBlocked = () => games.length > 0 || !verified;
+  // Only a CONFIRMED live game blocks analysis. An unverified guard (fresh
+  // boot, provider unreachable, or a just-switched account) must not lock the
+  // review page out with "finish the online game" when the user isn't in one.
+  const isBlocked = () => games.length > 0;
   const snapshot = () => ({ blocked: isBlocked(), activeGames: games.slice(), verified,
     reason: games.length ? 'live-game' : !verified ? 'verification' : null });
   function publish() {

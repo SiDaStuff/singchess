@@ -22,6 +22,9 @@ class ChessBoard {
     this.onMove = null; // callback(from, to)
     this.onFlip = null;
     this.interactive = false;
+    // Arrow-drawing mode (set by Play's draw toggle). Left-drag draws arrows
+    // instead of moving pieces; right-drag always draws.
+    this.drawMode = false;
     this.dragPiece = null;
     this.dragFrom = null;
     this.pendingDrag = null;
@@ -265,10 +268,13 @@ class ChessBoard {
 	    const durationMs = parseFloat(rawDuration) * (rawDuration.endsWith('ms') ? 1 : 1000) || 180;
         // Web Animations starts from explicit keyframes without forcing a
         // synchronous layout. The compositor moves only the temporary piece.
+        // A soft ease-out curve (with a tiny overshoot on arrival) makes the
+        // slide feel springy rather than mechanical.
         slideEl.animate?.([
-          { transform: 'translate(0, 0)' },
-          { transform: `translate(${endLeft - startLeft}px, ${endTop - startTop}px)` },
-        ], { duration: durationMs, easing: 'ease', fill: 'forwards' });
+          { transform: 'translate(0, 0) scale(1)' },
+          { transform: `translate(${endLeft - startLeft}px, ${endTop - startTop}px) scale(1.02)`, offset: .92 },
+          { transform: `translate(${endLeft - startLeft}px, ${endTop - startTop}px) scale(1)`, offset: 1 },
+        ], { duration: durationMs, easing: 'cubic-bezier(.25, .9, .3, 1.05)', fill: 'forwards' });
 	    this._slideTimeout = setTimeout(() => {
           if (this._slideElement !== slideEl) return;
 	      slideEl.remove();
@@ -1084,7 +1090,7 @@ class ChessBoard {
 
     this.cancelDrag = () => cleanupDrag();
     this._addDestroyableListener(this.container,'pointerdown', (e) => {
-      if (!this.interactive) return;
+      if (!this.interactive || this.drawMode) return;
       this._suppressNextClick = false;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       const sqEl = e.target.closest('.square');
@@ -1141,21 +1147,21 @@ class ChessBoard {
     this._addDestroyableListener(this.container,'pointerdown', (event) => {
       const sq = squareFromEvent(event);
       if (!sq) return;
-
-	      if (event.pointerType === 'mouse' && event.button === 2) {
-	        this.annotationPointer = {
-	          id: event.pointerId,
-	          from: sq,
-	        };
+      const rightDrag = event.pointerType === 'mouse' && event.button === 2;
+      const drawModeLeft = this.drawMode && event.button === 0;
+      if (rightDrag || drawModeLeft) {
+        this.annotationPointer = {
+          id: event.pointerId,
+          from: sq,
+        };
         this.container.setPointerCapture?.(event.pointerId);
         event.preventDefault();
         return;
       }
-
-	      if (event.button === 0 && window.QualityOfLife?.preferences().clearArrows !== false) {
-	        this.clearUserArrows();
-	        this.clearInvertedSquares();
-	      }
+      if (event.button === 0 && window.QualityOfLife?.preferences().clearArrows !== false) {
+        this.clearUserArrows();
+        this.clearInvertedSquares();
+      }
     });
 
     this._addDestroyableListener(this.container,'pointermove', (event) => {

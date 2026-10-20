@@ -17,10 +17,17 @@ export class PlayExperience {
     try { const saved = JSON.parse(localStorage.getItem('sing.play.setup') || '{}'); this.control = TIME_CONTROLS.find(c => c.time === saved.time && c.increment === saved.increment) || this.control; this.rated = saved.rated === true; } catch {}
     this.profile = null; this.reviewStats = null; this.activeGames = []; this.recentGames = []; this.connected = false; this.full = null; this.state = null; this.identity = ''; this.sessionVersion = 0; this.activityRevision = 0;
     this.gameController = null; this.eventController = null; this.seekController = null; this.pending = null; this.challenge = null; this.gameConnection = 'connecting'; this.refreshTask = null;
+    // Inline replay: replayIndex null = live position; a number = the ply being
+    // viewed (0 is the starting position). Arrow keys / clicking a move enter it.
+    this.replayIndex = null;
+    // Arrow/touch drawing mode (toggle beside the board).
+    this.drawMode = false;
+    this._displayFen = null;
     this.mount();
     this.sounds = app.boardSounds; this.sounds.setPreferences(this.preferences);
     this.board = new LiveGameInput(new window.ChessBoard('play-chess-board'), { preferences: this.preferences, onMove: uci => this.sendMove(uci), onFeedback: text => this.message(text), onPremoveChange: move => { this.$('premove').hidden = !move; } });
     this.board.setPosition(INITIAL, { interactive: false, playerColor: 'white' });
+    this.setDrawMode(false);
     this.clocks = new PlayClockPair({ whiteElement: this.$('clock-white'), blackElement: this.$('clock-black'), onLowTime: color => { if (color === this.color) this.sounds.play('lowTime'); } });
     this.renderSetup();
     root.addEventListener('click', event => this.click(event));
@@ -44,6 +51,12 @@ export class PlayExperience {
     window.addEventListener('online', () => { this.reconnectNow(); });
     document.addEventListener('visibilitychange', () => { if (!document.hidden && this.connected) { this.reconnectNow(); this.run(() => this.refresh()); } });
     this.refreshTimer = setInterval(() => { if (!document.hidden && this.connected && (!this.full || isFinished(this.state?.status))) this.run(() => this.refresh()); }, 60000);
+    // Arrow keys browse the move history during a live game. Capture phase wins
+    // over the board's square-focus arrows for Left/Right.
+    this._playKeydown = event => this.keydown(event);
+    document.addEventListener('keydown', this._playKeydown, true);
+    // Native dialog: clicking the dark backdrop (outside the panel) closes it.
+    this.$('settings')?.addEventListener('click', event => { if (event.target === this.$('settings')) this.$('settings').close(); });
     this.authChanged(); this.run(() => this.route());
     window.Play = this;
   }
@@ -57,7 +70,7 @@ export class PlayExperience {
           <div class="play-player" data-play="player-top"><span class="play-avatar">${icon('person')}</span><div><strong data-play="name-top">Opponent</strong><span data-play="detail-top">No active game</span></div><div class="play-clock" data-play="clock-black" aria-label="Black clock">10:00</div></div>
           <div class="board-wrapper"><div id="play-chess-board" data-play="board" class="chess-board"></div><div class="play-board-loading" data-play="board-loading" hidden><span class="spinner"></span><span>Connecting to your game…</span></div></div>
           <div class="play-player" data-play="player-bottom"><span class="play-avatar play-avatar-self">${icon('person')}</span><div><strong data-play="name-bottom">You</strong><span data-play="detail-bottom">Choose a time control</span></div><div class="play-clock" data-play="clock-white" aria-label="White clock">10:00</div></div>
-          <div class="play-board-toolbar"><span class="play-connection" data-play="connection"><span class="status-dot"></span> Ready to play</span><div><button type="button" class="btn btn-ghost btn-small" data-action="cancel-premove" data-play="premove" hidden>Cancel premove</button><button type="button" class="icon-button btn-ghost" data-action="flip" aria-label="Flip board" title="Flip board">${icon('swap_vert')}</button><button type="button" class="icon-button btn-ghost" data-action="focus" aria-label="Toggle focus mode" title="Focus mode">${icon('fullscreen')}</button></div></div>
+          <div class="play-board-toolbar"><span class="play-connection" data-play="connection"><span class="status-dot"></span> Ready to play</span><div><button type="button" class="btn btn-ghost btn-small" data-action="cancel-premove" data-play="premove" hidden>Cancel premove</button><button type="button" class="icon-button btn-ghost" data-action="toggle-draw" aria-label="Draw arrows" title="Draw arrows" aria-pressed="false">${icon('gesture')}</button><button type="button" class="icon-button btn-ghost" data-action="flip" aria-label="Flip board" title="Flip board">${icon('swap_vert')}</button><button type="button" class="icon-button btn-ghost" data-action="focus" aria-label="Toggle focus mode" title="Focus mode">${icon('fullscreen')}</button></div></div>
         </div>
         <aside class="play-side">
           <section class="play-setup card" data-play="lobby"><div class="play-section-head"><h2>New game</h2></div>
@@ -70,7 +83,7 @@ export class PlayExperience {
             <details class="play-friend" data-play="friend"><summary>Challenge a friend</summary><form data-play="friend-form"><label class="field"><span class="field-label">Lichess username</span><input class="input-select" data-play="friend-name" autocomplete="off" maxlength="30" pattern="[A-Za-z0-9_-]{2,30}" placeholder="Your friend’s username" required></label><label class="field"><span class="field-label">Your pieces</span><select class="input-select" data-play="friend-color"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></label><button type="submit" class="btn btn-secondary" data-play="challenge-button">Send challenge</button></form><div data-play="outgoing" class="play-outgoing" hidden></div></details>
             <p class="play-small-note">Blitz supports friend challenges. Choose rapid or classical for matchmaking.</p>
           </section>
-          <section class="play-live card" data-play="live" hidden><div class="play-section-head"><h2 data-play="live-title">Your game</h2><span class="play-live-pill" data-play="live-pill">LIVE</span></div><p class="play-game-caption" data-play="game-caption"></p><p class="play-turn" data-play="turn" role="status"></p><div class="play-material" data-play="material"></div><div class="play-moves" data-play="moves" aria-label="Game moves"></div><div class="play-draw-offer" data-play="draw-offer" hidden><strong>Your opponent offers a draw</strong><button type="button" class="btn btn-secondary btn-small" data-action="accept-draw">Accept</button><button type="button" class="btn btn-ghost btn-small" data-action="decline-draw">Decline</button></div><div data-play="game-actions" class="play-game-actions"><button type="button" class="btn btn-secondary btn-small" data-action="offer-draw">Offer draw</button><button type="button" class="btn btn-ghost btn-small" data-action="resign">Resign</button><button type="button" class="btn btn-ghost btn-small" data-play="abort-button" data-action="abort" hidden>Abort</button></div><div class="play-confirm" data-play="confirm" hidden><span data-play="confirm-text"></span><button type="button" class="btn btn-secondary btn-small" data-action="confirm-action">Confirm</button><button type="button" class="btn btn-ghost btn-small" data-action="dismiss-confirm">Cancel</button></div><p class="play-fairplay-note">${icon('shield')} Analysis becomes available after the game.</p><a href="/play" data-route="/play" class="btn-link" data-action="lobby">Back to Play</a></section>
+          <section class="play-live card" data-play="live" hidden><div class="play-section-head"><h2 data-play="live-title">Your game</h2><span class="play-live-pill" data-play="live-pill">LIVE</span></div><p class="play-game-caption" data-play="game-caption"></p><p class="play-turn" data-play="turn" role="status"></p><div class="play-material" data-play="material"></div><div class="play-replay-bar" data-play="replay-bar" hidden><span data-replay-label></span><button type="button" class="btn btn-ghost btn-small" data-action="back-to-live">${icon('bolt')} Back to live</button></div><div class="play-moves" data-play="moves" aria-label="Game moves"></div><div class="play-draw-offer" data-play="draw-offer" hidden><strong>Your opponent offers a draw</strong><button type="button" class="btn btn-secondary btn-small" data-action="accept-draw">Accept</button><button type="button" class="btn btn-ghost btn-small" data-action="decline-draw">Decline</button></div><div data-play="game-actions" class="play-game-actions"><button type="button" class="btn btn-secondary btn-small" data-action="offer-draw">Offer draw</button><button type="button" class="btn btn-ghost btn-small" data-action="resign">Resign</button><button type="button" class="btn btn-ghost btn-small" data-play="abort-button" data-action="abort" hidden>Abort</button></div><div class="play-confirm" data-play="confirm" hidden><span data-play="confirm-text"></span><button type="button" class="btn btn-secondary btn-small" data-action="confirm-action">Confirm</button><button type="button" class="btn btn-ghost btn-small" data-action="dismiss-confirm">Cancel</button></div><p class="play-fairplay-note">${icon('shield')} Analysis becomes available after the game.</p><a href="/play" data-route="/play" class="btn-link" data-action="lobby">Back to Play</a></section>
           <section class="play-results card" data-play="results" hidden aria-live="polite"><span class="play-result-icon" data-play="result-icon">${icon('emoji_events')}</span><span class="eyebrow">GAME COMPLETE</span><h2 data-play="result-title"></h2><p data-play="result-reason"></p><div class="play-result-opponent" data-play="result-opponent"></div><div class="play-result-facts" data-play="result-facts"></div><button type="button" class="btn btn-primary play-review" data-action="review">${icon('analytics')} Review Game</button><button type="button" class="btn btn-secondary" data-action="again">${icon('replay')} Play Again</button><div class="play-result-links"><a data-play="lichess-link" target="_blank" rel="noopener noreferrer">View on Lichess ↗</a><button type="button" class="btn-link" data-action="download">Download PGN</button></div><button type="button" class="btn btn-ghost" data-action="lobby">Return to Play</button></section>
           <section class="play-invitations card" data-play="invitations" hidden><h3>Friend challenges</h3><div data-play="invitation-list"></div></section>
         </aside>
@@ -194,6 +207,9 @@ export class PlayExperience {
     const resume = event.target.closest('[data-resume]'); if (resume) return this.run(() => this.resume(resume.dataset.resume));
     const recent = event.target.closest('[data-review-game]'); if (recent) return this.run(() => this.review(recent.dataset.reviewGame));
     const invitation = event.target.closest('[data-invitation]'); if (invitation) return this.run(async () => { await this.api.post(`/challenge/${encodeURIComponent(invitation.dataset.invitation)}/${invitation.dataset.response}`); invitation.closest('.play-invitation')?.remove(); });
+    // Clicking a move in the history jumps to that position (live-game replay).
+    const ply = event.target.closest('[data-ply]');
+    if (ply) { this.seekReplay(Number(ply.dataset.ply)); return; }
     const button = event.target.closest('[data-action]'); if (!button || button.disabled) return;
     if (button.dataset.action === 'lobby') event.preventDefault();
     await this.run(async () => {
@@ -208,6 +224,8 @@ export class PlayExperience {
         case 'cancel-search': await this.cancelSearch(); break;
         case 'refresh': await this.refresh(); break;
         case 'flip': this.board.flip(); this.updatePlayers(); break;
+        case 'toggle-draw': this.setDrawMode(!this.drawMode); break;
+        case 'back-to-live': this.seekReplay(Infinity); break;
         case 'focus': this.root.classList.toggle('play-focus'); document.body.classList.toggle('play-focus-mode', this.root.classList.contains('play-focus')); break;
         case 'cancel-premove': this.board.cancelPremove(); break;
         case 'settings': this.renderSettings(); this.$('settings').showModal(); break;
@@ -301,7 +319,7 @@ export class PlayExperience {
     clearTimeout(this.pendingTimer);
     this.gameConnection = preserve ? 'reconnecting' : 'connecting';
     if (preserve) this.board.setPosition(this.position.chess.fen(), { lastMove: this.position.lastMove, playerColor: this.color, interactive: false, pending: true });
-    else { this.full = null; this.state = null; this.position = null; this.board.setPosition(INITIAL, { interactive: false }); this.clocks.stop(); this.$('moves').replaceChildren(); }
+    else { this.full = null; this.state = null; this.position = null; this.replayIndex = null; this._displayFen = null; this.board.setPosition(INITIAL, { interactive: false }); this.clocks.stop(); this.$('moves').replaceChildren(); this.$('replay-bar').hidden = true; }
     this.$('board-loading').hidden = preserve; this.$('turn').textContent = preserve ? 'Reconnecting…' : 'Connecting…'; this.$('search').hidden = true; this.$('outgoing').hidden = true;
     if (preserve && isFinished(this.state?.status)) this.renderResult(); else this.showGame();
     this.updateConnection();
@@ -316,7 +334,7 @@ export class PlayExperience {
               if (event.variant?.key && event.variant.key !== 'standard') { const error = new Error('This game uses a variant. Continue it on Lichess.'); error.status = 400; throw error; }
               const firstPosition = this.full?.id !== id;
               this.full = event; this.full.id = id; this.color = event.white?.id?.toLowerCase() === this.profile?.id?.toLowerCase() ? 'white' : 'black';
-              if (firstPosition) this.board.setOrientation(this.color);
+              if (firstPosition) this.orientToPlayer();
               this.gameConnection = 'connected'; this.applyState(event.state);
             }
             else if (event.type === 'gameState' && this.full) { this.gameConnection = 'connected'; this.applyState(event); }
@@ -348,7 +366,7 @@ export class PlayExperience {
     this.$('board-loading').hidden = true;
     const finished = isFinished(state.status);
     if (!finished && !this.activeGames.some(g => gameId(g) === this.full.id)) { this.activityRevision++; this.activeGames.push({ gameId: this.full.id, color: this.color, opponent: this.full[this.color === 'white' ? 'black' : 'white'] }); window.PlayFairPlay?.setActiveGames(this.activeGames); }
-    this.board.setPosition(position.chess.fen(), { lastMove: position.lastMove, playerColor: this.color, interactive: !finished && this.gameConnection === 'connected', pending: Boolean(this.pending) });
+    this.showPosition();
     this.clocks.sync({ white: state.wtime, black: state.btime, running: !finished && position.ply >= 2 ? position.chess.turn() === 'w' ? 'white' : 'black' : null });
     if (previous && position.ply > previousPly && !finished) { const move = position.moves.at(-1); this.sounds.play(move.promotion ? 'promotion' : position.chess.in_check() ? 'check' : /[kq]/.test(move.flags) ? 'castle' : move.captured ? 'capture' : 'move'); }
     else if (!previous && !finished) { this.sounds.play('start'); this.message(''); }
@@ -360,6 +378,7 @@ export class PlayExperience {
       const wasFinished = isFinished(previous?.status);
       this.activityRevision++; this.activeGames = this.activeGames.filter(g => gameId(g) !== this.full.id); window.PlayFairPlay?.setActiveGames(this.activeGames);
       this.board.cancelPremove(); this.$('confirm').hidden = true;
+      this.replayIndex = null; this._displayFen = null; this.$('replay-bar').hidden = true;
       if (!wasFinished) { this.sounds.play('end'); this.cacheGame(); this.run(() => this.enrichResult(this.full.id)); }
       this.renderResult(); this.run(() => this.refresh());
     }
@@ -378,16 +397,102 @@ export class PlayExperience {
   updateConnection() {
     const el = this.$('connection'), connected = this.gameConnection === 'connected';
     el.innerHTML = `<span class="status-dot ${connected ? '' : 'play-dot-offline'}"></span> ${isFinished(this.state?.status) ? 'Game complete' : connected ? 'Connected' : this.gameConnection === 'connecting' ? 'Connecting…' : this.gameConnection === 'disconnected' ? 'Disconnected · resume to reconnect' : 'Reconnecting…'}`;
-    if (this.full && !isFinished(this.state?.status)) this.board.setPosition(this.position.chess.fen(), { playerColor: this.color, lastMove: this.position.lastMove, interactive: connected, pending: Boolean(this.pending) || !connected });
+    // Only re-paint the board when the connection flags actually change — the
+    // stream (applyState) already keeps it current, so avoid redundant work
+    // every time a gameState or connection event arrives.
+    if (this.full && !isFinished(this.state?.status) && this.position) {
+      const pending = Boolean(this.pending) || !connected;
+      if (this._connectionPending !== pending || this._connectionFen !== this._displayFen) {
+        this._connectionPending = pending; this._connectionFen = this._displayFen;
+        this.showPosition();
+      }
+    }
   }
   renderMoves() {
     const moves = this.position.moves;
-    this.$('moves').innerHTML = moves.map((move, i) => `${i % 2 === 0 ? `<span class="play-move-number">${Math.floor(i / 2) + 1}.</span>` : ''}<span class="play-move ${i === moves.length - 1 ? 'is-last' : ''}">${escape(move.san)}</span>`).join('');
-    this.$('moves').scrollTop = this.$('moves').scrollHeight;
+    const cursor = this.replayIndex == null ? moves.length : Math.max(0, Math.min(this.replayIndex, moves.length));
+    const inReplay = cursor < moves.length;
+    const currentTarget = cursor > 0 ? cursor - 1 : -1;
+    const replayBar = this.$('replay-bar');
+    if (replayBar) {
+      replayBar.hidden = !inReplay;
+      if (inReplay) replayBar.querySelector('[data-replay-label]').textContent = cursor ? `Viewing after move ${cursor} of ${moves.length}` : `Viewing the start position`;
+    }
+    this.$('moves').innerHTML = moves.map((move, i) => `${i % 2 === 0 ? `<span class="play-move-number">${Math.floor(i / 2) + 1}.</span>` : ''}<button type="button" class="play-move ${i === currentTarget ? 'is-current' : ''} ${i === moves.length - 1 ? 'is-last' : ''}" data-ply="${i + 1}">${escape(move.san)}</button>`).join('');
+    const list = this.$('moves');
+    if (inReplay) {
+      const current = list.querySelector('.is-current');
+      if (current) current.scrollIntoView({ block: 'nearest' });
+      else list.scrollTop = 0;
+    } else list.scrollTop = list.scrollHeight;
     const totals = { w: 0, b: 0 }, values = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
     for (const row of this.position.chess.board()) for (const piece of row) if (piece) totals[piece.color] += values[piece.type];
     const diff = totals.w - totals.b;
     this.$('material').textContent = diff ? `${diff > 0 ? 'White' : 'Black'} +${Math.abs(diff)} material` : 'Material is equal';
+  }
+
+  // Enter/leave inline replay of the played moves (arrow keys or clicking a
+  // move). The live stream keeps running underneath; returning to the end (or
+  // "Back to live") hands interaction back to the board.
+  seekReplay(index) {
+    if (!this.position || !this.position.fens?.length) return;
+    if (!this.full || isFinished(this.state?.status)) return;
+    const max = this.position.moves.length;
+    const target = Number.isFinite(index) ? Math.max(0, Math.min(index, max)) : max;
+    this.replayIndex = target >= max ? null : target;
+    this.board.cancelPremove();
+    this.renderMoves();
+    this.showPosition();
+  }
+
+  showPosition() {
+    const pos = this.position;
+    if (!pos || !this.full) return;
+    const finished = isFinished(this.state?.status);
+    const connected = this.gameConnection === 'connected';
+    const replaying = this.replayIndex != null && this.replayIndex < pos.moves.length;
+    const index = replaying ? Math.max(0, Math.min(this.replayIndex, pos.moves.length)) : pos.moves.length;
+    const fen = pos.fens[index] || pos.chess.fen();
+    this._displayFen = fen;
+    this.board.setPosition(fen, {
+      lastMove: index > 0 ? pos.moves[index - 1].uci : null,
+      playerColor: this.color,
+      interactive: !replaying && !finished && connected,
+      pending: Boolean(this.pending) && !replaying && !finished,
+    });
+  }
+
+  // Auto-orient the board so the player's pieces sit at the bottom for a fresh
+  // game. Uses the raw renderer flip so a remembered manual orientation never
+  // overrides the side the user is actually playing.
+  orientToPlayer() {
+    if (!this.board?.renderer) return;
+    const wantFlipped = this.color === 'black';
+    if (this.board.renderer.flipped !== wantFlipped) this.board.renderer.flip();
+  }
+
+  setDrawMode(on) {
+    this.drawMode = Boolean(on);
+    if (this.board?.renderer) this.board.renderer.drawMode = this.drawMode;
+    this.root.classList.toggle('play-draw-mode', this.drawMode);
+    const btn = this.root.querySelector('[data-action="toggle-draw"]');
+    btn?.setAttribute('aria-pressed', String(this.drawMode));
+    btn?.setAttribute('aria-label', this.drawMode ? 'Stop drawing arrows' : 'Draw arrows');
+    btn?.setAttribute('title', this.drawMode ? 'Stop drawing arrows' : 'Draw arrows');
+    if (this.drawMode) { this.board.cancelPremove?.(); this.board._select?.(null); }
+  }
+
+  keydown(event) {
+    if (!this.full || isFinished(this.state?.status) || !location.pathname.startsWith('/play')) return;
+    if (this.$('settings')?.open || document.querySelector('dialog[open]')) return;
+    if (event.target?.closest?.('input, textarea, select, [contenteditable]')) return;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault(); event.stopImmediatePropagation();
+      const active = document.activeElement;
+      if (active && active !== document.body && typeof active.blur === 'function' && active.closest?.('[data-ply], button')) active.blur();
+      const base = this.replayIndex == null ? this.position.moves.length : this.replayIndex;
+      this.seekReplay(base + (event.key === 'ArrowLeft' ? -1 : 1));
+    }
   }
   async sendMove(move) {
     if (!this.full || this.pending || isFinished(this.state?.status) || this.gameConnection !== 'connected') { this.board.setPending(Boolean(this.pending)); return; }
@@ -419,6 +524,8 @@ export class PlayExperience {
   showGame() { this.$('lobby').hidden = true; this.$('live').hidden = false; this.$('results').hidden = true; this.$('history').hidden = true; this.root.classList.add('play-in-game'); this.root.classList.remove('play-has-result'); }
   showLobby() {
     this.$('lobby').hidden = false; this.$('live').hidden = true; this.$('results').hidden = true; this.$('history').hidden = false; this.root.classList.remove('play-in-game', 'play-has-result');
+    this.replayIndex = null;
+    this.$('replay-bar').hidden = true;
     if (!this.full || isFinished(this.state?.status)) { this.gameController?.abort(); this.gameController = null; this.clocks?.stop(); this.board?.setPosition(INITIAL, { interactive: false }); this.$('name-top').textContent = 'Opponent'; this.$('detail-top').textContent = 'No active game'; this.$('name-bottom').textContent = this.profile?.username || 'You'; this.$('detail-bottom').textContent = 'Choose a time control'; this.$('connection').innerHTML = '<span class="status-dot"></span> Ready'; }
     this.renderSetup();
   }
@@ -473,7 +580,7 @@ export class PlayExperience {
   }
   reconnectNow() { if (this.full && !isFinished(this.state?.status)) { const id = this.full.id; this.gameController?.abort(); this.gameController = null; this.run(() => this.resume(id)); } }
   closeStreams() { for (const key of ['gameController', 'eventController', 'seekController']) { this[key]?.abort(); this[key] = null; } clearTimeout(this.pendingTimer); clearTimeout(this.noticeTimer); this.message(''); }
-  destroy() { this.closeStreams(); clearInterval(this.refreshTimer); this.clocks.destroy(); this.board.destroy(); }
+  destroy() { this.closeStreams(); clearInterval(this.refreshTimer); document.removeEventListener('keydown', this._playKeydown, true); this.clocks.destroy(); this.board.destroy(); }
 }
 
 export function mountPlay(app = window.app) {

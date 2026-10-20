@@ -502,33 +502,13 @@
     let assistantEl = null;
     let assistantText = '';
     let doneReceived = false; // guards against a post-`done` stream error re-saving the reply
-    // Live "thinking" view: reasoning models stream their chain of thought in
-    // a separate channel. Show it in the typing indicator (so the coach ALWAYS
-    // looks active — never a dead spinner) and as a dimmed collapsible note
-    // above the reply bubble.
-    let reasoningEl = null;
-    let reasoningText = '';
-    let reasoningRenderPending = false;
-    const showReasoning = (t) => {
-      reasoningText += t;
+    // Reasoning models stream their chain of thought in a separate channel.
+    // That thinking is internal — never render it into the chat (it reads as
+    // rambling instructions). Only the typing indicator shows that a reply is
+    // on its way, with little status updates while it works.
+    const showReasoning = () => {
       skeleton?.remove();
-      hideTyping();
-      if (!reasoningEl) {
-        reasoningEl = document.createElement('div');
-        reasoningEl.className = 'coach-reasoning';
-        reasoningEl.innerHTML = '<div class="coach-reasoning-head"><span>Coach is thinking…</span></div>';
-        el['coach-chat-messages']?.appendChild(reasoningEl);
-      }
-      // The typing indicator comes back on top of the reasoning block so the
-      // stream never looks idle while reasoning tokens arrive.
       showTyping('Thinking…');
-      if (!reasoningRenderPending) {
-        reasoningRenderPending = true;
-        setTimeout(() => {
-          reasoningRenderPending = false;
-          scrollMessages();
-        }, 120);
-      }
     };
 
     try {
@@ -577,18 +557,11 @@
         },
         onReasoning: showReasoning,
         onToken: (t) => {
-          // First answer token: collapse the reasoning view and start the reply.
-          if (reasoningEl) {
-            reasoningEl.classList.add('done');
-            reasoningEl = null; // don't touch it again this stream
-            skeleton?.remove();
-            hideTyping();
-          }
           if (!assistantEl) { skeleton?.remove(); hideTyping(); assistantEl = buildBubble('assistant', ''); assistantEl.classList.add('streaming'); el['coach-chat-messages'].appendChild(assistantEl); }
           assistantText += t;
           scheduleRender();
         },
-        onToolCall: (call) => { reasoningEl && reasoningEl.classList.add('done'); handleBrowserTool(call); },
+        onToolCall: (call) => { handleBrowserTool(call); },
         onToolStatus: ({ label }) => showTyping(label),
         onToolResultVisible: ({ name, summary, games }) => {
           hideTyping();
@@ -1132,7 +1105,20 @@
   function appendSkeleton() {
     const box = el['coach-chat-messages']; if (!box) return null;
     const d = document.createElement('div'); d.className = 'coach-skeleton-bubble';
-    box.appendChild(d); scrollMessages(); return d;
+    // Little live status updates instead of a blank pulsing bar.
+    const status = document.createElement('div'); status.className = 'coach-skeleton-status';
+    d.appendChild(status);
+    box.appendChild(d); scrollMessages();
+    const phases = ['Analyzing position…', 'Checking with Stockfish…', 'Writing your explanation…'];
+    let phase = 0;
+    status.textContent = phases[0];
+    const start = Date.now();
+    const timer = setInterval(() => {
+      if (!d.isConnected || Date.now() - start > 9000) { clearInterval(timer); return; }
+      phase = (phase + 1) % phases.length;
+      status.textContent = phases[phase];
+    }, 1800);
+    return d;
   }
   function appendToolCard(name, summary) {
     if (!el['coach-chat-messages'] || !summary) return;

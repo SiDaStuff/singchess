@@ -365,7 +365,8 @@
 .coach-reasoning.done .coach-reasoning-body { display: none; }
 .coach-reasoning.done .coach-reasoning-head { margin-bottom: 0; }
 .coach-reasoning.done .coach-reasoning-head span:last-child::after { content: ' · Complete'; }
-.coach-skeleton-bubble { width: 65%; height: 55px; background: var(--bg-elevated); border-radius: 10px; animation: coach-pulse 1.5s ease-in-out infinite; }
+.coach-skeleton-bubble { position: relative; width: 65%; height: 55px; background: var(--bg-elevated); border-radius: 10px; animation: coach-pulse 1.5s ease-in-out infinite; }
+.coach-skeleton-status { position: absolute; inset: 0; display: grid; place-items: center; padding: 0 14px; color: var(--text-secondary); font-size: 11px; text-align: center; }
 @keyframes coach-pulse { 50% { opacity: .45; } }
 .coach-question-card { display: grid; align-self: flex-start; gap: 14px; max-width: 95%; padding: 17px; border: 1px solid var(--border-color); background: var(--bg-page); border-radius: 10px; }
 .coach-question-text { font-size: .87rem; }
