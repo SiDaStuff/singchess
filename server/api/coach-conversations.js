@@ -48,7 +48,7 @@ exports.handler = async (event) => {
       await ref.set({ chats, preferences, updatedAt });
       return json(200, { saved: true, updatedAt, count: chats.length });
     }
-    return json(405, { error: 'Use GET or PUT.' });
+    return json(405, { error: 'Use GET or POST.' });
   } catch (err) {
     return json(err.statusCode || 500, { error: err.message || 'Could not sync Coach conversations.', code: err.code });
   }

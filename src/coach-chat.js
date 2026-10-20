@@ -81,7 +81,7 @@
     state.syncTimer = setTimeout(async () => {
       try {
         const headers = await state.app._authHeaders({ 'Content-Type': 'application/json' });
-        await window.apiFetch('/api/coach/conversations', { method: 'PUT', headers, cache: 'no-store', body: JSON.stringify({ chats: state.chats, preferences: state.preferences }) });
+        await window.apiFetch('/api/coach/conversations/save', { method: 'POST', headers, cache: 'no-store', body: JSON.stringify({ chats: state.chats, preferences: state.preferences }) });
       } catch (_) {}
     }, 900);
   }

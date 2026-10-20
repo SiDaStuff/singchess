@@ -35,7 +35,7 @@ export function siteOutputPlugin() {
       });
       const policyPath = path.join(directory, 'security-policy.json');
       const { policy: draft, workerPolicy } = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
-      const policy = draft.replace(/script-src [^;]+/, `script-src ${[...new Set(hashes)].join(' ')} 'strict-dynamic' 'wasm-unsafe-eval'`);
+      const policy = draft.replace(/script-src [^;]+/, `script-src ${[...new Set(hashes)].join(' ')} 'sha256-5A3NWzXjNO0S6Fhf43TKDvk4Zo+rKWmsxGnzPlrbBiE=' 'strict-dynamic' 'wasm-unsafe-eval'`);
       fs.writeFileSync(indexPath, html);
       fs.writeFileSync(policyPath, JSON.stringify({ policy, workerPolicy }));
       fs.writeFileSync(path.join(directory, '_headers'), `/*\n  Content-Security-Policy: ${policy}\n  Link: </llms.txt>; rel="describedby"; type="text/markdown"\n/src/stockfish.worker.js\n  Content-Security-Policy: ${workerPolicy}\n`);
@@ -82,7 +82,8 @@ export function siteOutputPlugin() {
       try { if (backend) origins.add(new URL(backend).origin); } catch {}
       const policy = [
         "default-src 'self'",
-        `script-src ${hashes.join(' ')} 'strict-dynamic' 'wasm-unsafe-eval'`,
+        `script-src ${hashes.join(' ')} 'sha256-5A3NWzXjNO0S6Fhf43TKDvk4Zo+rKWmsxGnzPlrbBiE=' 'strict-dynamic' 'wasm-unsafe-eval'`,
+        "script-src-elem 'self' https://static.cloudflareinsights.com",
         "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob: https:", "font-src 'self'",
         `connect-src 'self' ${[...origins].join(' ')} https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://lichess.org https://*.lichess.org https://api.chess.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com https://www.google.com https://www.gstatic.com`,
         "frame-src https://*.firebaseapp.com https://www.google.com https://www.recaptcha.net https://recaptcha.google.com",
