@@ -102,7 +102,7 @@ export function siteOutputPlugin() {
         "frame-src https://*.firebaseapp.com",
         "worker-src 'self' blob:", "media-src 'self' blob:", "object-src 'none'", "base-uri 'none'",
         "form-action 'self'", "frame-ancestors 'none'",
-        "require-trusted-types-for 'script'", "trusted-types default dompurify chess-templates index-script-url goog#html gapi#gapi",
+        "require-trusted-types-for 'script'", "trusted-types default dompurify chess-templates index-script-url goog#html gapi#gapi singchess-worker-script",
       ].join('; ');
       this.emitFile({ type: 'asset', fileName: '_headers', source: `/*\n  Content-Security-Policy: ${policy}\n  Link: </llms.txt>; rel="describedby"; type="text/markdown"\n` });
       // The isolated worker imports only blobs created from its validated

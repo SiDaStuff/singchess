@@ -6,7 +6,12 @@
       html: options.html,
       text: options.text || options.message || '',
       input: options.input,
-      inputValue: options.inputValue,
+      // SweetAlert2 throws "Unexpected type of inputValue" when `input` is a
+      // text type but inputValue is undefined. Coerce to a string so dialogs
+      // that call AppDialog.open({ input: 'text' }) without an inputValue don't
+      // log a console error. This mirrors the window.prompt fallback below.
+      inputValue: typeof options.inputValue === 'string' || typeof options.inputValue === 'number'
+        ? options.inputValue : '',
       inputPlaceholder: options.inputPlaceholder,
       inputAttributes: options.inputAttributes,
       inputValidator: options.inputValidator,

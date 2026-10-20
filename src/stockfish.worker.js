@@ -42,16 +42,25 @@ function dbg(msg) {
 // Under require-trusted-types-for 'script', importScripts must receive a
 // TrustedScriptURL, not a raw string. This worker only ever loads a blob: URL
 // it built itself (never a configurable remote path), so the policy can return
-// it unchanged. Falls back to the raw URL when Trusted Types is unavailable.
+// it unchanged. The policy is created ONCE and reused — re-creating a policy
+// with the same name throws when a `trusted-types` CSP allowlist is active, and
+// the fallback would otherwise hand back a raw URL that importScripts rejects.
+// The policy name is allowlisted via `trusted-types ... singchess-worker-script`
+// in build/site-output.js. Falls back to the raw URL when Trusted Types is
+// unavailable.
+let workerScriptPolicy = null;
 function makeTrustedScriptUrl(url) {
   try {
-    if (self.trustedTypes && self.trustedTypes.createPolicy) {
-      const policy = self.trustedTypes.createPolicy('singchess-worker-script', {
-        createScriptURL: (input) => input,
-      });
-      return policy.createScriptURL(String(url));
+    if (self.trustedTypes) {
+      if (!workerScriptPolicy) {
+        workerScriptPolicy = self.trustedTypes.getPolicy('singchess-worker-script')
+          || (self.trustedTypes.createPolicy && self.trustedTypes.createPolicy('singchess-worker-script', {
+            createScriptURL: (input) => input,
+          }));
+      }
+      if (workerScriptPolicy) return workerScriptPolicy.createScriptURL(String(url));
     }
-  } catch (_e) { /* policy already created or TT unavailable — fall through */ }
+  } catch (_e) { /* policy creation unavailable — fall through */ }
   return url;
 }
 
