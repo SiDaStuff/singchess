@@ -1,8 +1,8 @@
 // API base URL for the backend server.
 //
 // Resolution order:
-//   1) Vite compile-time env var VITE_API_URL (set in Netlify UI as:
-//      VITE_API_URL=https://chess.singdevelopments.com)
+//   1) Vite compile-time env var VITE_API_URL (production build defaults to the
+//      backend at https://mastermind.singdevelopments.com — see .env.production)
 //   2) window.__API_CONFIG.baseUrl — set by the Node server serving index.html
 //   3) window.__API_URL — set by a <script> tag in the HTML
 //   4) '' (empty string) — same-origin (server also serves static files, or
@@ -13,7 +13,8 @@
 
 let BASE = '';
 
-// 1) Vite compile-time env var (set in Netlify UI as VITE_API_URL).
+// 1) Vite compile-time env var. Production builds default to the backend at
+//    https://mastermind.singdevelopments.com (pinned via .env.production).
 if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) {
   BASE = String(import.meta.env.VITE_API_URL).replace(/\/+$/, '');
 }

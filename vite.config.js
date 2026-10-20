@@ -71,7 +71,12 @@ function servePublicSvgPlugin() {
 }
 
 export default defineConfig(({ mode }) => {
-  const apiTarget = loadEnv(mode, process.cwd(), '').VITE_API_URL || 'http://localhost:3000';
+  const env = loadEnv(mode, process.cwd(), '');
+  // Explicit override wins; otherwise dev defaults to localhost and production
+  // pins to the real backend so a build on any host never bakes in the dev URL.
+  const isProd = mode === 'production';
+  const productionBackend = 'https://mastermind.singdevelopments.com';
+  const apiTarget = env.VITE_API_URL || (isProd ? productionBackend : 'http://localhost:3000');
   return {
     root: '.',
     publicDir: 'public',

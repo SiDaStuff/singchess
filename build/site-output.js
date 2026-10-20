@@ -91,7 +91,7 @@ export function siteOutputPlugin() {
       // The application stylesheet (and its Inter font) is loaded after the
       // static home shell becomes interactive. Do not put that font back on
       // the first-load critical path with a preload hint.
-      const origins = new Set(['https://mastermind.singdevelopments.com', 'https://chess.sidastuff.com']);
+      const origins = new Set(['https://mastermind.singdevelopments.com', 'https://chess.singdevelopments.com']);
       try { if (backend) origins.add(new URL(backend).origin); } catch {}
       const policy = [
         "default-src 'self'",
@@ -102,7 +102,7 @@ export function siteOutputPlugin() {
         "frame-src https://*.firebaseapp.com",
         "worker-src 'self' blob:", "media-src 'self' blob:", "object-src 'none'", "base-uri 'none'",
         "form-action 'self'", "frame-ancestors 'none'",
-        "require-trusted-types-for 'script'", "trusted-types default dompurify chess-templates index-script-url goog#html",
+        "require-trusted-types-for 'script'", "trusted-types default dompurify chess-templates index-script-url goog#html gapi#gapi",
       ].join('; ');
       this.emitFile({ type: 'asset', fileName: '_headers', source: `/*\n  Content-Security-Policy: ${policy}\n  Link: </llms.txt>; rel="describedby"; type="text/markdown"\n` });
       // The isolated worker imports only blobs created from its validated
