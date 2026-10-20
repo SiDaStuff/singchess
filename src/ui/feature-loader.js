@@ -1,7 +1,7 @@
 let playTask, coachTask, adminTask, teachingTask;
 function loadTeaching() {
   return teachingTask ||= import('../tactics-coach.js')
-    .then(() => Promise.all([import('../tactics-advanced.js'), import('./move-explanation.js')]))
+    .then(() => Promise.all([import('../tactics-advanced.js'), import('./move-explanation.js'), import('./tactical-coach.css')]))
     .then(() => { window.app?._refreshInsightsForAuth(); })
     .catch(error => { teachingTask = null; throw error; });
 }

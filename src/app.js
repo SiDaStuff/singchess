@@ -3873,8 +3873,8 @@ _syncAccountUi() {
 	    if (!id) return;
 	    try {
 	      // apiFetch — see _markNotificationRead.
-	      await apiFetch(`/api/notifications/${encodeURIComponent(id)}`, {
-	        method: 'DELETE',
+	      await apiFetch(`/api/notifications/${encodeURIComponent(id)}/delete`, {
+	        method: 'POST',
 	        headers: await this._authHeaders(),
 	      });
 	    } catch (_err) { /* best-effort */ }
@@ -4120,15 +4120,25 @@ if (this.elAnticheatReportStatus) {
 	    if (score != null) {
 	      let tone = 'low';
 	      const low = String(lvl || '').toLowerCase();
-	      if (low.includes('high')) tone = 'high';
+	      if (low.includes('high') || low.includes('needs review')) tone = 'high';
 	      else if (low.includes('medium') || low.includes('moderate') || low.includes('mid')) tone = 'medium';
 	      lines.push('<div class="anticheat-report-gauge ' + tone + '">'
 	        + '<span class="anticheat-report-score">' + score + '</span><span class="anticheat-report-max">/100</span>'
-	        + (lvl ? '<span class="anticheat-report-level">' + esc(lvl) + ' risk</span>' : '')
+	        + (lvl ? '<span class="anticheat-report-level">' + esc(lvl) + '</span>' : '')
 	        + '</div>');
 	    }
 	    if (rs.headline) lines.push('<p class="anticheat-headline">' + esc(rs.headline) + '</p>');
 	    if (rs.explanation) lines.push('<p class="anticheat-explanation">' + esc(rs.explanation) + '</p>');
+	    if (rs.confidence) lines.push('<p class="anticheat-explanation">Confidence: ' + esc(rs.confidence)
+	      + (Array.isArray(rs.scoreRange) ? ' · estimated range ' + esc(rs.scoreRange[0]) + '–' + esc(rs.scoreRange[1]) : '') + '</p>');
+	    if (Array.isArray(rs.signals) && rs.signals.length) {
+	      lines.push('<div class="anticheat-report-games"><h4>Evidence</h4>');
+	      rs.signals.filter((signal) => Number(signal.points) > 0).slice(0, 10).forEach((signal) => {
+	        lines.push('<div class="anticheat-game-row"><span class="anticheat-game-title">' + esc(signal.label)
+	          + '</span><span class="anticheat-game-meta">+' + esc(signal.points) + ' · ' + esc(signal.detail || '') + '</span></div>');
+	      });
+	      lines.push('</div>');
+	    }
 	    if (Array.isArray(report.games) && report.games.length) {
 	      lines.push('<div class="anticheat-report-games"><h4>Game breakdown</h4>');
 	      report.games.forEach((g) => {
@@ -4802,7 +4812,7 @@ this._syncAnticheatForm();
 	    } else if (r.summary && r.summary.riskLevel) {
 	      const lvl = String(r.summary.riskLevel);
 	      const score = (r.summary.score != null) ? ` · ${r.summary.score}/100` : '';
-	      badge = `<span class="anticheat-badge done">${this._escapeHtml(lvl)} risk${score}</span>`;
+	      badge = `<span class="anticheat-badge done">${this._escapeHtml(lvl)}${score}</span>`;
 	    }
 	    return `<a class="anticheat-saved-item" href="${href}">
 	      ${icon}
@@ -4819,7 +4829,7 @@ this._syncAnticheatForm();
 	  _anticheatSavedTitle(r) {
 	    if (r.status === 'running') return 'Review in progress';
 	    if (r.status === 'error') return 'Review failed';
-	    if (r.summary && r.summary.riskLevel) return `${r.summary.riskLevel} risk review`;
+	    if (r.summary && r.summary.riskLevel) return `${r.summary.riskLevel} fair-play review`;
 	    return 'Anticheat review';
 	  }
 
@@ -8593,7 +8603,7 @@ _showPuzzleSuccessOverlay() {
 	    if (!this.elAnticheatResults || !data?.summary) return;
 	    const summary = data.summary;
 	    const score = Math.max(0, Math.min(100, Math.round(summary.score || 0)));
-	    const riskClass = summary.riskLevel === 'High' ? 'high' : summary.riskLevel === 'Watch' ? 'watch' : 'low';
+	    const riskClass = ['High', 'Needs review'].includes(summary.riskLevel) ? 'high' : summary.riskLevel === 'Watch' ? 'watch' : 'low';
 	    if (this.elAnticheatRiskPill) {
 	      this.elAnticheatRiskPill.textContent = summary.riskLevel || 'Low';
 	      this.elAnticheatRiskPill.className = `anticheat-risk-pill ${riskClass}`;
@@ -8652,7 +8662,17 @@ _showPuzzleSuccessOverlay() {
 	          ${metric('Mistakes', `${Math.round(summary.mistakeRate || 0)}%`)}
 	          ${metric('Fast bests', `${Math.round(summary.fastBestRate || 0)}%`)}
 	          ${metric('Fast criticals', `${Math.round(summary.fastCriticalRate || 0)}%`)}
+	          ${metric('Top-three moves', `${Math.round(summary.topThreeRate || 0)}%`)}
+	          ${metric('Critical-position strength', `${Math.round(summary.criticalBestRate || 0)}%`)}
+	          ${metric('Quiet bests', `${Math.round(summary.quietBestRate || 0)}%`)}
+	          ${metric('Distinctive engine moves', `${Math.round(summary.unusualEngineRate || 0)}%`)}
+	          ${metric('Rating expectation', `${Math.round(summary.ratingExpectedAccuracy || 0)}%`)}
+	          ${metric('Sample confidence', summary.confidence || 'Low')}
+	          ${metric('Estimated range', Array.isArray(summary.scoreRange) ? `${summary.scoreRange[0]}–${summary.scoreRange[1]}` : '—')}
+	          ${metric('Book moves excluded', summary.excluded?.book || 0)}
+	          ${metric('Forced moves excluded', summary.excluded?.forced || 0)}
 	        </div>
+	        ${Array.isArray(summary.signals) ? `<div class="anticheat-game-list"><h4>Evidence contributions</h4>${summary.signals.filter((signal) => Number(signal.points) > 0).map((signal) => `<div class="anticheat-game"><div><strong>${this._escapeHtml(signal.label)}</strong><small>${this._escapeHtml(signal.detail || '')}</small></div><strong>+${this._escapeHtml(signal.points)}</strong></div>`).join('')}</div>` : ''}
 	        ${gameRows ? `<div class="anticheat-game-list">${gameRows}</div>` : ''}
 	      </details>
 	    `;

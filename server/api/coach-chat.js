@@ -154,7 +154,8 @@ exports.streamHandler = async (req, res) => {
 
   // Partial reservations keep the remaining allowance usable; all provider
   // rounds share this grant so concurrent streams cannot exceed the daily cap.
-  let reserveAmount = COACH_RESERVE;
+  const detail = ['quick', 'standard', 'detailed'].includes(payload.detail) ? payload.detail : 'standard';
+  let reserveAmount = detail === 'quick' ? 1200 : detail === 'detailed' ? 5000 : COACH_RESERVE;
   let reservedTotal;
   let reservationDay;
   try {
@@ -214,7 +215,11 @@ exports.streamHandler = async (req, res) => {
     // Build the LLM message list (system + last N client-supplied messages +
     // this one). The client already includes the current `text` in history, so
     // buildLlmMessages dedupes to avoid sending it twice.
-    const llmMessages = buildLlmMessages(clientHistory, text, payload.reviewContext);
+    const llmMessages = buildLlmMessages(clientHistory, text, payload.reviewContext, {
+      mode: payload.mode,
+      detail,
+      preferences: payload.preferences,
+    });
 
     // Run the tool loop, then stream the final answer.
     let assistantText = '';
@@ -267,7 +272,7 @@ exports.streamHandler = async (req, res) => {
   }
 };
 
-function buildLlmMessages(history, currentText, reviewContext) {
+function buildLlmMessages(history, currentText, reviewContext, options = {}) {
   const recent = compactHistory(history, currentText);
   const msgs = [{ role: 'system', content: llm.SYSTEM_PROMPT }];
   // Optional review seed: when the chat was opened from a game review, the
@@ -280,6 +285,22 @@ function buildLlmMessages(history, currentText, reviewContext) {
   if (reviewContext && typeof reviewContext === 'object') {
     msgs.push({ role: 'system', content: `The user opened this chat from a reviewed game. Here is the engine review data you can reference (evals are White's perspective, in centipawns unless noted). Do NOT invent facts from this data — when the user asks about a position, move, or evaluation, use the stockfish tool to verify before answering.\n\n${JSON.stringify(reviewContext).slice(0, 8000)}` });
   }
+  const modePrompts = {
+    position: 'Focus on the attached/current position. Verify concrete move claims with Stockfish and organize the answer around evaluation, candidate moves, and plans.',
+    study: 'Act as a study planner. End with a short, actionable practice list that the user can save as tasks.',
+    opening: 'Focus on opening ideas and plans. Verify line names and statistics with the Lichess opening tool.',
+    ask: 'Answer the chess question directly.',
+  };
+  const detailPrompts = {
+    quick: 'Keep the answer under about 120 words unless essential evidence requires more.',
+    standard: 'Give a concise but complete club-player explanation.',
+    detailed: 'Give a structured, detailed explanation with variations and practical takeaways.',
+  };
+  const mode = Object.hasOwn(modePrompts, options.mode) ? options.mode : 'ask';
+  const detail = Object.hasOwn(detailPrompts, options.detail) ? options.detail : 'standard';
+  const preferences = options.preferences && typeof options.preferences === 'object'
+    ? JSON.stringify(options.preferences).slice(0, 1200) : '';
+  msgs.push({ role: 'system', content: `${modePrompts[mode]} ${detailPrompts[detail]}${preferences ? ` User coaching preferences: ${preferences}` : ''}` });
   for (const m of recent) {
     if (m.role === 'user' || m.role === 'assistant') {
       msgs.push({ role: m.role, content: String(m.content || '') });

@@ -44,7 +44,8 @@ function handleStdout(line) {
   for (const l of lines) {
     const trimmed = l.trim();
     if (!trimmed) continue;
-    dbg('stdout: ' + trimmed);
+    // UCI output is normal engine traffic, not a diagnostic. Forward it to
+    // consumers without flooding the browser console with info/bestmove lines.
     sendToMain('UCI_MESSAGE', trimmed);
     messageHandlers.forEach((fn) => {
       try { fn(trimmed); } catch (err) {

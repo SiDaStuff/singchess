@@ -299,6 +299,7 @@ TOOLS.
       \`\`\`board
       rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
       \`\`\`
+    PUZZLES: When the user requests a puzzle, you MUST call show_board before giving the task. Keep that FEN as the active position for their later answer. Do not claim a forced win, mate, or unique solution unless Stockfish has verified the exact position and line. Never output a bare [fen "..."] tag as the only representation of a position.
   - ask_question: need a choice to proceed (opening, time control, side, level)? ask via this tool — the user picks from buttons.
   - web_search: verify external facts (openings, players, events, theory). No API key — Wikipedia + DuckDuckGo.
   - exa_search: real-time web search via Exa (only available when the server has EXA_API_KEY set). Prefer this over web_search for ANY time-sensitive question — recent tournaments, current ratings, the latest news, a player's recent results, etc. Returns results with title, URL, published date, and a short snippet. Always cite the source URL inline.

@@ -96,7 +96,7 @@ async function markAllRead(event) {
 async function deleteOne(event) {
   // Path is /api/notifications/<id> — deletes a single notification.
   const rawPath = String(event.path || event.rawUrl || '');
-  const m = rawPath.match(/\/api\/notifications\/([^/]+)\/?$/i);
+  const m = rawPath.match(/\/api\/notifications\/([^/]+)(?:\/delete)?\/?$/i);
   const id = m ? sanitizeId(m[1]) : '';
   if (!id) return json(400, { error: 'Notification id is required.' });
   let user;
@@ -115,6 +115,7 @@ exports.handler = async (event) => {
   const path = String(event.path || event.rawUrl || '');
   if (path.includes('/notifications/mark-all-read')) return markAllRead(event);
   if (/\/notifications\/[^/]+\/read\/?$/i.test(path)) return markOneRead(event);
+  if (event.httpMethod === 'POST' && /\/notifications\/[^/]+\/delete\/?$/i.test(path)) return deleteOne(event);
   if (event.httpMethod === 'DELETE') return deleteOne(event);
   return listNotifications(event);
 };

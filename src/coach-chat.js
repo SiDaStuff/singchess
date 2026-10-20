@@ -21,6 +21,11 @@
     streaming: false,
     abortController: null,
     chatPid: null,        // backend instance pid for the active SSE (affinity backstop)
+    search: '',
+    showArchived: false,
+    syncTimer: null,
+    syncing: false,
+    preferences: {},
   };
 
   // ── DOM refs (resolved on mount) ─────────────────────────────────────
@@ -32,6 +37,11 @@
       'coach-typing', 'coach-typing-text', 'coach-chat-form', 'coach-chat-textarea',
       'btn-coach-send', 'btn-coach-stop', 'coach-sidebar-list', 'btn-coach-new-chat',
       'btn-coach-play-bot', 'btn-coach-sidebar-toggle', 'coach-chat-subtitle', 'coach-usage-bar',
+      'coach-chat-search', 'coach-show-archived', 'btn-coach-pin', 'btn-coach-rename',
+      'btn-coach-archive', 'btn-coach-export', 'coach-chat-mode', 'coach-chat-detail',
+      'btn-coach-attach-board', 'coach-context-status', 'coach-resume-row', 'btn-coach-resume',
+      'btn-coach-preferences', 'btn-coach-tasks', 'btn-coach-weekly',
+      'btn-coach-exercises',
     ].forEach((id) => { el[id] = $(id); });
   }
 
@@ -49,18 +59,61 @@
     try { state.chats = JSON.parse(localStorage.getItem(lsChatsKey()) || '[]'); }
     catch (_) { state.chats = []; }
     if (!Array.isArray(state.chats)) state.chats = [];
+    try { state.preferences = JSON.parse(localStorage.getItem(`sidastuff.coachPreferences.${state.uid}`) || '{}'); } catch { state.preferences = {}; }
+    state.chats = state.chats.map((chat) => ({
+      id: chat.id || newId(), title: chat.title || 'New chat', createdAt: chat.createdAt || Date.now(),
+      updatedAt: chat.updatedAt || chat.createdAt || Date.now(), messages: Array.isArray(chat.messages) ? chat.messages : [],
+      mode: chat.mode || 'ask', detail: chat.detail || 'standard', pinned: !!chat.pinned,
+      archived: !!chat.archived, ...chat,
+    }));
     state.activeId = localStorage.getItem(lsActiveKey()) || (state.chats[0] && state.chats[0].id) || null;
   }
   function saveChats() {
     if (!state.uid) return;
     try { localStorage.setItem(lsChatsKey(), JSON.stringify(state.chats)); } catch (_) {}
     if (state.activeId) { try { localStorage.setItem(lsActiveKey(), state.activeId); } catch (_) {} }
+    scheduleRemoteSync();
+  }
+
+  function scheduleRemoteSync() {
+    if (!state.uid || !state.app?.authState?.user || state.syncing) return;
+    clearTimeout(state.syncTimer);
+    state.syncTimer = setTimeout(async () => {
+      try {
+        const headers = await state.app._authHeaders({ 'Content-Type': 'application/json' });
+        await window.apiFetch('/api/coach/conversations', { method: 'PUT', headers, cache: 'no-store', body: JSON.stringify({ chats: state.chats, preferences: state.preferences }) });
+      } catch (_) {}
+    }, 900);
+  }
+
+  async function pullRemoteChats() {
+    if (!state.uid || !state.app?.authState?.user) return;
+    try {
+      state.syncing = true;
+      const response = await window.apiFetch('/api/coach/conversations', { headers: await state.app._authHeaders(), cache: 'no-store' });
+      if (!response.ok) return;
+      const remote = await response.json();
+      if (remote.preferences && typeof remote.preferences === 'object') {
+        state.preferences = { ...state.preferences, ...remote.preferences };
+        try { localStorage.setItem(`sidastuff.coachPreferences.${state.uid}`, JSON.stringify(state.preferences)); } catch {}
+      }
+      const merged = new Map(state.chats.map((chat) => [chat.id, chat]));
+      for (const chat of (remote.chats || [])) {
+        const local = merged.get(chat.id);
+        if (!local || (chat.updatedAt || 0) > (local.updatedAt || 0)) merged.set(chat.id, chat);
+      }
+      state.chats = [...merged.values()].sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt)).slice(0, 50);
+      try { localStorage.setItem(lsChatsKey(), JSON.stringify(state.chats)); } catch (_) {}
+      renderSidebar(); if (!state.streaming) renderMessages();
+    } catch (_) {
+      // Local history remains available offline.
+    } finally { state.syncing = false; }
   }
   function activeChat() { return state.chats.find((c) => c.id === state.activeId) || null; }
   function newId() { return 'c_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
   function createChat() {
-    const chat = { id: newId(), title: 'New chat', createdAt: Date.now(), messages: [] };
+    const chat = { id: newId(), title: 'New chat', createdAt: Date.now(), updatedAt: Date.now(), messages: [], mode: 'ask', detail: 'standard', pinned: false, archived: false };
     state.chats.unshift(chat);
     state.activeId = chat.id;
     saveChats();
@@ -119,9 +172,17 @@
       return;
     }
     el['coach-sidebar-list'].innerHTML = '';
-    state.chats.forEach((c) => {
+    const needle = state.search.trim().toLowerCase();
+    const visible = state.chats.filter((chat) => (state.showArchived || !chat.archived)
+      && (!needle || `${chat.title} ${chat.messages.map((message) => message.content).join(' ')}`.toLowerCase().includes(needle)))
+      .sort((a, b) => Number(b.pinned) - Number(a.pinned) || (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+    if (!visible.length) {
+      el['coach-sidebar-list'].innerHTML = '<div class="coach-sidebar-empty">No matching chats.</div>';
+      return;
+    }
+    visible.forEach((c) => {
       const row = document.createElement('div');
-      row.className = 'coach-chat-item' + (c.id === state.activeId ? ' active' : '');
+      row.className = 'coach-chat-item' + (c.id === state.activeId ? ' active' : '') + (c.pinned ? ' pinned' : '');
       row.innerHTML = `<button type="button" class="coach-chat-item-title"></button>
         <button type="button" class="coach-chat-item-del" aria-label="Delete chat"><span class="material-symbols-outlined" aria-hidden="true">delete</span></button>`;
       const selectButton = row.querySelector('.coach-chat-item-title');
@@ -158,16 +219,20 @@
       });
       box.appendChild(empty);
     } else {
-      chat.messages.forEach((m) => box.appendChild(buildBubble(m.role, m.content)));
+      chat.messages.forEach((m, index) => box.appendChild(buildBubble(m.role, m.content, m, index)));
     }
     if (el['coach-chat-subtitle'] && chat) el['coach-chat-subtitle'].textContent = chat.title || 'AI coach';
+    if (el['coach-chat-mode'] && chat) el['coach-chat-mode'].value = chat.mode || 'ask';
+    if (el['coach-chat-detail'] && chat) el['coach-chat-detail'].value = chat.detail || 'standard';
+    if (el['coach-context-status']) el['coach-context-status'].textContent = chat?.positionContext?.fen ? 'Board attached' : '';
+    if (el['coach-resume-row']) el['coach-resume-row'].hidden = !chat?.lastInterrupted;
     scrollMessages();
     // Re-apply the conversation lock for the now-active chat (textarea/send/
     // notice must follow the selected chat, not the previously-shown one).
     applyLockedState();
   }
 
-  function buildBubble(role, content) {
+  function buildBubble(role, content, message = null, index = -1) {
     const div = document.createElement('div');
     if (role === 'error') {
       div.className = 'coach-bubble coach-bubble-error';
@@ -178,12 +243,79 @@
       if (role === 'assistant') div.innerHTML = renderMarkdown(content || '');
       else { div.textContent = content; }
     }
-    return div;
+    if (!message) return div;
+    const wrap = document.createElement('div');
+    wrap.className = `coach-message-wrap ${role}`;
+    wrap.appendChild(div);
+    const actions = document.createElement('div');
+    actions.className = 'coach-message-actions';
+    const action = (label, name, selected = false) => {
+      const button = document.createElement('button'); button.type = 'button'; button.textContent = label;
+      button.dataset.coachMessageAction = name; button.dataset.messageIndex = String(index);
+      if (selected) button.classList.add('selected');
+      actions.appendChild(button);
+    };
+    if (role === 'user') action('Edit', 'edit');
+    if (role === 'assistant') {
+      action('Retry', 'retry'); action('Save task', 'task');
+      action('Helpful', 'up', message.feedback === 'up'); action('Not helpful', 'down', message.feedback === 'down');
+    }
+    wrap.appendChild(actions);
+    return wrap;
+  }
+
+  function renameActiveChat() {
+    const chat = activeChat(); if (!chat || state.streaming) return;
+    const title = window.prompt('Conversation name', chat.title || 'New chat');
+    if (!title?.trim()) return; chat.title = title.trim().slice(0, 80); chat.updatedAt = Date.now(); saveChats(); renderSidebar(); renderMessages();
+  }
+
+  function exportActiveChat() {
+    const chat = activeChat(); if (!chat) return;
+    const body = [`# ${chat.title || 'Coach conversation'}`, '', ...chat.messages.map((message) => `## ${message.role === 'assistant' ? 'Coach' : 'You'}\n\n${message.content}\n`)];
+    const url = URL.createObjectURL(new Blob([body.join('\n')], { type: 'text/markdown' }));
+    const link = document.createElement('a'); link.href = url; link.download = `${(chat.title || 'coach-chat').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.md`; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function handleMessageAction(button) {
+    const chat = activeChat(); const index = Number(button.dataset.messageIndex); const message = chat?.messages[index];
+    if (!chat || !message || state.streaming) return;
+    const name = button.dataset.coachMessageAction;
+    if (name === 'edit') {
+      chat.messages = chat.messages.slice(0, index); saveChats(); renderMessages();
+      el['coach-chat-textarea'].value = message.content; autoGrow(); focusInput(); return;
+    }
+    if (name === 'retry') {
+      const previous = [...chat.messages.slice(0, index)].reverse().find((entry) => entry.role === 'user');
+      chat.messages = chat.messages.slice(0, index); saveChats(); renderMessages();
+      if (previous) { el['coach-chat-textarea'].value = previous.content; autoGrow(); send(); } return;
+    }
+    if (name === 'task') {
+      const key = `sidastuff.coachTasks.${state.uid}`;
+      let tasks = []; try { tasks = JSON.parse(localStorage.getItem(key) || '[]'); } catch {}
+      tasks.unshift({ id: newId(), text: message.content.slice(0, 500), chatId: chat.id, createdAt: Date.now(), done: false });
+      try { localStorage.setItem(key, JSON.stringify(tasks.slice(0, 100))); } catch {}
+      button.textContent = 'Saved'; return;
+    }
+    if (name === 'up' || name === 'down') {
+      message.feedback = name; chat.updatedAt = Date.now(); saveChats(); renderMessages();
+      let reason = '';
+      if (name === 'down') reason = window.prompt('What could be better? (optional)', '') || '';
+      state.app?._authHeaders({ 'Content-Type': 'application/json' }).then((headers) => window.apiFetch('/api/coach/feedback', {
+        method: 'POST', headers, cache: 'no-store', body: JSON.stringify({
+          rating: name, reason, content: message.content, chatId: chat.id, messageTs: message.ts,
+          context: chat.positionContext || chat.reviewContext || undefined,
+        }),
+      })).catch(() => {});
+    }
   }
 
   // Markdown -> sanitized HTML. Falls back to escaped text if libs missing.
   function renderMarkdown(md, { interactive = true } = {}) {
-    const text = String(md || '');
+    // Models sometimes emit PGN-style FEN tags. Convert them to the board
+    // block the renderer understands so users always see the position.
+    const text = String(md || '').replace(/\[fen\s+["']([^"']+)["']\]/gi, (_, fen) => `\n\n\`\`\`board\n${fen.trim()}\n\`\`\`\n\n`);
     // Extract ```board FEN``` blocks into placeholders so marked doesn't escape
     // the board HTML. We swap them back in AFTER marked + DOMPurify run.
     const boards = [];
@@ -317,6 +449,8 @@
     let chat = activeChat();
     if (!chat) { createChat(); chat = activeChat(); }
     chat.messages.push({ role: 'user', content: text, ts: Date.now() });
+    chat.lastInterrupted = false;
+    chat.updatedAt = Date.now();
     if (chat.messages.filter((m) => m.role === 'user').length === 1) {
       chat.title = text.slice(0, 40);
     }
@@ -366,7 +500,7 @@
       if (!reasoningEl) {
         reasoningEl = document.createElement('div');
         reasoningEl.className = 'coach-reasoning';
-        reasoningEl.innerHTML = '<div class="coach-reasoning-head"><span class="material-symbols-outlined">psychology</span><span>Coach is reasoning…</span></div><div class="coach-reasoning-body"></div>';
+        reasoningEl.innerHTML = '<div class="coach-reasoning-head"><span>Coach is thinking…</span></div>';
         el['coach-chat-messages']?.appendChild(reasoningEl);
       }
       // The typing indicator comes back on top of the reasoning block so the
@@ -376,11 +510,7 @@
         reasoningRenderPending = true;
         setTimeout(() => {
           reasoningRenderPending = false;
-          const body = reasoningEl && reasoningEl.querySelector('.coach-reasoning-body');
-          if (body) {
-            body.textContent = reasoningText.slice(-600); // tail — keeps DOM cheap
-            scrollMessages();
-          }
+          scrollMessages();
         }, 120);
       }
     };
@@ -396,7 +526,11 @@
         headers: await state.app._authHeaders({ 'Content-Type': 'application/json', Accept: 'text/event-stream' }),
         signal: controller.signal,
         cache: 'no-store',
-        body: JSON.stringify({ message: text, history, reviewContext: chat.positionContext || chat.reviewContext || undefined }),
+        body: JSON.stringify({
+          message: text, history, reviewContext: chat.positionContext || chat.reviewContext || undefined,
+          mode: chat.mode || 'ask', detail: chat.detail || 'standard',
+          preferences: state.preferences,
+        }),
       });
       if (!response.ok) {
         let msg = `Coach error (${response.status}).`;
@@ -425,8 +559,6 @@
           // First answer token: collapse the reasoning view and start the reply.
           if (reasoningEl) {
             reasoningEl.classList.add('done');
-            const body = reasoningEl.querySelector('.coach-reasoning-body');
-            if (body) body.textContent = ''; // hide chain-of-thought once the real answer starts
             reasoningEl = null; // don't touch it again this stream
             skeleton?.remove();
             hideTyping();
@@ -455,6 +587,8 @@
           if (!cleaned) { appendBubble('error', 'No response.'); }
           else {
             chat.messages.push({ role: 'assistant', content: cleaned, ts: Date.now() });
+            chat.lastInterrupted = false;
+            chat.updatedAt = Date.now();
             saveChats();
           }
           // The reply is saved — a trailing error/reset after `done` must not
@@ -477,6 +611,7 @@
           // Stop clicked after the reply finished saving — nothing to rescue.
         } else if (assistantText) {
           chat.messages.push({ role: 'assistant', content: assistantText + '\n\n_(stopped)_', ts: Date.now() });
+          chat.lastInterrupted = true;
           saveChats();
           if (assistantEl) { assistantEl.classList.remove('streaming'); assistantEl.innerHTML = renderMarkdown(assistantText + '\n\n_(stopped)_'); }
         } else {
@@ -490,6 +625,7 @@
           // Preserve the partial reply that already streamed, then note the
           // error (mirrors the abort path — don't wipe content the user saw).
           chat.messages.push({ role: 'assistant', content: assistantText + '\n\n_(response cut off)_', ts: Date.now() });
+          chat.lastInterrupted = true;
           saveChats();
           if (assistantEl) assistantEl.innerHTML = renderMarkdown(assistantText + '\n\n_(response cut off)_');
           appendBubble('error', msg);
@@ -946,11 +1082,17 @@
     const box = el['coach-chat-messages']; if (!box) { await postToolResult(id, { shown: false }); return; }
     const card = document.createElement('div');
     card.className = 'coach-tool-card coach-board-inline';
-    card.innerHTML = `<span class="material-symbols-outlined">grid_on</span><span>Position:</span>`;
+    card.innerHTML = '<strong>Position</strong>';
     const boardDiv = document.createElement('div');
     boardDiv.innerHTML = renderBoardEmbed(fen);
     card.appendChild(boardDiv);
     box.appendChild(card); scrollMessages();
+    const chat = activeChat();
+    if (chat) {
+      chat.positionContext = { ...(chat.positionContext || {}), fen };
+      chat.updatedAt = Date.now();
+      saveChats();
+    }
     await postToolResult(id, { shown: true });
   }
 
@@ -972,16 +1114,7 @@
   function appendToolCard(name, summary) {
     if (!el['coach-chat-messages'] || !summary) return;
     const d = document.createElement('div'); d.className = 'coach-tool-card';
-    const icon = name === 'stockfish' ? 'memory'
-      : name === 'web_search' ? 'travel_explore'
-      : name === 'game_review' ? 'analytics'
-      : name === 'ask_question' ? 'quiz'
-      : name === 'end_conversation' ? 'block'
-      : name === 'lichess_opening' ? 'menu_book'
-      : name === 'lichess_player' ? 'person_search'
-      : name === 'fetch_games' ? 'history'
-      : 'build';
-    d.innerHTML = `<span class="material-symbols-outlined">${icon}</span><span>${escapeHtml(summary)}</span>`;
+    d.innerHTML = `<span>${escapeHtml(summary)}</span>`;
     el['coach-chat-messages'].appendChild(d); scrollMessages();
   }
 
@@ -1195,6 +1328,53 @@
     el['coach-chat-textarea']?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
     el['btn-coach-new-chat']?.addEventListener('click', () => { if (!state.streaming) { createChat(); } });
     el['btn-coach-stop']?.addEventListener('click', () => { stop(); });
+    el['coach-chat-search']?.addEventListener('input', (event) => { state.search = event.target.value || ''; renderSidebar(); });
+    el['coach-show-archived']?.addEventListener('change', (event) => { state.showArchived = !!event.target.checked; renderSidebar(); });
+    el['coach-chat-mode']?.addEventListener('change', (event) => { const chat = activeChat(); if (chat) { chat.mode = event.target.value; saveChats(); } });
+    el['coach-chat-detail']?.addEventListener('change', (event) => { const chat = activeChat(); if (chat) { chat.detail = event.target.value; saveChats(); } });
+    el['btn-coach-pin']?.addEventListener('click', () => { const chat = activeChat(); if (chat && !state.streaming) { chat.pinned = !chat.pinned; chat.updatedAt = Date.now(); saveChats(); renderSidebar(); } });
+    el['btn-coach-rename']?.addEventListener('click', renameActiveChat);
+    el['btn-coach-archive']?.addEventListener('click', () => {
+      const chat = activeChat(); if (!chat || state.streaming) return; chat.archived = !chat.archived; chat.updatedAt = Date.now(); saveChats(); renderSidebar();
+    });
+    el['btn-coach-export']?.addEventListener('click', exportActiveChat);
+    el['btn-coach-preferences']?.addEventListener('click', () => {
+      const rating = window.prompt('Your approximate rating (optional)', state.preferences.rating || '') ?? state.preferences.rating;
+      const openings = window.prompt('Openings you play (optional)', state.preferences.openings || '') ?? state.preferences.openings;
+      const style = window.prompt('Preferred coaching style: concise, practical, or detailed', state.preferences.style || 'practical') ?? state.preferences.style;
+      state.preferences = { rating: String(rating || '').slice(0, 20), openings: String(openings || '').slice(0, 300), style: String(style || '').slice(0, 40) };
+      try { localStorage.setItem(`sidastuff.coachPreferences.${state.uid}`, JSON.stringify(state.preferences)); } catch {}
+      scheduleRemoteSync();
+    });
+    el['btn-coach-tasks']?.addEventListener('click', () => {
+      const key = `sidastuff.coachTasks.${state.uid}`; let tasks = [];
+      try { tasks = JSON.parse(localStorage.getItem(key) || '[]'); } catch {}
+      const text = tasks.length ? tasks.slice(0, 20).map((task, index) => `${index + 1}. ${task.done ? '✓ ' : ''}${task.text.replace(/\s+/g, ' ').slice(0, 140)}`).join('\n') : 'No saved study tasks yet.';
+      window.alert(text);
+    });
+    el['btn-coach-weekly']?.addEventListener('click', () => {
+      if (state.streaming) return;
+      const ta = el['coach-chat-textarea'];
+      ta.value = 'Review my recent games and our recent conversations. Summarize recurring mistakes from the last week, then give me three specific training tasks.';
+      autoGrow(); send();
+    });
+    el['btn-coach-exercises']?.addEventListener('click', () => {
+      if (state.streaming) return;
+      const ta = el['coach-chat-textarea'];
+      ta.value = 'Use my attached reviewed game or recent games to identify my recurring mistakes. Create three concrete chess exercises, each with a position, question, answer, and training goal.';
+      autoGrow(); send();
+    });
+    el['btn-coach-attach-board']?.addEventListener('click', () => {
+      const chat = activeChat(); const fen = state.app?.chess?.fen?.(); if (!chat || !fen) return;
+      chat.positionContext = { ...(chat.positionContext || {}), fen, source: 'current board' }; chat.updatedAt = Date.now(); saveChats(); renderMessages();
+    });
+    el['btn-coach-resume']?.addEventListener('click', () => {
+      const chat = activeChat(); if (!chat || state.streaming) return;
+      el['coach-chat-textarea'].value = 'Continue from where the previous response stopped.'; autoGrow(); send();
+    });
+    el['coach-chat-messages']?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-coach-message-action]'); if (button) handleMessageAction(button);
+    });
     // Play the bot: delegate to the app's coach game setup modal.
     el['btn-coach-play-bot']?.addEventListener('click', () => {
       if (state.app && state.app._showCoachSetupModal) state.app._showCoachSetupModal();
@@ -1249,6 +1429,7 @@
     // Don't wipe the live streaming bubble if an onAuth re-render fires mid-stream.
     if (!state.streaming) renderMessages();
     applyLockedState();
+    pullRemoteChats();
   }
 
   // Called by app.js when /coach is entered.
@@ -1289,14 +1470,28 @@
     const control = event.target.closest('[data-coach-preview-fen]'); if (!control) return;
     if (window.PlayFairPlay && !(await window.PlayFairPlay.verify())) return;
     const position = new window.Chess(); if (!position.load(control.dataset.coachPreviewFen)) return;
+    const references = [...(control.closest('.coach-message-wrap, .coach-bubble') || document).querySelectorAll('[data-coach-preview-fen]')];
+    let referenceIndex = Math.max(0, references.indexOf(control));
     let dialog = document.getElementById('coach-position-preview');
     if (dialog) { dialog.board?.destroy(); dialog.remove(); }
     dialog = document.createElement('dialog'); dialog.id = 'coach-position-preview'; dialog.className = 'qol-dialog'; dialog.setAttribute('aria-label', 'Coach move preview');
     const wrapper = document.createElement('div'); wrapper.className = 'board-wrapper';
     const surface = document.createElement('div'); surface.className = 'chess-board'; wrapper.append(surface);
+    const controls = document.createElement('div'); controls.className = 'standalone-actions';
+    const previous = document.createElement('button'); previous.type = 'button'; previous.className = 'btn btn-secondary'; previous.textContent = 'Previous';
+    const next = document.createElement('button'); next.type = 'button'; next.className = 'btn btn-secondary'; next.textContent = 'Next';
     const close = document.createElement('button'); close.type = 'button'; close.className = 'btn btn-secondary'; close.textContent = 'Close'; close.addEventListener('click', () => dialog.close());
-    dialog.append(wrapper, close); document.body.append(dialog); dialog.showModal();
+    const showReference = (index) => {
+      referenceIndex = Math.max(0, Math.min(references.length - 1, index));
+      const nextPosition = new window.Chess(); if (nextPosition.load(references[referenceIndex]?.dataset.coachPreviewFen || '')) {
+        dialog.board.setChessInstance(nextPosition); dialog.board.setPositionFromFen(nextPosition.fen());
+      }
+      previous.disabled = referenceIndex <= 0; next.disabled = referenceIndex >= references.length - 1;
+    };
+    previous.addEventListener('click', () => showReference(referenceIndex - 1)); next.addEventListener('click', () => showReference(referenceIndex + 1));
+    controls.append(previous, next, close); dialog.append(wrapper, controls); document.body.append(dialog); dialog.showModal();
     dialog.board = new window.ChessBoard(surface); dialog.board.setChessInstance(position); dialog.board.setPositionFromFen(position.fen()); close.focus();
+    showReference(referenceIndex);
     dialog.addEventListener('close', () => { dialog.board.destroy(); dialog.remove(); control.focus(); }, { once: true });
   });
   window.CoachChat = { mount, onAuth, renderGate, send, stop };

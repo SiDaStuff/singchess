@@ -328,6 +328,11 @@ app.get('/api/users/me/stream', usersMeStreamFn.streamHandler);
 app.post('/api/coach/chat', coachLimit, coachChatFn.streamHandler);
 app.post('/api/coach/overview', coachLimit, coachOverviewFn.streamHandler);
 app.post('/api/coach/tool-result', coachLimit, wrapHandler(coachToolResultFn));
+app.get('/api/coach/conversations', gentleApiLimit, wrapHandler(require('./api/coach-conversations')));
+app.put('/api/coach/conversations', writeLimit, wrapHandler(require('./api/coach-conversations')));
+app.post('/api/coach/feedback', writeLimit, wrapHandler(require('./api/coach-feedback')));
+app.get('/api/admin/fair-play-reviews', gentleApiLimit, wrapHandler(require('./api/fair-play-review')));
+app.patch('/api/admin/fair-play-reviews', writeLimit, wrapHandler(require('./api/fair-play-review')));
 app.post('/api/admin/gift-boost', writeLimit, wrapHandler(giftBoostFn));
 app.post('/api/admin/remove-subscription', writeLimit, wrapHandler(adminPlansFn.removeSubscriptionHandler));
 app.post('/api/admin/ban-user', writeLimit, wrapHandler(adminBanUserFn));
@@ -350,6 +355,7 @@ app.post('/api/admin/abuse/notes', writeLimit, wrapHandler(adminAbuseReportFn));
 app.get('/api/notifications', wrapHandler(notificationsFn));
 app.post('/api/notifications/mark-all-read', writeLimit, wrapHandler(notificationsFn));
 app.post(/^\/api\/notifications\/[^/]+\/read\/?$/i, writeLimit, wrapHandler(notificationsFn));
+app.post(/^\/api\/notifications\/[^/]+\/delete\/?$/i, writeLimit, wrapHandler(notificationsFn));
 // Delete a single notification: DELETE /api/notifications/<id>
 app.delete(/^\/api\/notifications\/[^/]+$/i, writeLimit, wrapHandler(notificationsFn));
 

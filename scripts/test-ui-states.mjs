@@ -55,7 +55,7 @@ const chats = [
   { id: 'qa-opening-chat', title: 'The Italian Game and a thoughtful plan for the middlegame', createdAt: 1,
     messages: [{ role: 'user', content: 'Please explain this position. <img src=x onerror="window.__qaUnsafeScript=true">', ts: 1 },
       { role: 'assistant', content: '## A clear opening plan\n\nDevelop your pieces and keep your king safe.\n\n'
-        + '```board\n' + initialFen + '\n```\n\n'
+        + '[fen "' + initialFen + '"]\n\n'
         + '| Move | Purpose |\n|---|---|\n| `Nf3` | Develop with tempo |\n| `Bc4` | Watch f7 |\n\n'
         + '> Look for the next useful move.\n\n- Develop a knight.\n- Castle when it is safe.\n\n'
         + '[A deliberately long source label that stays readable](https://example.test/chess-study)\n\n'
@@ -317,10 +317,10 @@ try {
       assert.ok(await page.locator('#coach-chat-textarea').isEnabled());
     });
 
-    await check(`${width}px QA attempted no account mutations or Coach network sends`, async () => {
+    await check(`${width}px QA attempted no account mutations or Coach generation sends`, async () => {
       const requests = report.apiRequests.filter(request => request.width === width);
       assert.ok(requests.every(request => request.method === 'GET'), JSON.stringify(requests.filter(request => request.method !== 'GET')));
-      assert.ok(!requests.some(request => request.path.startsWith('/api/coach')));
+      assert.ok(!requests.some(request => ['/api/coach/chat', '/api/coach/feedback', '/api/coach/tool-result'].includes(request.path)));
       assert.ok(!report.runtimeErrors.some(error => error.width === width), JSON.stringify(report.runtimeErrors.filter(error => error.width === width)));
     });
     await context.close();

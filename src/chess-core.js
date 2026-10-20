@@ -80,6 +80,7 @@ function moveTimesFromPgn(pgn, movesLength, headers) {
 	const baseClock = parseBaseClock(headers);
 	const lastClock = { white: baseClock, black: baseClock };
 	const times = [];
+	const remaining = [];
 
 	for (let i = 0; i < movesLength; i += 1) {
 		const side = i % 2 === 0 ? 'white' : 'black';
@@ -87,9 +88,11 @@ function moveTimesFromPgn(pgn, movesLength, headers) {
 		const previous = Number.isFinite(lastClock[side]) ? lastClock[side] : null;
 		const spent = previous === null ? null : Math.max(0, previous - current + increment);
 		times.push(Number.isFinite(spent) ? spent : null);
+		remaining.push(Number.isFinite(current) ? current : null);
 		lastClock[side] = current;
 	}
 
+	times.remaining = remaining;
 	return times;
 }
 
@@ -107,20 +110,58 @@ function stddev(values) {
 	return Math.sqrt(variance);
 }
 
+function percentile(values, p) {
+  const clean = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!clean.length) return 0;
+  return clean[Math.max(0, Math.min(clean.length - 1, Math.round((clean.length - 1) * p)))];
+}
+
+function correlation(a, b) {
+  const pairs = a.map((value, index) => [value, b[index]]).filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+  if (pairs.length < 4) return 0;
+  const ax = safeAverage(pairs.map(([x]) => x));
+  const ay = safeAverage(pairs.map(([, y]) => y));
+  const numerator = pairs.reduce((sum, [x, y]) => sum + ((x - ax) * (y - ay)), 0);
+  const dx = Math.sqrt(pairs.reduce((sum, [x]) => sum + ((x - ax) ** 2), 0));
+  const dy = Math.sqrt(pairs.reduce((sum, [, y]) => sum + ((y - ay) ** 2), 0));
+  return dx && dy ? numerator / (dx * dy) : 0;
+}
+
+function anticheatRating(headers, side) {
+  const value = Number(side === 'white' ? headers.WhiteElo : headers.BlackElo);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function anticheatTimeClass(headers) {
+  const seconds = parseBaseClock(headers);
+  if (!Number.isFinite(seconds)) return 'unknown';
+  if (seconds < 180) return 'bullet';
+  if (seconds < 600) return 'blitz';
+  if (seconds < 1800) return 'rapid';
+  return 'classical';
+}
+
 function sideMetrics(results, side, times, headers) {
 	const isWhite = side === 'white';
-	const moves = results.filter((entry) => entry.isWhite === isWhite);
+  const allMoves = results.filter((entry) => entry.isWhite === isWhite);
+  const bookMoves = allMoves.filter((entry) => entry.classificationKey === 'BOOK');
+  const forcedMoves = allMoves.filter((entry) => Array.isArray(entry.alternatives) && entry.alternatives.length <= 1);
+  const moves = allMoves.filter((entry) => entry.classificationKey !== 'BOOK' && !(Array.isArray(entry.alternatives) && entry.alternatives.length <= 1));
 	const strongKeys = new Set(['BRILLIANT', 'GREAT', 'BEST', 'EXCELLENT']);
 	const mistakeKeys = new Set(['INACCURACY', 'MISTAKE', 'BLUNDER', 'MISS']);
-	const strongMoves = moves.filter((entry) => strongKeys.has(entry.classificationKey));
+  const strongMoves = moves.filter((entry) => strongKeys.has(entry.classificationKey) && !entry.opponentJustBlundered);
 	const mistakeMoves = moves.filter((entry) => mistakeKeys.has(entry.classificationKey));
-	const timedStrong = strongMoves.filter((entry) => {
+  const speed = anticheatTimeClass(headers);
+  const fastThreshold = speed === 'bullet' ? 2.5 : speed === 'blitz' ? 5 : speed === 'rapid' ? 9 : 14;
+  const timedStrong = strongMoves.filter((entry) => {
 		const spent = times[entry.moveIndex];
-		return Number.isFinite(spent) && spent <= 5 && (entry.cpLoss || 0) <= 8;
+    const remaining = times.remaining?.[entry.moveIndex];
+    const notInTimeTrouble = !Number.isFinite(remaining) || remaining > Math.max(15, (parseBaseClock(headers) || 0) * .05);
+    return notInTimeTrouble && Number.isFinite(spent) && spent <= fastThreshold && (entry.cpLoss || 0) <= 8;
 	});
 	const timedCritical = moves.filter((entry) => {
 		const spent = times[entry.moveIndex];
-		return Number.isFinite(spent) && spent <= 6 && (entry.isCriticalMoment || Math.abs(entry.swing || 0) >= 120);
+    return Number.isFinite(spent) && spent <= fastThreshold * 1.2 && (entry.isCriticalMoment || Math.abs(entry.swing || 0) >= 120);
 	});
 	const sideTimes = moves.map((entry) => times[entry.moveIndex]).filter((value) => Number.isFinite(value));
 	const accuracy = results.whiteAccuracy !== undefined
@@ -133,6 +174,35 @@ function sideMetrics(results, side, times, headers) {
 	const fastBestRate = strongMoves.length ? (timedStrong.length / strongMoves.length) * 100 : 0;
 	const fastCriticalRate = moves.length ? (timedCritical.length / moves.length) * 100 : 0;
 	const avgThink = safeAverage(sideTimes);
+  const topThreeMoves = moves.filter((entry) => (entry.alternatives || []).slice(0, 3).some((alternative) => alternative.moveUci === entry.moveUci));
+  const exactBestMoves = moves.filter((entry) => entry.moveUci && entry.moveUci === entry.alternatives?.[0]?.moveUci);
+  const quietBestMoves = strongMoves.filter((entry) => !/[x+#=]/.test(entry.moveSan || '') && Math.abs(entry.swing || 0) < 80);
+  const unusualEngineMoves = moves.filter((entry) => {
+    const alternatives = entry.alternatives || [];
+    const gap = alternatives.length > 1 ? Math.abs((alternatives[0].eval || 0) - (alternatives[1].eval || 0)) : 0;
+    return entry.moveUci === alternatives[0]?.moveUci && gap >= 80 && !/[x+#]/.test(entry.moveSan || '');
+  });
+  const criticalMoves = moves.filter((entry) => entry.isCriticalMoment || Math.abs(entry.swing || 0) >= 120);
+  const criticalStrong = criticalMoves.filter((entry) => strongKeys.has(entry.classificationKey));
+  const criticalExact = criticalMoves.filter((entry) => entry.moveUci && entry.moveUci === entry.alternatives?.[0]?.moveUci);
+  let exactStreak = 0, longestExactStreak = 0;
+  for (const entry of moves) {
+    if (entry.moveUci && entry.moveUci === entry.alternatives?.[0]?.moveUci) {
+      exactStreak += 1;
+      longestExactStreak = Math.max(longestExactStreak, exactStreak);
+    } else exactStreak = 0;
+  }
+  const complexities = moves.map((entry) => {
+    const alternatives = entry.alternatives || [];
+    const gap = alternatives.length > 1 ? Math.abs((alternatives[0].eval || 0) - (alternatives[1].eval || 0)) : 0;
+    return Math.min(300, gap) + (entry.isCriticalMoment ? 120 : 0) + Math.min(150, Math.abs(entry.swing || 0));
+  });
+  const moveThinkTimes = moves.map((entry) => times[entry.moveIndex]);
+  const phaseAccuracy = {};
+  for (const phase of ['opening', 'middlegame', 'endgame']) {
+    const phaseMoves = moves.filter((entry) => String(entry.phase || '').toLowerCase() === phase);
+    phaseAccuracy[phase] = phaseMoves.length ? safeAverage(phaseMoves.map((entry) => Math.max(0, 100 - Math.min(100, Number(entry.cpLoss) || 0)))) : null;
+  }
 
 	return {
 		side,
@@ -147,60 +217,71 @@ function sideMetrics(results, side, times, headers) {
 		fastCriticalRate,
 		avgThink,
 		timeSamples: sideTimes.length,
+    rating: anticheatRating(headers, side), timeControl: anticheatTimeClass(headers),
+    bookMovesExcluded: bookMoves.length, forcedMovesExcluded: forcedMoves.length,
+    topThreeRate: moves.length ? (topThreeMoves.length / moves.length) * 100 : 0,
+    exactBestRate: moves.length ? (exactBestMoves.length / moves.length) * 100 : 0,
+    longestExactStreak,
+    criticalBestRate: criticalMoves.length ? (criticalStrong.length / criticalMoves.length) * 100 : 0,
+    criticalExactRate: criticalMoves.length ? (criticalExact.length / criticalMoves.length) * 100 : 0,
+    quietBestRate: moves.length ? (quietBestMoves.length / moves.length) * 100 : 0,
+    unusualEngineRate: moves.length ? (unusualEngineMoves.length / moves.length) * 100 : 0,
+    complexityThinkCorrelation: correlation(complexities, moveThinkTimes), medianThink: percentile(sideTimes, 0.5), thinkTimeStd: stddev(sideTimes), phaseAccuracy,
 	};
 }
 
 function scoreMetrics(metricsList) {
-	const games = metricsList.length;
-	const accuracy = safeAverage(metricsList.map((entry) => entry.accuracy));
-	const acpl = safeAverage(metricsList.map((entry) => entry.acpl));
-	const winRate = games ? safeAverage(metricsList.map((entry) => entry.win)) * 100 : 0;
-	const bestRate = safeAverage(metricsList.map((entry) => entry.bestRate));
-	const mistakeRate = safeAverage(metricsList.map((entry) => entry.mistakeRate));
-	const fastBestRate = safeAverage(metricsList.map((entry) => entry.fastBestRate));
-	const fastCriticalRate = safeAverage(metricsList.map((entry) => entry.fastCriticalRate));
-	const accuracyStd = stddev(metricsList.map((entry) => entry.accuracy));
-	const timeCoverage = safeAverage(metricsList.map((entry) => entry.timeSamples > 0 ? 1 : 0));
-	const avgMoves = safeAverage(metricsList.map((entry) => entry.moves));
-
-	let score = 0;
-	// accuracy is now win-probability based (chess.com-style: clean ~95-99,
-	// typical ~80-92, shaky ~70-80), so the anticheat thresholds sit lower than
-	// under the old compressed scale where play clustered in the 90s.
-	score += Math.max(0, Math.min(38, (accuracy - 72) * 1.9));
-	score += Math.max(0, Math.min(18, (42 - acpl) * 0.45));
-	score += Math.max(0, Math.min(16, (bestRate - 55) * 0.45));
-	score += Math.max(0, Math.min(12, (winRate - 65) * 0.35));
-	score += Math.max(0, Math.min(10, (18 - mistakeRate) * 0.35));
-	score += Math.max(0, Math.min(16, (fastBestRate - 35) * 0.35)) * timeCoverage;
-	score += Math.max(0, Math.min(8, (fastCriticalRate - 8) * 0.7)) * timeCoverage;
-	if (games >= 4 && accuracy >= 90 && accuracyStd <= 5) score += 8;
-	if (games < 3) score *= 0.72;
-	if (avgMoves < 12) score *= 0.45;
-
-	score = Math.round(Math.max(0, Math.min(98, score)));
-	const riskLevel = score >= 70 ? 'High' : score >= 42 ? 'Watch' : 'Low';
-	const headline = riskLevel === 'High'
-		? 'High review score. Escalate only with human review.'
-		: riskLevel === 'Watch'
-			? 'Some indicators are unusual.'
-			: 'No strong cheating pattern found.';
-	const explanation = 'This combines win rate, engine-match style accuracy, ACPL, consistency, and fast strong moves. It is a heuristic, not proof.';
-
-	return {
-		score,
-		riskLevel,
-		headline,
-		explanation,
-		games,
-		winRate,
-		accuracy,
-		acpl,
-		bestRate,
-		mistakeRate,
-		fastBestRate,
-		fastCriticalRate,
-	};
+  const games = metricsList.length;
+  const average = (key) => safeAverage(metricsList.map((entry) => entry[key]));
+  const accuracy = average('accuracy'), acpl = average('acpl'), winRate = average('win') * 100;
+  const bestRate = average('bestRate'), mistakeRate = average('mistakeRate');
+  const fastBestRate = average('fastBestRate'), fastCriticalRate = average('fastCriticalRate');
+  const topThreeRate = average('topThreeRate'), quietBestRate = average('quietBestRate');
+  const exactBestRate = average('exactBestRate'), longestExactStreak = Math.max(0, ...metricsList.map((entry) => Number(entry.longestExactStreak) || 0));
+  const criticalBestRate = average('criticalBestRate'), criticalExactRate = average('criticalExactRate');
+  const unusualEngineRate = average('unusualEngineRate'), complexityThinkCorrelation = average('complexityThinkCorrelation');
+  const accuracyStd = stddev(metricsList.map((entry) => entry.accuracy));
+  const timeCoverage = safeAverage(metricsList.map((entry) => entry.timeSamples > 0 ? 1 : 0));
+  const avgMoves = average('moves');
+  const rating = safeAverage(metricsList.map((entry) => entry.rating).filter(Number.isFinite));
+  const ratingExpectedAccuracy = rating ? Math.max(68, Math.min(91, 68 + ((rating - 800) / 80))) : 82;
+  const accuracyAboveRating = accuracy - ratingExpectedAccuracy;
+  const recent = metricsList.slice(0, Math.min(3, games)), baseline = metricsList.slice(Math.min(3, games));
+  const performanceShift = baseline.length ? safeAverage(recent.map((entry) => entry.accuracy)) - safeAverage(baseline.map((entry) => entry.accuracy)) : 0;
+  const signals = [];
+  const add = (key, label, points, value, detail) => { const applied = Math.max(0, Math.round(points * 10) / 10); signals.push({ key, label, points: applied, value, detail }); return applied; };
+  let score = 0;
+  score += add('rating_accuracy', 'Accuracy above rating expectation', Math.min(24, accuracyAboveRating * 1.45), accuracyAboveRating, `${Math.round(accuracy)}% observed vs ${Math.round(ratingExpectedAccuracy)}% expected`);
+  score += add('acpl', 'Low centipawn loss', Math.min(12, (34 - acpl) * .42), acpl, `${Math.round(acpl)} ACPL`);
+  score += add('exact_engine', 'Exact engine choices', Math.min(22, (exactBestRate - 48) * .48), exactBestRate, `${Math.round(exactBestRate)}% exact first choices`);
+  score += add('top_three', 'Top-three agreement', Math.min(8, (topThreeRate - 80) * .35), topThreeRate, `${Math.round(topThreeRate)}% top-three choices`);
+  score += add('critical_exact', 'Exact choices in critical positions', Math.min(12, (criticalExactRate - 50) * .3), criticalExactRate, `${Math.round(criticalExactRate)}% exact in critical positions`);
+  score += add('quiet_moves', 'Quiet best moves', Math.min(7, (quietBestRate - 22) * .28), quietBestRate, `${Math.round(quietBestRate)}% quiet strong moves`);
+  score += add('unusual_moves', 'Distinctive engine choices', Math.min(8, (unusualEngineRate - 5) * .5), unusualEngineRate, `${Math.round(unusualEngineRate)}% distinctive engine choices`);
+  score += add('fast_strong', 'Fast strong moves', Math.min(10, (fastBestRate - 35) * .24) * timeCoverage, fastBestRate, `${Math.round(fastBestRate)}% with clock coverage`);
+  score += add('fast_critical', 'Fast critical moves', Math.min(7, (fastCriticalRate - 8) * .5) * timeCoverage, fastCriticalRate, `${Math.round(fastCriticalRate)}%`);
+  score += add('time_complexity', 'Time use versus complexity', Math.min(7, Math.max(0, -complexityThinkCorrelation) * 11) * timeCoverage, complexityThinkCorrelation, 'Negative values mean harder positions were played faster');
+  score += add('exact_streak', 'Consecutive exact engine choices', Math.min(7, Math.max(0, longestExactStreak - 4) * 1.2), longestExactStreak, `${longestExactStreak} in a row`);
+  score += add('performance_shift', 'Change from earlier games', Math.min(8, Math.max(0, performanceShift - 4) * .6), performanceShift, `${performanceShift >= 0 ? '+' : ''}${performanceShift.toFixed(1)} accuracy points`);
+  score += add('results', 'Result pattern', Math.min(3, (winRate - 78) * .12), winRate, `${Math.round(winRate)}% score`);
+  if (games >= 4 && accuracy >= 88 && accuracyStd <= 5) score += add('consistency', 'Unusually consistent accuracy', 5, accuracyStd, `${accuracyStd.toFixed(1)} standard deviation`);
+  const independentSignals = signals.filter((signal) => signal.points >= 4).length;
+  if (games < 2 || avgMoves < 10 || independentSignals < 3) score = Math.min(score, 69);
+  else if (games < 3) score = Math.min(score, 79);
+  score = Math.round(Math.max(0, Math.min(100, score)));
+  const riskLevel = score >= 72 ? 'High' : score >= 42 ? 'Watch' : 'Low';
+  const effectiveSamples = Math.max(0, Math.round(avgMoves * games));
+  const confidence = effectiveSamples >= 120 && games >= 8 ? 'High' : effectiveSamples >= 45 && games >= 3 ? 'Moderate' : 'Low';
+  const margin = Math.round(Math.max(6, 28 / Math.sqrt(Math.max(1, games))));
+  return { score, riskLevel, headline: riskLevel === 'High' ? 'Strong indicators require human review.' : riskLevel === 'Watch' ? 'Some indicators are unusual.' : 'No strong cheating pattern found.',
+    explanation: 'This evidence score uses independent move, timing, rating, and cross-game signals. It is not a probability or proof; a trained reviewer must inspect the games before any action.',
+    games, winRate, accuracy, acpl, bestRate, exactBestRate, longestExactStreak, mistakeRate, fastBestRate, fastCriticalRate, topThreeRate, criticalBestRate, criticalExactRate, quietBestRate, unusualEngineRate,
+    complexityThinkCorrelation, rating: rating || null, ratingExpectedAccuracy, accuracyAboveRating, performanceShift, accuracyStd,
+    phaseAccuracy: Object.fromEntries(['opening', 'middlegame', 'endgame'].map((phase) => [phase, safeAverage(metricsList.map((entry) => entry.phaseAccuracy?.[phase]).filter(Number.isFinite))])),
+    timeControls: [...new Set(metricsList.map((entry) => entry.timeControl).filter(Boolean))],
+    excluded: { book: metricsList.reduce((sum, entry) => sum + (entry.bookMovesExcluded || 0), 0), forced: metricsList.reduce((sum, entry) => sum + (entry.forcedMovesExcluded || 0), 0) },
+    confidence, scoreRange: [Math.max(0, score - margin), Math.min(100, score + margin)], effectiveSamples, independentSignals, modelVersion: 'fairplay-evidence-v2',
+    signals: signals.sort((a, b) => b.points - a.points), requiresHumanReview: riskLevel === 'High' };
 }
 
 class BrowserMoveCoach {

@@ -326,6 +326,11 @@
             </form>
             <p id="admin-profile-status" class="account-status" role="status" aria-live="polite"></p>
             <div id="admin-profile-result"></div>
+            <section class="admin-control-card" id="admin-fair-play-panel">
+              <div class="card-header"><div><h4>Fair-play review queue</h4><p class="muted">Screening results awaiting a human decision.</p></div><button class="btn btn-secondary btn-small" id="admin-fair-play-refresh" type="button">Refresh</button></div>
+              <p class="account-status" id="admin-fair-play-calibration"></p>
+              <div id="admin-fair-play-list"><p class="muted">Refresh to load queued reports.</p></div>
+            </section>
           </section>
           <div class="admin-boost-panel" id="spa-admin-boost-panel" hidden>
             <h3>Plans &amp; subscriptions</h3>
@@ -919,7 +924,7 @@
       <div class="card panel-wide page-card legal-page-card">
         <div class="page-card-head">
           <h1>Privacy Policy</h1>
-          <p class="legal-updated">Last updated: 19 October 2026</p>
+          <p class="legal-updated">Last updated: 20 October 2026</p>
         </div>
         <article class="legal-body">
           <p>This policy explains what Sing Chess collects and why. We keep it simple: we only store what we need to run the service, and we don't sell your data.</p>
@@ -928,7 +933,8 @@
           <ul>
             <li><strong>Account data.</strong> Your email and a Firebase user ID if you sign up. Passwords are handled by Firebase; we never see them.</li>
             <li><strong>Games and reviews.</strong> PGNs you paste or import, reviews you save, and automatic reviews created for eligible completed Lichess Play games.</li>
-            <li><strong>Training and coach data.</strong> Your puzzle rating, solve history, coach conversations, and coach-game results. Coach messages and relevant chess context are sent to the configured AI provider to produce a reply.</li>
+            <li><strong>Training and coach data.</strong> Your puzzle rating, solve history, synced coach conversations, coaching preferences, response feedback, and coach-game results. Coach messages and relevant chess context are sent to the configured AI provider to produce a reply.</li>
+            <li><strong>Fair-play data.</strong> Fair-play reports contain game-derived screening signals. Reports with stronger indicators may enter an administrator queue for human review, including reviewer notes and whether the reviewer agreed, disagreed, or found the result inconclusive.</li>
             <li><strong>Connected chess accounts.</strong> Public usernames you save for imports. If you connect Lichess Play, we store your Lichess identity and an encrypted OAuth credential so the server can make authorized Board API requests. The credential is never sent to your browser.</li>
             <li><strong>Preferences.</strong> Board theme, piece set, engine settings, and similar options. These live in your browser by default and sync to your account when you're signed in.</li>
             <li><strong>Technical data.</strong> IP address and browser type for rate limits and security. We also keep anonymous counts like total games reviewed.</li>
@@ -958,7 +964,7 @@
           <p>When you use the contact form, we keep your email and message so we can reply. If you're signed in, we also store your user ID. Only site admins can see these.</p>
 
           <h2>Retention and your choices</h2>
-          <p>Notifications are removed after 30 days. Automatic reviews retain the 20 most recent reviews. Other account data is kept while your account is active or as needed to provide the service, prevent abuse, resolve disputes, and meet legal obligations. You can disconnect Lichess Play, unlink public usernames, clear local browser data in Settings, or ask us to access, correct, export, or delete your account data through the contact form. Some requests may require identity verification.</p>
+          <p>Notifications are removed after 30 days. Automatic reviews retain the 20 most recent reviews. Fair-play reports follow the retention period shown on the report; review labels may be retained longer in de-identified calibration statistics. Other account data is kept while your account is active or as needed to provide the service, prevent abuse, resolve disputes, and meet legal obligations. You can disconnect Lichess Play, unlink public usernames, clear local browser data in Settings, or ask us to access, correct, export, or delete your account data through the contact form. Some requests may require identity verification.</p>
 
           <h2>Contact</h2>
           <p>Questions about privacy? Use the contact form or email the address on the home page.</p>
@@ -974,7 +980,7 @@
       <div class="card panel-wide page-card legal-page-card">
         <div class="page-card-head">
           <h1>Terms of Service</h1>
-          <p class="legal-updated">Last updated: 19 October 2026</p>
+          <p class="legal-updated">Last updated: 20 October 2026</p>
         </div>
         <article class="legal-body">
           <p>By using Sing Chess, you agree to these terms. If you don't agree, please don't use the service.</p>
@@ -1021,12 +1027,14 @@
             <span>New chat</span>
           </button>
           <p class="coach-history-label">Your conversations</p><div class="coach-sidebar-list" id="coach-sidebar-list"></div>
+          <label class="coach-history-search"><span class="sr-only">Search conversations</span><input id="coach-chat-search" type="search" placeholder="Search chats" autocomplete="off"></label>
+          <label class="coach-archive-toggle"><input id="coach-show-archived" type="checkbox"> Show archived</label>
         </aside>
         <div class="coach-chat-main card page-card">
           <div class="coach-card-header">
             <div class="coach-identity">
               <div class="coach-avatar" aria-hidden="true">
-                <img src="/assets/icon.svg" alt="">
+                <img src="/assets/brand-mark.png" alt="">
               </div>
               <div>
                 <h1>Chess Coach <span class="beta-badge">Beta</span></h1>
@@ -1034,6 +1042,14 @@
               </div>
             </div>
             <div class="coach-chat-header-actions">
+              <button type="button" class="btn btn-secondary coach-icon-btn" id="btn-coach-pin" title="Pin conversation" aria-label="Pin conversation"><span class="material-symbols-outlined" aria-hidden="true">keep</span></button>
+              <button type="button" class="btn btn-secondary coach-icon-btn" id="btn-coach-rename" title="Rename conversation" aria-label="Rename conversation"><span class="material-symbols-outlined" aria-hidden="true">edit</span></button>
+              <button type="button" class="btn btn-secondary coach-icon-btn" id="btn-coach-archive" title="Archive conversation" aria-label="Archive conversation"><span class="material-symbols-outlined" aria-hidden="true">archive</span></button>
+              <button type="button" class="btn btn-secondary coach-icon-btn" id="btn-coach-export" title="Export conversation" aria-label="Export conversation"><span class="material-symbols-outlined" aria-hidden="true">download</span></button>
+              <button type="button" class="btn btn-secondary coach-icon-btn" id="btn-coach-preferences" title="Coaching preferences" aria-label="Coaching preferences"><span class="material-symbols-outlined" aria-hidden="true">tune</span></button>
+              <button type="button" class="btn btn-secondary coach-icon-btn" id="btn-coach-tasks" title="Saved study tasks" aria-label="Saved study tasks"><span class="material-symbols-outlined" aria-hidden="true">checklist</span></button>
+              <button type="button" class="btn btn-secondary coach-icon-btn" id="btn-coach-weekly" title="Weekly coaching summary" aria-label="Weekly coaching summary"><span class="material-symbols-outlined" aria-hidden="true">calendar_view_week</span></button>
+              <button type="button" class="btn btn-secondary coach-icon-btn" id="btn-coach-exercises" title="Create exercises from mistakes" aria-label="Create exercises from mistakes"><span class="material-symbols-outlined" aria-hidden="true">fitness_center</span></button>
               <button type="button" class="btn btn-secondary coach-icon-btn" id="btn-coach-sidebar-toggle" title="Chat history" aria-label="Toggle chat history" aria-controls="coach-sidebar" aria-expanded="true">
                 <span class="material-symbols-outlined" aria-hidden="true">history</span>
               </button>
@@ -1057,6 +1073,12 @@
           </div>
           <p class="coach-boundary-note">Keep chats respectful and focused on chess. Repeated misuse may be reported for review.</p>
           <div class="coach-chat-body" id="coach-chat-body" hidden>
+            <div class="coach-context-bar" aria-label="Coach options">
+              <label>Mode <select id="coach-chat-mode"><option value="ask">Ask</option><option value="position">Analyze position</option><option value="study">Study plan</option><option value="opening">Opening help</option></select></label>
+              <label>Detail <select id="coach-chat-detail"><option value="quick">Quick</option><option value="standard" selected>Standard</option><option value="detailed">Detailed</option></select></label>
+              <button type="button" class="btn btn-secondary btn-small" id="btn-coach-attach-board"><span class="material-symbols-outlined" aria-hidden="true">grid_on</span> Attach board</button>
+              <span id="coach-context-status" role="status"></span>
+            </div>
             <div class="coach-chat-messages coach-markdown" id="coach-chat-messages" role="log" aria-live="polite" aria-label="Coach conversation"></div>
             <div class="coach-typing" id="coach-typing" role="status" aria-live="polite" hidden>
               <span class="material-symbols-outlined coach-typing-icon" aria-hidden="true">progress_activity</span>
@@ -1072,6 +1094,7 @@
               <span class="material-symbols-outlined btn-symbol" aria-hidden="true">stop_circle</span>
             </button>
           </form>
+          <div class="coach-resume-row" id="coach-resume-row" hidden><span>The last response was interrupted.</span><button type="button" class="btn btn-secondary btn-small" id="btn-coach-resume">Resume</button></div>
         </div>
       </div>
     </section>

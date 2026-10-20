@@ -1,5 +1,4 @@
 import { structuredLesson, renderTacticalLesson } from './tactical-coach.js';
-import './tactical-coach.css';
 
 // References carry their own legal position. Previews never mutate app.chess.
 function buildExplanationReferences(text, result, Chess) {

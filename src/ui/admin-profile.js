@@ -10,6 +10,36 @@ async function adminAction(body) {
   if (!response.ok) throw new Error(data.error || 'Administrator action failed.');
   return data;
 }
+async function loadFairPlayReviews() {
+  const list = $('admin-fair-play-list'); if (!list || !app?.authState?.isAdmin) return;
+  list.innerHTML = '<p class="muted">Loading review queue…</p>';
+  try {
+    const response = await window.apiFetch('/api/admin/fair-play-reviews', { headers: await app._authHeaders(), cache: 'no-store' });
+    const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Could not load review queue.');
+    const calibration = data.calibration || {};
+    $('admin-fair-play-calibration').textContent = calibration.decisive
+      ? `${calibration.labelled} labelled · ${Math.round((calibration.disagreementRate || 0) * 100)}% reviewer disagreement`
+      : 'No decisive reviewer labels yet.';
+    const pending = (data.reviews || []).filter((review) => review.status !== 'reviewed');
+    list.innerHTML = pending.map((review) => `<article class="admin-profile-note" data-fair-play-job="${escape(review.jobId)}">
+      <strong>Score ${escape(review.score)} · ${escape(review.confidence || 'Low')} confidence</strong>
+      <span>${escape(date(review.createdAt))} · range ${escape((review.scoreRange || []).join('–'))}</span>
+      <p>${escape((review.signals || []).filter(signal => signal.points > 0).slice(0, 4).map(signal => `${signal.label} +${signal.points}`).join(' · '))}</p>
+      <label class="field"><span class="field-label">Reviewer notes</span><textarea class="input-select" rows="2" maxlength="2000"></textarea></label>
+      <div class="standalone-actions"><button class="btn btn-secondary btn-small" data-decision="agree" type="button">Agree</button><button class="btn btn-secondary btn-small" data-decision="disagree" type="button">Disagree</button><button class="btn btn-secondary btn-small" data-decision="inconclusive" type="button">Inconclusive</button></div>
+    </article>`).join('') || '<p class="muted">No reports are waiting for review.</p>';
+    list.querySelectorAll('[data-decision]').forEach((button) => button.addEventListener('click', async () => {
+      const card = button.closest('[data-fair-play-job]');
+      button.disabled = true;
+      try {
+        const result = await window.apiFetch('/api/admin/fair-play-reviews', { method: 'PATCH', headers: await app._authHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ jobId: card.dataset.fairPlayJob, decision: button.dataset.decision, notes: card.querySelector('textarea').value }) });
+        const payload = await result.json(); if (!result.ok) throw new Error(payload.error || 'Could not save review.');
+        await loadFairPlayReviews();
+      } catch (error) { button.disabled = false; $('admin-fair-play-calibration').textContent = error.message; }
+    }));
+  } catch (error) { list.innerHTML = `<p class="account-status error">${escape(error.message)}</p>`; }
+}
 function rows(value, prefix = '') {
   if (!value || typeof value !== 'object') return `<div><dt>${escape(label(prefix))}</dt><dd>${escape(value ?? 'Not recorded')}</dd></div>`;
   return Object.entries(value).map(([key, child]) => rows(child, prefix ? `${prefix} · ${key}` : key)).join('');
@@ -142,6 +172,10 @@ window.AdminProfileUI = { refresh(email) {
   }
   if (!form.dataset.bound) {
     form.dataset.bound = '1'; form.addEventListener('submit', event => { event.preventDefault(); lookup({ query: $('admin-profile-query').value.trim() }); });
+  }
+  const fairPlayRefresh = $('admin-fair-play-refresh');
+  if (fairPlayRefresh && !fairPlayRefresh.dataset.bound) {
+    fairPlayRefresh.dataset.bound = '1'; fairPlayRefresh.addEventListener('click', loadFairPlayReviews);
   }
   const globalToggle = $('admin-global-background-review');
   if (globalToggle && !globalToggle.dataset.bound) {
