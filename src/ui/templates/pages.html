@@ -1062,24 +1062,33 @@
               </div>
             </div>
             <div class="coach-chat-header-actions">
-              <div class="coach-action-row" aria-label="Conversation actions">
-                <span class="coach-action-label">Chat</span>
-                <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-pin" title="Keep this conversation at the top"><span class="material-symbols-outlined" aria-hidden="true">keep</span><span>Pin</span></button>
-                <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-rename" title="Change this conversation's name"><span class="material-symbols-outlined" aria-hidden="true">edit</span><span>Rename</span></button>
-                <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-archive" title="Move this conversation to the archive"><span class="material-symbols-outlined" aria-hidden="true">archive</span><span>Archive</span></button>
-                <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-export" title="Download this conversation as a text file"><span class="material-symbols-outlined" aria-hidden="true">download</span><span>Export</span></button>
-              </div>
-              <div class="coach-action-row" aria-label="Training tools">
-                <span class="coach-action-label">Training</span>
-                <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-preferences" title="Set your rating, openings, and playing style"><span class="material-symbols-outlined" aria-hidden="true">tune</span><span>Preferences</span></button>
-                <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-tasks" title="View study tasks saved from Coach messages"><span class="material-symbols-outlined" aria-hidden="true">checklist</span><span>Tasks</span></button>
-                <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-weekly" title="Summarize this week's coaching work"><span class="material-symbols-outlined" aria-hidden="true">calendar_view_week</span><span>Weekly review</span></button>
-                <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-exercises" title="Create practice exercises from your mistakes"><span class="material-symbols-outlined" aria-hidden="true">fitness_center</span><span>Exercises</span></button>
-              </div>
               <div class="coach-action-row" aria-label="Coach navigation">
                 <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-sidebar-toggle" title="Show or hide conversation history" aria-controls="coach-sidebar" aria-expanded="true"><span class="material-symbols-outlined" aria-hidden="true">history</span><span>History</span></button>
-                <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-play-bot" title="Start a practice game against Stockfish"><span class="material-symbols-outlined" aria-hidden="true">sports_esports</span><span>Play bot</span></button>
               </div>
+              <details class="coach-more-menu" id="coach-more-menu">
+                <summary class="btn btn-secondary coach-action-btn coach-more-toggle" aria-label="More coach actions">
+                  <span class="material-symbols-outlined" aria-hidden="true">more_horiz</span><span>More</span>
+                </summary>
+                <div class="coach-more-panel">
+                  <div class="coach-action-row" aria-label="Conversation actions">
+                    <span class="coach-action-label">Chat</span>
+                    <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-pin" title="Keep this conversation at the top"><span class="material-symbols-outlined" aria-hidden="true">keep</span><span>Pin</span></button>
+                    <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-rename" title="Change this conversation's name"><span class="material-symbols-outlined" aria-hidden="true">edit</span><span>Rename</span></button>
+                    <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-archive" title="Move this conversation to the archive"><span class="material-symbols-outlined" aria-hidden="true">archive</span><span>Archive</span></button>
+                    <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-export" title="Download this conversation as a text file"><span class="material-symbols-outlined" aria-hidden="true">download</span><span>Export</span></button>
+                  </div>
+                  <div class="coach-action-row" aria-label="Training tools">
+                    <span class="coach-action-label">Training</span>
+                    <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-preferences" title="Set your rating, openings, and playing style"><span class="material-symbols-outlined" aria-hidden="true">tune</span><span>Preferences</span></button>
+                    <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-tasks" title="View study tasks saved from Coach messages"><span class="material-symbols-outlined" aria-hidden="true">checklist</span><span>Tasks</span></button>
+                    <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-weekly" title="Summarize this week's coaching work"><span class="material-symbols-outlined" aria-hidden="true">calendar_view_week</span><span>Weekly review</span></button>
+                    <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-exercises" title="Create practice exercises from your mistakes"><span class="material-symbols-outlined" aria-hidden="true">fitness_center</span><span>Exercises</span></button>
+                  </div>
+                  <div class="coach-action-row" aria-label="Coach navigation extra">
+                    <button type="button" class="btn btn-secondary coach-action-btn" id="btn-coach-play-bot" title="Start a practice game against Stockfish"><span class="material-symbols-outlined" aria-hidden="true">sports_esports</span><span>Play bot</span></button>
+                  </div>
+                </div>
+              </details>
             </div>
           </div>
           <div class="coach-chat-locked" id="coach-chat-locked" hidden>
