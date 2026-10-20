@@ -2,6 +2,7 @@
 import { friendlyAuthError, validEmail } from './auth-errors.js';
 import { BoardSounds } from './board-sounds.js';
 import { onReady } from './ui/ready.js';
+import { loadEngine, loadBoost, loadRecaptcha } from './application.js';
 class ChessReviewApp {
   constructor() {
     this.board = new ChessBoard('chess-board');
@@ -1179,15 +1180,15 @@ class ChessReviewApp {
 		      currentPath = normalized;
 		    }
 		    if (!this._browserMeetsRequirements()) {
-		      this._applyRoute('/incompatible-browser', { replace: true });
+		      void this._applyRoute('/incompatible-browser', { replace: true });
 		      return;
 		    }
-		    this._applyRoute(currentPath, { replace: true, skipHistory: true });
+		    void this._applyRoute(currentPath, { replace: true, skipHistory: true });
 		    window.addEventListener('popstate', () => {
 		      const route = this._normalizeRoute(window.location.pathname || '/index');
 		      // disableRestore so Back/Forward doesn't re-prompt "Continue
 		      // review?" for a game the user already resumed or dismissed.
-		      this._applyRoute(route, { skipHistory: true, disableRestore: true });
+		      void this._applyRoute(route, { skipHistory: true, disableRestore: true });
 		    });
 		    this._installLinkInterceptor();
 		    document.addEventListener('app-navigate', (e) => {
@@ -1242,18 +1243,16 @@ class ChessReviewApp {
 		  }
 
 		  _navigateTo(path, options = {}) {
-    window.MoveExplanationUI?.clear();
+		    window.MoveExplanationUI?.clear();
 		    const url = new URL(path || '/index', window.location.origin);
-        if (url.origin !== window.location.origin) return;
+		    if (url.origin !== window.location.origin) return;
 		    const route = this._normalizeRoute(url.pathname);
 		    const target = this._routeUrl(route) + url.search + url.hash;
 		    const current = this._normalizeRoute(window.location.pathname || '/index');
-		    // Forward skipImport so callers (the coach's game_review tool) can
-		    // suppress the "Import Games" popup when loading a PGN directly.
 		    const passOpts = { skipHistory: true, disableRestore: options.disableRestore, skipImport: options.skipImport };
 		    if (current === route) {
-          if (window.location.pathname + window.location.search + window.location.hash !== target) window.history.replaceState({}, '', target);
-		      this._applyRoute(route, passOpts);
+		      if (window.location.pathname + window.location.search + window.location.hash !== target) window.history.replaceState({}, '', target);
+		      void this._applyRoute(route, passOpts);
 		      return;
 		    }
 		    if (options.replace) {
@@ -1261,7 +1260,7 @@ class ChessReviewApp {
 		    } else {
 		      window.history.pushState({}, '', target);
 		    }
-		    this._applyRoute(route, passOpts);
+		    void this._applyRoute(route, passOpts);
 		  }
 
 _installLinkInterceptor() {
@@ -1370,7 +1369,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    if (this._mobileNavOpen) this._setMobileNavOpen(false);
 	  }
 
-		  _showRoutePage(name) {
+		  async _showRoutePage(name) {
 		    this._hideRoutePages();
 		    if (this.elMainContent) this.elMainContent.hidden = false;
         if (name === 'play' && this.elPlayPage) {
@@ -1392,6 +1391,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      this._renderBoardPreview();
 		    } else if (name === 'boost' && this.elBoostPagePanel) {
 		      this.elBoostPagePanel.hidden = false;
+		      await loadBoost();
 		      this._bindSpaBoostPageEvents();
 		    } else if (name === 'coach' && this.elCoachPage) {
 		      this.elCoachPage.hidden = false;
@@ -1709,6 +1709,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    try {
 	      // reCAPTCHA v3 token — invisible to the user, verified server-side.
 	      // Throws if the site key is missing or Google's script fails to load.
+	      await loadRecaptcha();
 	      const recaptchaToken = await window.recaptchaLib.executeRecaptcha('contact');
 	      const res = await apiFetch('/api/contact', {
 	        method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2518,7 +2519,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    }
 		  }
 
-		  _applyRoute(path, options = {}) {
+		  async _applyRoute(path, options = {}) {
 		    this._closeMobileNav();
 		    const route = this._normalizeRoute(path || '/index');
         if (route !== '/play' && route !== '/play/callback') document.body.classList.remove('play-focus-mode');
@@ -2540,7 +2541,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 
 		    if (route === '/incompatible-browser') {
 		      this._hideRoutePages();
-		      this._showRoutePage('incompatible-browser');
+		      await this._showRoutePage('incompatible-browser');
 		      document.body.classList.remove('menu-active');
 		      document.body.classList.add('in-app-route');
 		      if (this.elMainMenu) this.elMainMenu.hidden = true;
@@ -2554,7 +2555,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		        return this._navigateTo('/account', { replace: true });
 		      }
 		      this._enterInAppLayout();
-		      this._showRoutePage('login');
+		      await this._showRoutePage('login');
 		      this._showBannedMessageIfAny();
 		      document.title = 'Sign In | Sing Chess';
 		      this._updateNavActiveState();
@@ -2568,7 +2569,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		        return this._navigateTo('/account', { replace: true });
 		      }
 		      this._enterInAppLayout();
-		      this._showRoutePage('signup');
+		      await this._showRoutePage('signup');
 		      this._applySignupContext();
 		      // (Re)initialize the onboarding wizard to step 1 each time signup is shown.
 		      this._initOnboarding();
@@ -2579,7 +2580,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 
 		    if (route === '/account') {
 		      this._enterInAppLayout();
-		      this._showRoutePage('account');
+		      await this._showRoutePage('account');
 		      document.title = 'Account | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
@@ -2587,7 +2588,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 
 		    if (route === '/settings') {
 		      this._enterInAppLayout();
-		      this._showRoutePage('settings');
+		      await this._showRoutePage('settings');
 		      document.title = 'Settings | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
@@ -2595,7 +2596,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 
 		    if (route === '/auth') {
 		      this._enterInAppLayout();
-		      this._showRoutePage('auth');
+		      await this._showRoutePage('auth');
 		      document.title = 'Account Help | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
@@ -2603,7 +2604,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 
 		    if (route === '/privacy') {
 		      this._enterInAppLayout();
-		      this._showRoutePage('privacy');
+		      await this._showRoutePage('privacy');
 		      document.title = 'Privacy Policy | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
@@ -2611,7 +2612,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 
 		    if (route === '/terms') {
 		      this._enterInAppLayout();
-		      this._showRoutePage('terms');
+		      await this._showRoutePage('terms');
 		      document.title = 'Terms of Service | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
@@ -2619,7 +2620,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 
 		    if (route === '/contact') {
 		      this._enterInAppLayout();
-		      this._showRoutePage('contact');
+		      await this._showRoutePage('contact');
 		      this._initContactPage();
 		      document.title = 'Contact Us | Sing Chess';
 		      this._updateNavActiveState();
@@ -2628,8 +2629,9 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 
 		    if (route === '/plans' || route === '/boost') {
 		      this._enterInAppLayout();
-		      this._showRoutePage('boost');
+		      await this._showRoutePage('boost');
 		      document.title = 'Plans | Sing Chess';
+		      await loadBoost();
 		      if (window.SidaBoost?.render) window.SidaBoost.render();
 		      this._updateNavActiveState();
 		      return;
@@ -2642,7 +2644,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
           this._stopReviewPlayback();
           if (this.clockState?.active) this._resetClockState();
           this._enterInAppLayout();
-          this._showRoutePage('play');
+          await this._showRoutePage('play');
           document.title = 'Play | Sing Chess';
           this._updateNavActiveState();
           window.dispatchEvent(new CustomEvent('play:route', { detail: { route } }));
@@ -2674,7 +2676,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      const jobId = route.slice('/anticheat/report/'.length).replace(/\/+$/, '');
 		      if (jobId) {
 		        this._enterInAppLayout();
-		        this._showRoutePage('anticheat-report');
+		        await this._showRoutePage('anticheat-report');
 		        this._hideSettingsModal();
 		        this._hideAccountModal();
 		        this._renderAnticheatReportPage(jobId);
@@ -2688,7 +2690,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 			      this._hideRoutePages();
 			      this._hideSettingsModal();
 			      this._hideAccountModal();
-			      this._enterCoachChat();
+			      await this._enterCoachChat();
 		      document.title = 'Coach | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
@@ -2709,7 +2711,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 
 		    if (route === '/404') {
 		      this._enterInAppLayout();
-		      this._showRoutePage('404');
+		      await this._showRoutePage('404');
 		      document.title = 'Not found | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
@@ -2726,13 +2728,13 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		        username = decodeURIComponent(route.slice('/profile/'.length)).replace(/\/+$/, '');
 		      } catch (_err) {
 		        this._enterInAppLayout();
-		        this._showRoutePage('404');
+		        await this._showRoutePage('404');
 		        document.title = 'Not found | Sing Chess';
 		        this._updateNavActiveState();
 		        return;
 		      }
 		      this._enterInAppLayout();
-		      this._showRoutePage('profile');
+		      await this._showRoutePage('profile');
 		      this._loadPublicProfile(username || '');
 		      document.title = `${username || 'Profile'} | Sing Chess`;
 		      this._updateNavActiveState();
@@ -2744,7 +2746,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    // show the menu.
 		    if (route !== '/index' && route !== '/' && !this._isKnownAppRoute(route)) {
 		      this._enterInAppLayout();
-		      this._showRoutePage('404');
+		      await this._showRoutePage('404');
 		      document.title = 'Not found | Sing Chess';
 		      this._updateNavActiveState();
 		      return;
@@ -4491,6 +4493,7 @@ if (this.elAnticheatReportStatus) {
         } else {
           this._setAccountStatus('Verifying…');
         }
+        await loadRecaptcha();
         const recaptchaToken = await window.recaptchaLib.executeRecaptcha('signup');
         const verifyRes = await apiFetch('/api/signup-verify', {
           method: 'POST',
@@ -5584,6 +5587,7 @@ if (this.elBtnAnticheatRefresh) {
       if (initToken !== this.engineInitToken) return;
 
       this._setEngineLoadProgress(42, 'Starting Stockfish...');
+      const { createEngineController } = await loadEngine();
       const engine = createEngineController({
         source: this.engineSettings.source,
         module: this.engineSettings.module,
@@ -5648,6 +5652,7 @@ if (this.elBtnAnticheatRefresh) {
           if (initToken !== this.engineInitToken) return;
 
           this._setEngineLoadProgress(42, 'Starting Stockfish...');
+          const { createEngineController } = await loadEngine();
           const engine = createEngineController({
             source: this.engineSettings.source,
             module: this.engineSettings.module,
@@ -5827,9 +5832,10 @@ if (this.elBtnAnticheatRefresh) {
 		  }
 
   _preloadSounds(onProgress) {
-    // Synthesized effects need no downloads or audio preload delay.
+    // Preload real MP3 sound effects from /sounds/. Falls back to synthesis
+    // if the files can't be fetched or decoded.
     onProgress?.(1);
-    return Promise.resolve(true);
+    return this.boardSounds.preload();
   }
 
 		  _syncActionButtons() {
@@ -7530,7 +7536,7 @@ _showPuzzleSuccessOverlay() {
   // tools (stockfish runs in THIS browser via this.engine.evaluate; web_search
   // + coach_games run server-side). Max-users-only. History persists server-side.
 
-  _enterCoachChat() {
+  async _enterCoachChat() {
     // /coach is its own full-screen page-panel route. The chat experience
     // (localStorage multi-chat + sidebar + markdown + streaming) lives in
     // src/coach-chat.js (window.CoachChat); this just activates the route and
@@ -7540,7 +7546,7 @@ _showPuzzleSuccessOverlay() {
     this.puzzleMode.active = false;
     this.anticheatMode.active = false;
     this._enterInAppLayout();
-    this._showRoutePage('coach');
+    await this._showRoutePage('coach');
     if (window.CoachChat) window.CoachChat.mount(this);
   }
 

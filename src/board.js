@@ -887,6 +887,12 @@ class ChessBoard {
       <span class="board-loading-spinner material-symbols-outlined" aria-hidden="true">progress_activity</span>
       <span class="board-loading-text"></span>
       <div class="board-loading-progress"><div class="board-loading-progress-fill"></div></div>
+      <div class="board-skeleton" aria-hidden="true">
+        <div class="board-skeleton-row"></div>
+        <div class="board-skeleton-row"></div>
+        <div class="board-skeleton-row"></div>
+        <div class="board-skeleton-row"></div>
+      </div>
     `;
     this.wrapper.appendChild(overlay);
     this.loadingOverlay = overlay;
@@ -916,31 +922,33 @@ class ChessBoard {
     this.arrowLayer.setAttribute('viewBox', `0 0 ${width} ${height}`);
     this.arrowLayer.setAttribute('width', width);
     this.arrowLayer.setAttribute('height', height);
-	    this.arrowLayer.innerHTML = `
-	      <defs>
-	        <marker id="best-move-arrowhead" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto" markerUnits="strokeWidth">
-	          <path d="M 0 0 L 7 3.5 L 0 7 z" fill="${this.bestMoveArrow?.color || '#77c75d'}"></path>
-	        </marker>
-	        <marker id="user-arrowhead" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto" markerUnits="strokeWidth">
-	          <path d="M 0 0 L 7 3.5 L 0 7 z" fill="${this._annotationArrowColor()}"></path>
-	        </marker>
-	      </defs>
-	    `;
+
+    const bestColor = this.bestMoveArrow?.color || '#77c75d';
+    const userColor = this._annotationArrowColor();
+    const parts = [
+      '<defs>',
+      `<marker id="best-move-arrowhead" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto" markerUnits="strokeWidth"><path d="M 0 0 L 7 3.5 L 0 7 z" fill="${bestColor}"></path></marker>`,
+      `<marker id="user-arrowhead" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto" markerUnits="strokeWidth"><path d="M 0 0 L 7 3.5 L 0 7 z" fill="${userColor}"></path></marker>`,
+      '</defs>',
+    ];
 
     for (const arrow of this.userArrows) {
-      this._appendArrowElement(arrow, 'user-arrowhead', 0.78, 5);
+      parts.push(this._arrowHtml(arrow, 'user-arrowhead', 0.78, 5));
     }
 
-    if (!this.bestMoveArrow) return;
-    this._appendArrowElement(this.bestMoveArrow, 'best-move-arrowhead', 0.55, 4);
+    if (this.bestMoveArrow) {
+      parts.push(this._arrowHtml(this.bestMoveArrow, 'best-move-arrowhead', 0.55, 4));
+    }
+
+    this.arrowLayer.innerHTML = parts.join('');
   }
 
-  _appendArrowElement(arrow, markerId, opacity = 0.6, strokeWidth = 4) {
-    if (!arrow || !this.arrowLayer) return;
+  _arrowHtml(arrow, markerId, opacity = 0.6, strokeWidth = 4) {
+    if (!arrow) return '';
 
     const from = this._squareCenter(arrow.from);
     const to = this._squareCenter(arrow.to);
-    if (!from || !to) return;
+    if (!from || !to) return '';
 
     const dx = to.x - from.x;
     const dy = to.y - from.y;
@@ -951,21 +959,22 @@ class ChessBoard {
     const startY = from.y + (dy / distance) * startTrim;
     const endX = to.x - (dx / distance) * endTrim;
     const endY = to.y - (dy / distance) * endTrim;
+    const color = arrow.color || '';
 
-    this.arrowLayer.innerHTML += `
+    return `
       <line
         x1="${startX}"
         y1="${startY}"
         x2="${endX}"
         y2="${endY}"
-        stroke="${arrow.color}"
+        stroke="${color}"
         stroke-width="${strokeWidth}"
         stroke-linecap="round"
         stroke-linejoin="round"
         marker-end="url(#${markerId})"
         opacity="${opacity}"
       ></line>
-      <circle cx="${from.x}" cy="${from.y}" r="3" fill="${arrow.color}" opacity="${opacity}"></circle>
+      <circle cx="${from.x}" cy="${from.y}" r="3" fill="${color}" opacity="${opacity}"></circle>
     `;
   }
 

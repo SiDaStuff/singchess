@@ -7,7 +7,7 @@ body.menu-active .main-content, body.in-app-route .main-content { display: none;
 .workspace-heading .eyebrow { font-size: 10px; }
 .workspace-shortcut { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); }
 kbd { font: 11px var(--font-mono); padding: 3px 6px; border: 1px solid var(--border-color); border-radius: 4px; }
-.board-section { grid-area: board; min-width: 0; width: 100%; }
+.board-section { grid-area: board; min-width: 0; width: 100%; padding-bottom: 72px; }
 .board-controls { position: sticky; bottom: 0; z-index: 6; margin-top: 12px; padding: 8px 4px 6px; border-radius: 9px; background: var(--bg-page); box-shadow: 0 -6px 12px -10px rgba(0, 0, 0, .35); }
 .board-stage { position: relative; width: 100%; aspect-ratio: 1; }
 .eval-bar-container { position: absolute; top: 0; left: calc(-1 * var(--eval-offset)); width: 22px; height: 100%; }
