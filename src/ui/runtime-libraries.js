@@ -1,14 +1,11 @@
-import Swal from 'sweetalert2';
-import 'sweetalert2/dist/sweetalert2.css';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
-import '@fontsource/inter/latin-400.css';
-import '@fontsource/inter/latin-500.css';
-import '@fontsource/inter/latin-600.css';
-import '@fontsource/inter/latin-700.css';
-import '@fontsource/ibm-plex-mono/latin-400.css';
-import '@fontsource/ibm-plex-mono/latin-500.css';
-import '@fontsource/material-symbols-outlined/400.css';
-
 // Stable compat interfaces for the retained service and game controllers.
-Object.assign(window, { Swal, marked, DOMPurify });
+let dialogs;
+window.Swal = {
+  async fire(...args) {
+    const runtime = await (dialogs ||= import('./dialog-runtime.js').then(runtime => { window.Swal = runtime.default; return runtime; }));
+    return runtime.default.fire(...args);
+  },
+  showLoading(...args) { dialogs?.then(runtime => runtime.default.showLoading(...args)); },
+  close(...args) { dialogs?.then(runtime => runtime.default.close(...args)); },
+};
+window.loadChessMarkdown = () => import('./markdown-runtime.js');

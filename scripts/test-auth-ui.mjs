@@ -22,7 +22,7 @@ try {
     page.on('pageerror', error => errors.push(error.message));
     const initial = await page.goto(base);
     check(initial.headers()['cross-origin-opener-policy'] === 'same-origin-allow-popups', `${width}: popup-compatible frontend header`);
-    await page.waitForFunction(() => window.app?.authState.initialized);
+    await page.waitForFunction(() => window.app?.authState?.initialized);
     await page.evaluate(() => {
       const app = window.app; app._navigateTo('/login');
       window.__authCalls = 0; window.__banCalls = 0;

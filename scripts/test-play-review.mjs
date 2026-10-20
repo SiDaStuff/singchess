@@ -104,7 +104,7 @@ const engineSource = (await fs.readFile(new URL('../src/engine.js', import.meta.
 const bodyClasses = new Set(['play-focus-mode']);
 const host = Object.assign(new EventTarget(), { CustomEvent, location: { pathname: '/play' },
   history: { pushState() {}, replaceState() {} }, __API_BASE: '' });
-const context = { Chess, console, window: host, CustomEvent, setTimeout, clearTimeout,
+const context = { Chess, console, window: host, CustomEvent, setTimeout, clearTimeout, onReady() {},
   document: { title: '', addEventListener() {}, body: { dataset: {}, classList: { remove: name => bodyClasses.delete(name) } } } };
 vm.createContext(context);
 vm.runInContext(await fs.readFile(new URL('../src/chess-core.js', import.meta.url), 'utf8'), context);

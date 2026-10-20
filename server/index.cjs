@@ -201,7 +201,7 @@ app.use((req, res, next) => {
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   // Strict Transport Security (1 year)
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
   return next();
 });
 
@@ -393,8 +393,18 @@ if (fs.existsSync(vendorDir)) {
 }
 
 if (serveStatic) {
+  app.get(/^\/(404|account|anticheat|auth|boost|coach|incompatible-browser|puzzles|review|settings|signin|signup)\.html$/, (req, res) => res.redirect(301, req.path.slice(0, -5)));
   const staticDir = isDev || !fs.existsSync(distDir) ? publicDir : distDir;
   const staticIndexPath = path.join(staticDir, 'index.html');
+  let builtPolicy = '', workerPolicy = '';
+  try {
+    if (!isDev) ({ policy: builtPolicy, workerPolicy } = JSON.parse(fs.readFileSync(path.join(staticDir, 'security-policy.json'), 'utf8')));
+  } catch {}
+  app.use((req, res, next) => {
+    if (builtPolicy) res.setHeader('Content-Security-Policy', req.path === '/src/stockfish.worker.js' ? workerPolicy : builtPolicy);
+    res.setHeader('Link', '</llms.txt>; rel="describedby"; type="text/markdown"');
+    next();
+  });
   const apiConfigScript = API_BASE_URL
     ? `<script>window.__API_CONFIG={baseUrl:'${API_BASE_URL.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'}</script>`
     : '';
@@ -416,6 +426,10 @@ if (serveStatic) {
               cachedIndexHtmlPath = filePath;
             }
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            if (builtPolicy) {
+              const hash = require('node:crypto').createHash('sha256').update(apiConfigScript.slice(8, -9)).digest('base64');
+              res.setHeader('Content-Security-Policy', builtPolicy.replace('script-src ', `script-src 'sha256-${hash}' `));
+            }
             return res.send(cachedIndexHtml);
           } catch (err) {
             return sendFile(filePath, opts, cb);
@@ -433,6 +447,10 @@ if (serveStatic) {
     setHeaders(res, filePath) {
       if (path.basename(filePath) === 'index.html') {
         res.setHeader('Cache-Control', 'no-store');
+      } else if (!isDev && /[\\/]assets[\\/][^\\/]+-[\w-]{8,}\.(js|css|woff2?|map)$/.test(filePath)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      } else if (!isDev && /[\\/](assets|sounds)[\\/]/.test(filePath)) {
+        res.setHeader('Cache-Control', 'public, max-age=604800, stale-while-revalidate=86400');
       }
       if (path.extname(filePath).toLowerCase() === '.svg') {
         res.setHeader('Content-Type', 'image/svg+xml');

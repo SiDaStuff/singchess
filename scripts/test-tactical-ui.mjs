@@ -30,7 +30,7 @@ try {
     const page = await context.newPage(), errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(base);
-    await page.waitForFunction(() => window.app?.authState.initialized && window.TacticalCoachUI && window.TacticsCoach);
+    await page.waitForFunction(() => window.app?.authState?.initialized && window.TacticalCoachUI && window.TacticsCoach);
     await page.evaluate(({ pgn, result }) => {
       const app = window.app;
       app.authState.user = { uid: 'qa-tactical', getIdToken: async () => 'isolated' };

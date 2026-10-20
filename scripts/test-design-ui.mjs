@@ -21,7 +21,7 @@ try {
     });
     const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
     page.on('dialog', dialog => dialog.accept()); page.setDefaultTimeout(8000);
-    await page.goto(base); await page.waitForFunction(() => window.app?.authState.initialized && document.getElementById('training-journey-home'));
+    await page.goto(base); await page.waitForFunction(() => window.app?.authState?.initialized && document.getElementById('training-journey-home'));
     await page.evaluate(() => { window.app._requestLiveEvaluation = async () => {}; });
     check(!await page.locator('#home-stats').isVisible(), `${width}: unavailable statistics show no placeholder counters`);
     await page.route('**/api/public-stats', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{"stats":{"gamesAnalyzed":12}}' }));

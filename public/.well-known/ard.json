@@ -1,0 +1,16 @@
+{
+  "specVersion": "1.0",
+  "entries": [
+    {
+      "identifier": "urn:air:chess.singdevelopments.com:skills:website-guide",
+      "displayName": "Sing Chess website guide",
+      "type": "text/markdown; profile=\"urn:air:agent-skills\"",
+      "url": "https://chess.singdevelopments.com/docs/chess-guide.md",
+      "description": "Instructions for using the public Sing Chess interface to review completed games and practice chess.",
+      "representativeQueries": [
+        "How do I review a completed chess game in Sing Chess?",
+        "How do I connect my Lichess account to Sing Chess Play?"
+      ]
+    }
+  ]
+}

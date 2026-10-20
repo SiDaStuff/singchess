@@ -1,26 +1,19 @@
 import './ui/runtime-libraries.js';
-import './ui/styles.css';
-import './ui/bootstrap.js';
-import './api-base.js';
-import './firebase-config.js';
-import './pieces.js';
-import './board.js';
-import './engine.js';
-import './chess-core.js';
-import './tactics-coach.js';
-import './tactics-advanced.js';
-import './app-dialog.js';
-import './boost.js';
-import './recaptcha.js';
-import './coach-chat.js';
-import './footer.js';
-import './app.js';
-import './ui/workspace.js';
-import './ui/move-explanation.js';
-import './ui/forms.js';
-import './ui/linked-chess.js';
+import './ui/trusted-types.js';
+import './ui/critical.css';
 
-import './ui/admin-profile.js';
-import './play/index.js';
-import './ui/quality-of-life.js';
-import './ui/training-journey.js';
+// Home is already in the HTML and can paint while controllers download.
+const application = import('./application.js');
+let ready = false;
+const controlsReady = new Promise(resolve => window.addEventListener('app:ready', () => { ready = true; resolve(); }, { once: true }));
+application.catch(error => {
+  console.error('Application could not load:', error);
+  document.getElementById('app-load-error')?.removeAttribute('hidden');
+});
+document.addEventListener('click', event => {
+  if (ready || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  const control = event.target.closest('button, a[data-route]');
+  if (!control) return;
+  event.preventDefault(); event.stopImmediatePropagation();
+  application.then(() => controlsReady).then(() => { if (control.isConnected) control.click(); });
+}, true);

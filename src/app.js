@@ -1,6 +1,7 @@
 // Main Application - Chess Game Review
 import { friendlyAuthError, validEmail } from './auth-errors.js';
 import { BoardSounds } from './board-sounds.js';
+import { onReady } from './ui/ready.js';
 class ChessReviewApp {
   constructor() {
     this.board = new ChessBoard('chess-board');
@@ -210,9 +211,8 @@ class ChessReviewApp {
 	    // _initEngine() on demand; idle startup is delayed so the 7 MB WASM
 	    // payload never competes with the first paint.
 	    this._engineInitStarted = false;
-	    this._engineInitTimer = setTimeout(() => {
-	      if (!this.engine && !this._engineInitStarted) void this._initEngine();
-	    }, 5000);
+	    // Loading Stockfish is tied to a chess action or a review route. An
+	    // idle Home, account or live Play visit needs no WASM download.
 		    this._initAuth();
 		    this._updateBoard();
 		    this._updateLiveEvalPanel();
@@ -2826,10 +2826,10 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    // gtag page view
 	    try {
 	      if (typeof gtag === 'function') {
-	        gtag('config', 'G-TFW7HFWKYP', {
+	        gtag('event', 'page_view', {
 	          page_path: pagePath,
 	          page_title: pageTitle,
-	          send_page_view: false,
+              page_location: window.location.href,
 	        });
 	      }
 	    } catch (e) { /* gtag not loaded */ }
@@ -5185,6 +5185,7 @@ if (this.elBtnAnticheatRefresh) {
 	  }
 
 		  _enterReviewMode() {
+        if (!this.engine && !this._engineInitStarted) void this._initEngine();
 		    this._activateGameLayout();
 		    document.body.dataset.mode = 'review';
 		    this.puzzleMode.active = false;
@@ -11022,7 +11023,8 @@ _showMoveBadge(classification, targetSquare, options = {}) {
     if (window.PlayFairPlay && !(await window.PlayFairPlay.verify())) return;
     if (!this._canStartHeavyAction('review', 'Game Review')) return;
 		const serverReview = this.engineSettings.analysisLocation === 'server';
-	    if (this.isAnalyzing || this.gameMoves.length === 0 || (!serverReview && !this.engine?.ready)) return;
+	    if (this.isAnalyzing || this.gameMoves.length === 0) return;
+        if (!serverReview && !this.engine?.ready && !(await this._initEngine())) return;
 	    let forceBrowserReview = false;
 	    if (serverReview && this.authState.user) {
 	      await this._refreshUsageBeforeAction();
@@ -12270,6 +12272,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
   // Shared driver: show skeleton in `target`, stream tokens, render + Chat-more.
   // `scope` is 'move' | 'game'; `extra` carries moveIndex for move scope.
   async _streamCoachOverview(target, scope, extra = {}, _retryCount = 0) {
+    await window.loadChessMarkdown?.();
     if (window.PlayFairPlay && !(await window.PlayFairPlay.verify())) return;
     if (!target) return;
     const token = (this._coachOverviewToken = (this._coachOverviewToken || 0) + 1);
@@ -12896,7 +12899,7 @@ function browserMeetsChessRequirements() {
 
 window.browserMeetsChessRequirements = browserMeetsChessRequirements;
 
-document.addEventListener('DOMContentLoaded', () => {
+onReady(() => {
   if (!browserMeetsChessRequirements()) {
     // Route directly to the in-SPA incompatible-browser panel instead of the
     // /incompatible-browser.html shim, which bounces back to "/" and re-runs

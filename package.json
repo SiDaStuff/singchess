@@ -38,11 +38,13 @@
     "test:journey": "node scripts/test-journey-state.mjs",
     "test:ui:journey": "node scripts/test-journey-ui.mjs",
     "test:ui:design": "node scripts/test-design-ui.mjs",
+    "test:ui:loading": "node scripts/test-loading-ui.mjs",
     "db:recover": "node scripts/database.cjs recover"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.2",
     "@capacitor/core": "^8.4.2",
+    "@fontsource-variable/inter": "^5.3.0",
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "@fontsource/inter": "^5.3.0",
     "@fontsource/material-symbols-outlined": "^5.3.9",

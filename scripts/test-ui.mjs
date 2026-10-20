@@ -144,6 +144,7 @@ try {
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => typeof window.app?._navigateTo === 'function', null, { timeout: 20000 });
     await check(`${width}px real browser engine initialization`, async () => {
+      await page.evaluate(() => window.app._initEngine());
       await page.waitForFunction(() => window.app.engine?.ready, null, { timeout: 30000 });
     });
 

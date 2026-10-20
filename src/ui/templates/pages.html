@@ -935,21 +935,24 @@
           </ul>
 
           <h2>Where your data lives</h2>
-          <p>Account data is stored in Google Firebase Authentication and Realtime Database. Firebase may process data on Google infrastructure, including in the United States. Local preferences stay in your browser unless you sign in and sync them.</p>
+          <p>Firebase Authentication handles sign-in. Application account data is stored in our server database, with backups in Firebase Realtime Database. Firebase may process data on Google infrastructure, including in the United States. Local preferences stay in your browser unless you sign in and sync them.</p>
 
           <h2>Cookies and local storage</h2>
-          <p>We don't use advertising or tracking cookies. Firebase may set an authentication cookie or local storage entry to keep you signed in. To help detect multi-accounting and abuse, we set a single device-identifier cookie and store a hash of your IP address; raw IP addresses are not kept. You can clear all stored data from Settings → Clear data or through your browser.</p>
+          <p>Firebase uses browser storage to keep you signed in. A device-identifier cookie and hashed IP records help prevent abuse and multiple accounts. The site also uses Google Analytics to measure page visits and usage; your browser may store analytics identifiers. Hosting and security providers may process IP addresses and request logs. You can clear local site data in Settings or your browser; this does not delete data held on the server.</p>
 
           <h2>Third parties</h2>
           <ul>
-            <li><strong>Firebase</strong> — sign-in and database.</li>
-            <li><strong>lichess.org and chess.com</strong> — only when you import your public games by username.</li>
+            <li><strong>Firebase</strong> — sign-in and database backups. See <a href="https://firebase.google.com/support/privacy" target="_blank" rel="noopener noreferrer">Firebase privacy information</a>.</li>
+            <li><strong>Lichess</strong> — public imports and authorized Play account, game, move, and challenge requests. See the <a href="https://lichess.org/privacy" target="_blank" rel="noopener noreferrer">Lichess privacy policy</a>.</li>
+            <li><strong>Chess.com</strong> — public games and ratings imported by username. See the <a href="https://www.chess.com/legal/privacy" target="_blank" rel="noopener noreferrer">Chess.com privacy policy</a>.</li>
+            <li><strong>AI provider</strong> — Coach messages and relevant chess context are processed to generate a reply.</li>
+            <li><strong>Google Analytics</strong> — page and usage measurement.</li>
             <li><strong>Google reCAPTCHA</strong> — bot detection on the signup and contact forms. Google processes the request per their <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">privacy policy</a> and <a href="https://policies.google.com/terms" target="_blank" rel="noopener noreferrer">terms</a>.</li>
           </ul>
           <p>We don't sell or share your personal data for advertising.</p>
 
           <h2>Public profiles</h2>
-          <p>If you choose a username, a public profile appears at <code>mastermind.singdevelopments.com/profile/&lt;username&gt;</code>. It shows your username, plan flair, puzzle rating, and puzzle stats. Your email, games, and usage stats stay private. You can hide your profile by contacting us.</p>
+          <p>If you choose a username, a public profile appears at <code>chess.singdevelopments.com/profile/&lt;username&gt;</code>. It shows your username, plan flair, puzzle rating, and puzzle stats. Your email, games, and usage stats stay private. You can hide your profile by contacting us.</p>
 
           <h2>Messages</h2>
           <p>When you use the contact form, we keep your email and message so we can reply. If you're signed in, we also store your user ID. Only site admins can see these.</p>

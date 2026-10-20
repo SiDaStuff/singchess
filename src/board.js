@@ -261,12 +261,14 @@ class ChessBoard {
 	    this.wrapper.appendChild(slideEl);
         this._slideElement = slideEl;
 
-	    slideEl.offsetHeight;
-
-	    slideEl.style.left = endLeft + 'px';
-	    slideEl.style.top = endTop + 'px';
-
-	    const durationMs = parseFloat(getComputedStyle(document.body).getPropertyValue('--piece-slide-duration')) * 1000 || 500;
+	    const rawDuration = getComputedStyle(document.body).getPropertyValue('--piece-slide-duration').trim();
+	    const durationMs = parseFloat(rawDuration) * (rawDuration.endsWith('ms') ? 1 : 1000) || 180;
+        // Web Animations starts from explicit keyframes without forcing a
+        // synchronous layout. The compositor moves only the temporary piece.
+        slideEl.animate?.([
+          { transform: 'translate(0, 0)' },
+          { transform: `translate(${endLeft - startLeft}px, ${endTop - startTop}px)` },
+        ], { duration: durationMs, easing: 'ease', fill: 'forwards' });
 	    this._slideTimeout = setTimeout(() => {
           if (this._slideElement !== slideEl) return;
 	      slideEl.remove();
@@ -351,11 +353,14 @@ class ChessBoard {
     const squares = this.container.querySelectorAll('.square');
     squares.forEach(sqEl => {
       const sq = sqEl.dataset.square;
-      // Remove existing piece image
       const existing = sqEl.querySelector('.piece');
+      const piece = this.position[sq];
+      if (existing && piece && existing.getAttribute('src') === getPieceSvgUri(piece)) {
+        existing.style.opacity = '';
+        existing.classList.remove('piece-arrive');
+        return;
+      }
       if (existing) existing.remove();
-
-	      const piece = this.position[sq];
 		      if (piece) {
 		        const img = document.createElement('img');
 		        img.className = 'piece';

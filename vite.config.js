@@ -1,6 +1,28 @@
 import { defineConfig, loadEnv } from 'vite';
 import path from 'path';
 import fs from 'fs';
+import { Chess } from 'chess.js';
+import { siteOutputPlugin } from './build/site-output.js';
+
+function homeHtmlPlugin() {
+  return {
+    name: 'home-html',
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html) {
+        const game = new Chess();
+        for (const move of ['e4','e5','Nf3','d6','d4','Bg4','dxe5','Bxf3','Qxf3','dxe5','Bc4','Nf6','Qb3','Qe7','Nc3','c6','Bg5','b5']) game.move(move);
+        let squares = '';
+        for (let rank = 8; rank > 0; rank--) for (let file = 0; file < 8; file++) {
+          const square = String.fromCharCode(97 + file) + rank, piece = game.get(square);
+          squares += `<div class="square ${(rank + file) % 2 ? 'dark' : 'light'}" aria-hidden="true">${piece ? `<img class="piece" width="64" height="64" src="/assets/pieces/cburnett/${piece.color}${piece.type.toUpperCase()}.svg" alt="" decoding="async">` : ''}</div>`;
+        }
+        const home = fs.readFileSync('src/ui/templates/home.html', 'utf8').replace('aria-label="Study position"></div>', `aria-label="Study position">${squares}</div>`);
+        return html.replace('<div data-template="home"></div>', home);
+      },
+    },
+  };
+}
 
 /**
  * Force Vite's dev server to serve .wasm files with the MIME type required by
@@ -67,22 +89,19 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       assetsDir: 'assets',
-      sourcemap: mode === 'development',
+      sourcemap: true,
+      target: 'es2022',
+      modulePreload: false,
       rollupOptions: {
         input: './index.html',
         output: {
-          manualChunks(id) {
-            if (id.includes('/src/ui/templates/')) return 'views';
-            if (id.includes('/node_modules/')) {
-              return /\/(@firebase|firebase)\//.test(id) ? 'firebase' : 'vendor';
-            }
-          },
+          // Preserve dynamic feature boundaries instead of one eager vendor.
         },
       },
     },
     optimizeDeps: {
       entries: ['./index.html'],
     },
-    plugins: [wasmMimePlugin(), servePublicSvgPlugin()],
+    plugins: [homeHtmlPlugin(), wasmMimePlugin(), servePublicSvgPlugin(), siteOutputPlugin()],
   };
 });

@@ -7,7 +7,7 @@
   --bg-strong: #3e6f35;
   --text-primary: #1a211c;
   --text-secondary: #4f5c52;
-  --text-muted: #6c786f;
+  --text-muted: #59665d;
   --border-color: #c8d2ca;
   --border-soft: #dce4dd;
   --accent: #3e6f35;
@@ -79,7 +79,7 @@
 body[data-color-theme="light"] {
   color-scheme: light;
   --bg-page: #f4f6f3; --bg-panel: #fff; --bg-muted: #edf1ed; --bg-elevated: #e1e8e2;
-  --bg-strong: #3e6f35; --text-primary: #1a211c; --text-secondary: #4f5c52; --text-muted: #6c786f;
+  --bg-strong: #3e6f35; --text-primary: #1a211c; --text-secondary: #4f5c52; --text-muted: #59665d;
   --border-color: #c8d2ca; --border-soft: #dce4dd; --accent: #3e6f35; --accent-hover: #31592b; --accent-contrast: #fff;
   --focus-ring: #3e6f35; --text-danger: #a52e27;
   --surface-sidebar: #fff; --surface-sidebar-upgrade: #edf4eb; --surface-hover: #e8eee9;
@@ -116,7 +116,7 @@ p { line-height: 1.7; }
 ::selection { background: #a7d68b44; }
 :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; }
 [hidden] { display: none !important; }
-.material-symbols-outlined { font-family: 'Material Symbols Outlined'; font-weight: normal; font-style: normal; font-size: 22px; display: inline-block; line-height: 1; letter-spacing: normal; text-transform: none; white-space: nowrap; word-wrap: normal; direction: ltr; font-feature-settings: 'liga'; -webkit-font-smoothing: antialiased; font-variation-settings: 'wght' 400, 'FILL' 0, 'opsz' 24; }
+.material-symbols-outlined { font-family: 'Material Symbols Outlined'; font-weight: normal; font-style: normal; font-size: 22px; display: inline-block; width: 1em; height: 1em; flex-shrink: 0; overflow: hidden; line-height: 1; letter-spacing: normal; text-transform: none; white-space: nowrap; word-wrap: normal; direction: ltr; font-feature-settings: 'liga'; -webkit-font-smoothing: antialiased; font-variation-settings: 'wght' 400, 'FILL' 0, 'opsz' 24; }
 .eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--text-muted); }
 .status-dot { display: inline-block; height: 6px; width: 6px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
 .text-center { text-align: center; }

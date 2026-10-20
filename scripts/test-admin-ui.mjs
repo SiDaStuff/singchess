@@ -45,7 +45,7 @@ try {
     const page = await context.newPage(), errors = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.goto(base);
-    await page.waitForFunction(() => window.app?.authState.initialized && window.AdminProfileUI);
+    await page.waitForFunction(() => window.app?.authState?.initialized && window.AdminProfileUI);
     await page.evaluate(() => {
       const app = window.app;
       app.authState.user = { uid: 'admin-test', email: 'qa@example.test', getIdToken: async () => 'isolated' };

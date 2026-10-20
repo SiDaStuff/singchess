@@ -1,3 +1,4 @@
+import { onReady } from './ui/ready.js';
 (function () {
   function renderFooter() {
     const footer = document.createElement('footer');
@@ -18,5 +19,5 @@
     else document.body.appendChild(footer);
   }
 
-  document.addEventListener('DOMContentLoaded', renderFooter);
+  onReady(renderFooter);
 })();

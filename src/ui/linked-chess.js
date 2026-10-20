@@ -1,4 +1,5 @@
-document.addEventListener('DOMContentLoaded', () => {
+import { onReady } from './ready.js';
+onReady(() => {
   const app = window.app;
   if (!app?._authHeaders) return;
   const escape = value => app._escapeHtml(String(value ?? ''));

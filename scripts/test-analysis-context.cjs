@@ -6,7 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { Chess } = require('chess.js');
 const root = path.resolve(__dirname, '..');
-const appContext = { Chess, console, window: { Chess }, document: { addEventListener() {}, hidden: false }, setTimeout, clearTimeout };
+const appContext = { Chess, console, onReady() {}, window: { Chess }, document: { addEventListener() {}, hidden: false }, setTimeout, clearTimeout };
 vm.createContext(appContext);
 vm.runInContext(fs.readFileSync(path.join(root, 'src/chess-core.js'), 'utf8'), appContext);
 const appSource = fs.readFileSync(path.join(root, 'src/app.js'), 'utf8').replace(/^import .*;\r?\n/gm, '');

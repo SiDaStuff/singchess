@@ -1,6 +1,9 @@
+import { onReady } from './ready.js';
 // Presentation state belongs here; chess state remains in ChessReviewApp.
-document.addEventListener('DOMContentLoaded', () => {
+onReady(() => {
   const tabs = document.getElementById('analysis-tabs');
+  const title = document.getElementById('workspace-title');
+  const description = document.getElementById('workspace-description');
   const panels = {
     feedback: document.getElementById('live-eval'),
     moves: document.getElementById('move-list-container'),
@@ -65,8 +68,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const sync = () => {
     const mode = document.body.dataset.mode;
     const content = copy[mode] || copy.review;
-    document.getElementById('workspace-title').textContent = content[0];
-    document.getElementById('workspace-description').textContent = content[1];
+    title.textContent = content[0];
+    description.textContent = content[1];
     const label = labels[location.pathname] || (location.pathname.startsWith('/profile/') ? 'Player profile' : location.pathname.startsWith('/anticheat/report/') ? 'Fair play report' : 'Sing Chess');
     document.getElementById('header-breadcrumb').textContent = label;
     // The router owns page titles, including usernames and error-page titles.

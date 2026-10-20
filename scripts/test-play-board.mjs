@@ -42,7 +42,7 @@ silent.destroy();
 // Exercise the actual stream lifecycle without mounting the app or contacting a
 // provider. Delayed old-stream callbacks must never touch a newly selected game.
 const experienceSource = await fs.readFile(new URL('../src/play/index.js', import.meta.url), 'utf8');
-const classSource = experienceSource.slice(experienceSource.indexOf('export class PlayExperience'), experienceSource.indexOf('\ndocument.addEventListener')).replace('export class', 'class');
+const classSource = experienceSource.slice(experienceSource.indexOf('export class PlayExperience'), experienceSource.indexOf('\nexport function mountPlay')).replace('export class', 'class');
 const Experience = new Function('isFinished', 'INITIAL', `${classSource}; return PlayExperience;`)(isFinished, new (createRequire(import.meta.url)('chess.js').Chess)().fen());
 const experience = Object.create(Experience.prototype), streams = [], jobs = [], frames = [], elements = new Map();
 let stops = 0, orientations = 0;

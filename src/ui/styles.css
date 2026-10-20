@@ -1,12 +1,5 @@
-@import './tokens.css';
-@import './components.css';
-@import './shell.css';
-@import './home.css';
-@import './board.css';
 @import './workspace.css';
 @import './features.css';
 @import './training.css';
 @import './pages.css';
 @import './linked-chess.css';
-@import './admin.css';
-@import './tactical-coach.css';

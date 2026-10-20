@@ -17,6 +17,9 @@
   <link rel="icon" type="image/svg+xml" href="/assets/icon.svg">
   <link rel="apple-touch-icon" href="/assets/icon.svg">
   <link rel="manifest" href="/site.webmanifest">
+  <link rel="describedby" href="/llms.txt" type="text/markdown">
+  <link rel="ard" href="/.well-known/ard.json" type="application/json">
+  <link rel="ai-catalog" href="/.well-known/ai-catalog.json" type="application/json">
 
   <script>
     // Strip one-use OAuth credentials before analytics or subresources can read
@@ -66,6 +69,7 @@
 </aside>
 <div class="sc-scrim" id="sc-scrim" hidden></div>
 <div id="app" tabindex="-1">
+  <p id="app-load-error" role="alert" hidden>The application could not load. <a href="/">Reload the page</a>.</p>
   <header class="header" id="app-header"><div class="header-location"><button type="button" class="apple-nav-toggle icon-button" id="apple-nav-toggle" aria-label="Open navigation" aria-expanded="false" aria-controls="sc-sidebar"><span class="material-symbols-outlined">menu</span></button><a class="apple-brand-link mobile-brand" href="/" data-route="/index">sing CHESS</a><span class="header-breadcrumb" id="header-breadcrumb">Game review and training</span></div><div class="apple-header-actions"><a href="/puzzles" data-route="/puzzles" class="header-train"><span class="material-symbols-outlined">extension</span> Practice tactics</a><button id="btn-settings" class="apple-header-btn icon-button" type="button" aria-label="Settings" title="Settings"><span class="material-symbols-outlined">tune</span></button><button id="header-account" class="apple-header-btn" type="button" title="Account"><span class="material-symbols-outlined" id="header-account-icon">account_circle</span><span id="header-account-label">Account</span></button></div><div hidden aria-hidden="true"><button id="btn-import"></button><button id="btn-coach"></button><button id="btn-puzzles"></button><button id="btn-anticheat"></button><button id="btn-account"></button><div id="account-btn-label"></div></div></header>
   <div id="play-fairplay-notice" class="play-fairplay-notice" role="status" aria-live="polite" hidden><span class="material-symbols-outlined" aria-hidden="true">verified_user</span><span data-fairplay-text></span><a href="/play" data-route="/play">Return to Play</a></div>
   <div data-template="home"></div>

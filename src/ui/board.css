@@ -33,7 +33,7 @@ body[data-board-theme=rose] { --sq-light: #f7e2df; --sq-dark: #b56a72; --sq-high
 .board-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
 .board-coordinates-file, .board-coordinates-rank { display: none; }
 .drag-piece { position: fixed; pointer-events: none; z-index: 300; }
-.piece-slide { position: absolute; z-index: 20; pointer-events: none; transition: top var(--piece-slide-duration) ease, left var(--piece-slide-duration) ease; }
+.piece-slide { position: absolute; z-index: 20; pointer-events: none; will-change: transform; }
 .piece-slide img { width: 94%; height: 94%; margin: 3%; }
 body[data-anim-speed='0.2'] { --piece-slide-duration: .2s; }
 body[data-anim-speed='0.5'] { --piece-slide-duration: .3s; }

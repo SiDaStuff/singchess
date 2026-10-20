@@ -33,7 +33,7 @@
     Referrer-Policy = "strict-origin-when-cross-origin"
     Cross-Origin-Opener-Policy = "same-origin-allow-popups"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
-    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+    Strict-Transport-Security = "max-age=63072000; includeSubDomains"
 
 # Long-cache fingerprints bundled assets (Vite emits content-hashed filenames
 # like /assets/index-C5YnXl1t.js so these are safe to cache forever).
@@ -41,6 +41,33 @@
   for = "/assets/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
+
+# These public assets do not have content hashes. Revalidate after a week.
+[[headers]]
+  for = "/assets/pieces/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800, stale-while-revalidate=86400"
+
+[[headers]]
+  for = "/assets/icons/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800, stale-while-revalidate=86400"
+
+[[headers]]
+  for = "/sounds/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800, stale-while-revalidate=86400"
+
+[[headers]]
+  for = "/llms.txt"
+  [headers.values]
+    Content-Type = "text/plain; charset=utf-8"
+    Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/.well-known/*"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
 
 # index.html must NEVER be cached (it points at the current hashed bundle).
 [[headers]]
@@ -57,6 +84,12 @@
 # SPA fallback: every unmatched path serves index.html (so client-side routing
 # /coach /review /account works on a cold load / refresh). Must be status 200
 # (a rewrite), NOT a 301 redirect, so the URL the user typed stays in the bar.
+[[redirects]]
+  from = "/*.html"
+  to = "/:splat"
+  status = 301
+  force = true
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

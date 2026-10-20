@@ -49,7 +49,7 @@ try {
     const page = await context.newPage(), errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(base);
-    await page.waitForFunction(() => window.app?.authState.initialized && window.MoveExplanationUI);
+    await page.waitForFunction(() => window.app?.authState?.initialized && window.MoveExplanationUI);
     await page.evaluate(({ pgn, result }) => {
       const app = window.app;
       app.authState.user = { uid: 'qa-explanation', getIdToken: async () => 'isolated' };

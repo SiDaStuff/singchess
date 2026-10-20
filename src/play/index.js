@@ -77,6 +77,7 @@ export class PlayExperience {
       </div>
       <div class="play-history" data-play="history"><section class="card play-active"><div class="card-header"><h2>Active games</h2><button type="button" class="btn-link" data-action="refresh">Refresh</button></div><div data-play="active-list"></div></section><section class="card play-recent"><div class="card-header"><h2>Recent games</h2></div><div data-play="recent-list"></div></section></div>
       <dialog class="play-settings" data-play="settings"><div class="card-header"><h2>Game settings</h2><button type="button" class="icon-button btn-ghost" data-action="close-settings" aria-label="Close settings">${icon('close')}</button></div><div data-play="settings-fields"></div><p class="play-small-note">Hold Shift when promoting to choose a piece with auto-queen enabled. Right-drag to draw an arrow; right-click to mark a square.</p></dialog>`;
+    this.$('lichess-link').href = 'https://lichess.org';
     this.renderSetup(); this.renderAccount(); this.renderHistory();
   }
   message(text, error = false) {
@@ -475,4 +476,11 @@ export class PlayExperience {
   destroy() { this.closeStreams(); clearInterval(this.refreshTimer); this.clocks.destroy(); this.board.destroy(); }
 }
 
-document.addEventListener('DOMContentLoaded', () => { const root = document.getElementById('play-page'); if (root && window.app) new PlayExperience(window.app, root); });
+export function mountPlay(app = window.app) {
+  const root = document.getElementById('play-page');
+  if (root && app && !window.Play) {
+    new PlayExperience(app, root);
+    window.dispatchEvent(new CustomEvent('play:ready'));
+  }
+  return window.Play;
+}

@@ -1,6 +1,7 @@
 import { DEFAULTS, QOL_KEY, normalizePreferences, readJson, writeJson, exportPreferences, importPreferences, studyKey, classifyReview, matchingMoves, nextMistake, schedulePuzzle, annotatedPgn } from './qol-state.js';
 import { TIME_CONTROLS } from '../play/state.js';
 import './quality-of-life.css';
+import { onReady } from './ready.js';
 
 const $ = selector => document.querySelector(selector);
 const el = (tag, text, attributes = {}) => {
@@ -474,13 +475,16 @@ export function installQualityOfLife(app) {
   window.addEventListener('play:fair-play', () => { backToGame.hidden = !blocked(); updateReviewTools(); });
   wrap(app, '_applyPlayFairPlay', original => (...args) => { const result = original(...args); backToGame.hidden = !blocked(); if (blocked()) $('#coach-position-preview')?.close(); updateReviewTools(); return result; });
   installPlayExtras();
+  window.addEventListener('play:ready', () => { installPlayExtras(); applyPreferences(); });
   function installPlayExtras() {
-    const play = window.Play; if (!play) return;
+    const play = window.Play; if (!play || play.qolInstalled) return;
+    play.qolInstalled = true;
+    wrap(play.board.renderer, 'flip', original => (...args) => { const value = original(...args); writeJson('sidastuff.orientation.play', play.board.renderer.flipped); return value; });
     wrap(play.board, 'setOrientation', original => color => { const remembered = readJson('sidastuff.orientation.play'); return original(typeof remembered === 'boolean' ? remembered ? 'black' : 'white' : color); });
     const mute = button('Mute', () => save({ sounds: !state.preferences.sounds }), 'Mute game sounds (M)'); mute.dataset.qolMute = '';
     play.root.querySelector('.play-board-toolbar > div')?.prepend(mute);
     const latency = el('span', '', { class: 'qol-health', 'aria-label': 'Last request round trip' }); play.root.querySelector('.play-board-toolbar')?.append(latency);
-    const fallback = el('a', 'Open on Lichess', { class: 'btn btn-secondary btn-small', target: '_blank', rel: 'noopener noreferrer', hidden: '' }); play.root.querySelector('.play-board-toolbar')?.append(fallback);
+    const fallback = el('a', 'Open on Lichess', { href: 'https://lichess.org', class: 'btn btn-secondary btn-small', target: '_blank', rel: 'noopener noreferrer', hidden: '' }); play.root.querySelector('.play-board-toolbar')?.append(fallback);
     const previousRequest = play.api.request.bind(play.api);
     play.api.request = async (...args) => {
       const startedAt = performance.now();
@@ -568,4 +572,4 @@ export function installQualityOfLife(app) {
   window.QualityOfLife = { save, applyPreferences, tell, preferences: () => ({ ...state.preferences }), restoreDraft, reviewDuePuzzle, openPalette, updateReviewTools, syncPreferences, scope };
 }
 
-document.addEventListener('DOMContentLoaded', () => { if (window.app) installQualityOfLife(window.app); });
+onReady(() => { if (window.app) installQualityOfLife(window.app); });

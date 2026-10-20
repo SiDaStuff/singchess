@@ -1,6 +1,7 @@
+import { onReady } from './ready.js';
 // Email/password forms share the same keyboard behavior as native forms,
 // while the existing controller continues to own validation and requests.
-document.addEventListener('DOMContentLoaded', () => {
+onReady(() => {
   const groups = [
     [['login-email', 'login-password'], 'btn-login-submit'],
     [['signup-username', 'signup-email', 'signup-password'], 'btn-signup-submit'],

@@ -30,7 +30,7 @@ try {
     const page = await context.newPage(), errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(base);
-    await page.waitForFunction(() => window.app?.authState.initialized);
+    await page.waitForFunction(() => window.app?.authState?.initialized);
     await page.evaluate(() => window.app._renderNotificationPanel([{ id: 'generic', type: 'auto_review', title: 'Notification', body: 'Alice vs Bob', read: false }], 1));
     check(await page.locator('.notification-item-title').innerText() === 'Game review ready', `${width}: generic notification titles are replaced with useful text`);
     await page.evaluate(() => window.app._navigateTo('/settings'));

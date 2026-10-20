@@ -1,0 +1,20 @@
+# Sing Chess
+
+> Sing Chess provides chess game review, puzzles, a chess Coach, and online Play through a connected Lichess account.
+
+Browser reviews and puzzles can be used without an account. Sign-in is required for saved account progress and Lichess Play. Analysis and coaching are paused during active online games. Ratings and move classifications are estimates; imported provider ratings and reviewed-game statistics have different scopes.
+
+## Guide
+
+- [Using Sing Chess](https://chess.singdevelopments.com/docs/chess-guide.md): Review a PGN, practice puzzles, and navigate the connected Play workflow.
+
+## Policies
+
+- [Privacy policy](https://chess.singdevelopments.com/privacy.md): Data, storage, connected accounts, and user choices.
+- [Terms of service](https://chess.singdevelopments.com/terms.md): Accounts, acceptable use, fair play, and connected services.
+
+## Website
+
+- [Home](https://chess.singdevelopments.com/): Import a game or open the sample game.
+- [Plans](https://chess.singdevelopments.com/plans): Current plan features and allowances.
+- [Contact](https://chess.singdevelopments.com/contact): Support and account-data requests.

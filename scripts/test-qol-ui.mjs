@@ -18,6 +18,8 @@ try {
     });
     const page = await context.newPage(), errors = []; page.setDefaultTimeout(8000); page.on('pageerror', error => errors.push(error.message)); page.on('dialog', dialog => dialog.accept());
     await page.goto(base + '/review'); await page.waitForFunction(() => window.QualityOfLife && window.app.authState.initialized);
+    await page.evaluate(() => window.app._navigateTo('/play'));
+    await page.waitForFunction(() => window.Play?.board);
     await page.evaluate(() => { window.app._requestLiveEvaluation = async () => {}; window.app._navigateTo('/review', { skipImport: true }); });
     await page.keyboard.press('Control+k');
     check(await page.locator('#qol-command-palette').isVisible(), `${width}: keyboard command palette opens`);

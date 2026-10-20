@@ -1,6 +1,7 @@
 import { readJson, writeJson } from './qol-state.js';
 import { journeyOffer, journeySteps, offerDismissed } from './journey-state.js';
 import './training-journey.css';
+import { onReady } from './ready.js';
 
 const create = (tag, text, className) => {
   const node = document.createElement(tag);
@@ -54,7 +55,7 @@ export function installTrainingJourney(app) {
     writeJson(progressKey(), { ...progress(), [key]: true }); schedule();
   }
   function price(tier) {
-    const card = document.querySelector(`.plan-tier-${tier?.toLowerCase()}`);
+    const card = (window.RoutePages?.find('page-boost') || document).querySelector(`.plan-tier-${tier?.toLowerCase()}`);
     return [card?.querySelector('.amount')?.textContent, card?.querySelector('.period')?.textContent].filter(Boolean).join('');
   }
   function renderOffer(host, offer, dismissible = true) {
@@ -150,4 +151,4 @@ export function installTrainingJourney(app) {
   render();
 }
 
-document.addEventListener('DOMContentLoaded', () => { if (window.app) installTrainingJourney(window.app); });
+onReady(() => { if (window.app) installTrainingJourney(window.app); });

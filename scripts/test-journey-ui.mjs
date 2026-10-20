@@ -20,7 +20,7 @@ try {
     });
     const page = await context.newPage(), errors = []; page.setDefaultTimeout(8000);
     page.on('pageerror', error => errors.push(error.message)); page.on('dialog', dialog => dialog.accept());
-    await page.goto(base); await page.waitForFunction(() => window.app?.authState.initialized && document.querySelector('#training-journey-home:not([hidden])'));
+    await page.goto(base); await page.waitForFunction(() => window.app?.authState?.initialized && document.querySelector('#training-journey-home:not([hidden])'));
     check((await page.locator('.sidebar-upgrade').getAttribute('href')).includes('/signup?'), `${width}: guests get signup before upgrade in the sidebar`);
     check(await page.locator('#training-journey-home').getByRole('link', { name: 'Create free account' }).isVisible(), `${width}: home explains the free account benefits`);
     if (width === 390) await page.screenshot({ path: 'artifacts/journey/guest-home.png', fullPage: true });
