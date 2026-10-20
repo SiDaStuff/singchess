@@ -32,9 +32,25 @@
     }
   </script>
   <script>
+    // The early inline shell runs before the bundled Trusted Types policy.
+    // Use a narrow named policy for the two script-URL sinks it owns.
+    var shellScriptUrlPolicy = window.trustedTypes
+      ? window.trustedTypes.createPolicy('index-script-url', {
+          createScriptURL: function (input) {
+            var url = new URL(input, location.href);
+            if (url.origin === location.origin || url.origin === 'https://www.googletagmanager.com') return url.href;
+            throw new TypeError('Untrusted shell script URL');
+          }
+        })
+      : null;
+  </script>
+  <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function (error) {
+        var serviceWorkerUrl = shellScriptUrlPolicy
+          ? shellScriptUrlPolicy.createScriptURL('/sw.js')
+          : '/sw.js';
+        navigator.serviceWorker.register(serviceWorkerUrl, { scope: '/' }).catch(function (error) {
           console.error('Service worker registration failed:', error);
         });
       }, { once: true });
@@ -52,7 +68,8 @@
       setTimeout(function () {
         var script = document.createElement('script');
         script.async = true;
-        script.src = 'https://www.googletagmanager.com/gtag/js?id=G-TFW7HFWKYP';
+        var analyticsUrl = 'https://www.googletagmanager.com/gtag/js?id=G-TFW7HFWKYP';
+        script.src = shellScriptUrlPolicy ? shellScriptUrlPolicy.createScriptURL(analyticsUrl) : analyticsUrl;
         document.head.appendChild(script);
       }, 10000);
     }, { once: true });
