@@ -89,7 +89,7 @@ export function siteOutputPlugin() {
         `script-src-elem ${hashes.join(' ')} 'sha256-5A3NWzXjNO0S6Fhf43TKDvk4Zo+rKWmsxGnzPlrbBiE=' 'self' https://static.cloudflareinsights.com https://www.googletagmanager.com`,
         "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob: https:", "font-src 'self'",
         `connect-src 'self' ${[...origins].join(' ')} https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://lichess.org https://*.lichess.org https://api.chess.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com https://www.google.com https://www.gstatic.com`,
-        "frame-src https://*.firebaseapp.com https://www.google.com https://www.recaptcha.net https://recaptcha.google.com",
+        "frame-src https://*.firebaseapp.com",
         "worker-src 'self' blob:", "media-src 'self' blob:", "object-src 'none'", "base-uri 'none'",
         "form-action 'self'", "frame-ancestors 'none'",
         "require-trusted-types-for 'script'", "trusted-types default dompurify chess-templates index-script-url goog#html",

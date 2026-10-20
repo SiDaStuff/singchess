@@ -1,19 +1,16 @@
 const { json } = require('./_lib/user-service');
-const { verify: verifyRecaptcha } = require('./_lib/recaptcha');
 
-// POST /api/signup-verify — gate account creation behind a reCAPTCHA check.
+// POST /api/signup-verify — pre-flight check before Firebase account creation.
 //
 // Firebase creates users client-side (firebase.auth().createUserWithEmailAndPassword),
-// so we can't intercept the actual create. We CAN however reject the client
-// before it makes the Firebase call — that's enough to stop commodity bots. A
-// determined attacker who repackages the client can skip this, but the in-memory
-// writeLimit (45/min/IP) mounted in server/index.cjs and reCAPTCHA's scoring
-// still bound their damage.
+// so we can't intercept the actual create. This endpoint still rejects an invalid
+// email before the client makes the Firebase call. Commodity-bot abuse is bound
+// by the in-memory writeLimit (45/min/IP) mounted in server/index.cjs.
 //
 // We deliberately do NOT add a longer-window per-IP bucket here: the
 // rate-limit primitive in firebase-stats is "1 attempt per window per IP"
 // (ETag-based first-claim-wins), which would lock a fat-fingered legit user
-// out for an hour. The combination of writeLimit + reCAPTCHA score is the gate.
+// out for an hour.
 exports.handler = async (event = {}) => {
   try {
     if (event.httpMethod === 'OPTIONS') return json(200, {});
@@ -29,12 +26,6 @@ exports.handler = async (event = {}) => {
     const email = String(payload.email || '').trim().toLowerCase();
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
       return json(400, { error: 'A valid email is required.' });
-    }
-
-    const recaptchaToken = String(payload.recaptchaToken || '');
-    const result = await verifyRecaptcha(recaptchaToken, 'signup');
-    if (!result.ok) {
-      return json(400, { error: 'Captcha verification failed.' });
     }
 
     return json(200, { ok: true });

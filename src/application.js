@@ -33,9 +33,3 @@ export async function loadBoost() {
   if (!boostModule) boostModule = await import('./boost.js');
   return boostModule;
 }
-
-let recaptchaModule;
-export async function loadRecaptcha() {
-  if (!recaptchaModule) recaptchaModule = await import('./recaptcha.js');
-  return recaptchaModule;
-}

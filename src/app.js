@@ -2,7 +2,7 @@
 import { friendlyAuthError, validEmail } from './auth-errors.js';
 import { BoardSounds } from './board-sounds.js';
 import { onReady } from './ui/ready.js';
-import { loadEngine, loadBoost, loadRecaptcha } from './application.js';
+import { loadEngine, loadBoost } from './application.js';
 // Engine catalog data + helpers live in an eager module (not the lazy engine.js
 // chunk) so the constructor can read them synchronously at boot.
 import {
@@ -1751,23 +1751,17 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 	    if (!message || message.length < 5) { set('Please write a short message.', 'error'); return; }
 	    set('Sending…', '');
 	    try {
-	      // reCAPTCHA v3 token — invisible to the user, verified server-side.
-	      // Throws if the site key is missing or Google's script fails to load.
-	      await loadRecaptcha();
-	      const recaptchaToken = await window.recaptchaLib.executeRecaptcha('contact');
 	      const res = await apiFetch('/api/contact', {
 	        method: 'POST', headers: { 'Content-Type': 'application/json' },
-	        body: JSON.stringify({ email, reason, message, recaptchaToken }),
+	        body: JSON.stringify({ email, reason, message }),
 	      });
 	      const data = await res.json().catch(() => ({}));
 	      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
 	      set('Message sent — we\'ll get back to you soon.', 'success');
 	      const msg = document.getElementById('contact-message'); if (msg) msg.value = '';
 	    } catch (err) {
-	      // Distinguish captcha load/exec failures (client-side, no network) from
-	      // server rejection. Both render the same way to the user.
 	      const msg = err?.message || 'Could not send. Try again.';
-	      set(msg.includes('reCAPTCHA') ? 'Captcha unavailable. Please try again in a moment.' : msg, 'error');
+	      set(msg, 'error');
 	    }
 	  }
 
@@ -4533,16 +4527,14 @@ if (this.elAnticheatReportStatus) {
         } else {
           this._setAccountStatus('Verifying…');
         }
-        await loadRecaptcha();
-        const recaptchaToken = await window.recaptchaLib.executeRecaptcha('signup');
         const verifyRes = await apiFetch('/api/signup-verify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, recaptchaToken }),
+          body: JSON.stringify({ email }),
         });
         if (!verifyRes.ok) {
           const verifyData = await verifyRes.json().catch(() => ({}));
-          throw new Error(verifyData.error || `Captcha verification failed (${verifyRes.status}).`);
+          throw new Error(verifyData.error || `Sign-up verification failed (${verifyRes.status}).`);
         }
         credential = await firebase.auth().createUserWithEmailAndPassword(email, password);
 	        this.authState.user = credential.user;
