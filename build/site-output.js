@@ -15,10 +15,6 @@ export function siteOutputPlugin() {
       // emitted bytes, and normalize HTML newlines as the browser does.
       let html = fs.readFileSync(indexPath, 'utf8').replace(/\r\n?/g, '\n');
       const hashes = [];
-      for (const file of fs.readdirSync(path.join(directory, 'assets'))) {
-        if (!file.endsWith('.js')) continue;
-        hashes.push(`'${digest(fs.readFileSync(path.join(directory, 'assets', file)))}'`);
-      }
       // A previous build may have injected an import map. Strip it (and any
       // other import map) so stale hashed entries can't block module loads.
       html = html.replace(/<script type="importmap">[\s\S]*?<\/script>\s*/g, '');
