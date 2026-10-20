@@ -3,6 +3,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 const digest = source => `sha256-${createHash('sha256').update(source).digest('base64')}`;
 
+// External script hosts the app legitimately loads as <script src> elements
+// (auth/CDN/analytics). Kept in sync with src/ui/trusted-types.js scriptHosts.
+// These belong in script-src-elem: strict-dynamic only governs script-src and
+// does NOT cover direct <script src> elements that third-party libs inject
+// (e.g. Google's auth client loading https://apis.google.com/js/api.js).
+const SCRIPT_ELEM_HOSTS = [
+  'https://www.googletagmanager.com',
+  'https://static.cloudflareinsights.com',
+  'https://apis.google.com',
+  'https://www.gstatic.com',
+  'https://www.google.com',
+  'https://singchess-sd.firebaseapp.com',
+].join(' ');
+
 export function siteOutputPlugin() {
   let backend;
   return {
@@ -33,7 +47,7 @@ export function siteOutputPlugin() {
       const scriptHashes = [...new Set(hashes)].join(' ');
       const policy = draft
         .replace(/script-src [^;]+/, `script-src ${scriptHashes} 'sha256-5A3NWzXjNO0S6Fhf43TKDvk4Zo+rKWmsxGnzPlrbBiE=' 'strict-dynamic' 'wasm-unsafe-eval'`)
-        .replace(/script-src-elem [^;]+/, `script-src-elem ${scriptHashes} 'sha256-5A3NWzXjNO0S6Fhf43TKDvk4Zo+rKWmsxGnzPlrbBiE=' 'self' https://static.cloudflareinsights.com https://www.googletagmanager.com`);
+        .replace(/script-src-elem [^;]+/, `script-src-elem ${scriptHashes} 'sha256-5A3NWzXjNO0S6Fhf43TKDvk4Zo+rKWmsxGnzPlrbBiE=' 'self' ${SCRIPT_ELEM_HOSTS}`);
       fs.writeFileSync(indexPath, html);
       fs.writeFileSync(policyPath, JSON.stringify({ policy, workerPolicy }));
       fs.writeFileSync(path.join(directory, '_headers'), `/*\n  Content-Security-Policy: ${policy}\n  Link: </llms.txt>; rel="describedby"; type="text/markdown"\n/src/stockfish.worker.js\n  Content-Security-Policy: ${workerPolicy}\n`);
@@ -82,7 +96,7 @@ export function siteOutputPlugin() {
       const policy = [
         "default-src 'self'",
         `script-src ${hashes.join(' ')} 'sha256-5A3NWzXjNO0S6Fhf43TKDvk4Zo+rKWmsxGnzPlrbBiE=' 'strict-dynamic' 'wasm-unsafe-eval'`,
-        `script-src-elem ${hashes.join(' ')} 'sha256-5A3NWzXjNO0S6Fhf43TKDvk4Zo+rKWmsxGnzPlrbBiE=' 'self' https://static.cloudflareinsights.com https://www.googletagmanager.com`,
+        `script-src-elem ${hashes.join(' ')} 'sha256-5A3NWzXjNO0S6Fhf43TKDvk4Zo+rKWmsxGnzPlrbBiE=' 'self' ${SCRIPT_ELEM_HOSTS}`,
         "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob: https:", "font-src 'self'",
         `connect-src 'self' ${[...origins].join(' ')} https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://lichess.org https://*.lichess.org https://api.chess.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com https://www.google.com https://www.gstatic.com`,
         "frame-src https://*.firebaseapp.com",
