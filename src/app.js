@@ -6184,7 +6184,6 @@ if (this.elBtnAnticheatRefresh) {
   _closeDialog(overlay) {
     if (!overlay) return;
     this._dialogStack = this._dialogStack.filter((el) => el !== overlay);
-    overlay.setAttribute('aria-hidden', 'true');
     if (this._dialogStack.length === 0) {
       // Last dialog closed — give the background back to assistive tech.
       // inert must clear BEFORE restoring focus to the opener: an inert
@@ -6200,6 +6199,12 @@ if (this.elBtnAnticheatRefresh) {
     if (typeof opener?.focus === 'function') {
       try { opener.focus(); } catch (_) {}
     }
+    // Move focus out before hiding the dialog. Otherwise Chrome rejects
+    // aria-hidden when the close button still owns focus.
+    if (overlay.contains(document.activeElement)) {
+      try { document.activeElement.blur(); } catch (_) {}
+    }
+    overlay.setAttribute('aria-hidden', 'true');
   }
 
   _closeTopDialog() {
@@ -8929,6 +8934,19 @@ _showPuzzleSuccessOverlay() {
       });
       results.appendChild(button);
     }
+    // Bring the freshly-rendered game list into view (inside the modal or on
+    // the page) so the user immediately sees pickable games. block:'nearest'
+    // scrolls only the minimal distance and never animates, so already-visible
+    // results leave the page exactly where it was.
+    requestAnimationFrame(() => {
+      const rect = results.getBoundingClientRect();
+      const modal = results.closest('.modal');
+      const viewTop = modal ? modal.getBoundingClientRect().top : 0;
+      const viewBottom = modal ? modal.getBoundingClientRect().bottom : window.innerHeight;
+      if (rect.bottom > viewBottom || rect.top < viewTop) {
+        results.scrollIntoView({ block: 'nearest' });
+      }
+    });
   }
 
   _resultLabel(result) {

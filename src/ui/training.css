@@ -33,7 +33,7 @@
 .notification-item-delete .material-symbols-outlined { font-size: 15px; }
 .notification-item-delete:hover { color: var(--clr-blunder); }
 .notification-empty { font-size: 12px; color: var(--text-muted); padding: 6px 8px; }
-.import-results { display: grid; gap: 7px; max-height: 390px; overflow: auto; }
+.import-results { display: grid; gap: 7px; max-height: 390px; overflow: auto; scroll-margin-top: calc(var(--header-h) + 12px); }
 .import-result { width: 100%; text-align: left; display: flex; align-items: center; gap: 10px; background: var(--bg-muted); border: 1px solid var(--border-soft); border-radius: 6px; padding: 12px; color: var(--text-primary); }
 .import-result:hover { border-color: var(--accent); }
 .import-result-badge { font: 10px var(--font-mono); background: var(--bg-elevated); border-radius: 4px; padding: 5px; flex-shrink: 0; }

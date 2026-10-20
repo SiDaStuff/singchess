@@ -393,6 +393,13 @@ export function installQualityOfLife(app) {
   }
   wrap(app, '_enterReviewMode', original => (...args) => { const value = original(...args); restoreWorkspace(state.reviewSession); return value; });
   wrap(app, '_enterPuzzleMode', original => async (...args) => { await original(...args); restoreWorkspace(state.puzzleSession, true); });
+  // Fresh navigation should never drop the user mid-page: a cross-page move
+  // scrolls to the top (or a #hash anchor) so the destination never paints at
+  // a stale scroll offset, same-page re-navigation keeps the current position,
+  // and only browser Back/Forward restores a remembered scroll position.
+  // Capture phase runs before app.js's own popstate handler so the flag is set
+  // by the time it calls _applyRoute.
+  window.addEventListener('popstate', () => { state.historyNavigation = true; }, true);
   wrap(app, '_applyRoute', original => (path, options = {}) => {
     saveDraft();
     if (state.route === '/review' && !app.puzzleMode.active) state.reviewSession = snapshotWorkspace();
@@ -400,10 +407,31 @@ export function installQualityOfLife(app) {
     scrolls[state.route] = window.scrollY; writeJson('sidastuff.routeScrolls', scrolls);
     if (path === '/review' && state.reviewSession) options = { ...options, skipImport: true };
     if (path !== '/review' || options.skipImport) app._hidePgnModal();
+    const previousRoute = state.route;
+    const fromHistory = state.historyNavigation === true;
+    state.historyNavigation = false;
+    // Position the viewport before the new page paints so there is no
+    // intermediate flash of the destination at the old scroll offset. Browsers
+    // clamp so a shorter page can never restore into the middle/void.
+    if (fromHistory) window.scrollTo(0, scrolls[location.pathname] || 0);
+    else if (!app._isSameRoute(previousRoute, location.pathname)) window.scrollTo(0, 0);
     const value = original(path, options); state.route = location.pathname;
     writeJson('sidastuff.lastPage', state.route);
     document.body.classList.remove('qol-focus'); exitFocus.hidden = true;
-    requestAnimationFrame(() => { window.scrollTo(0, scrolls[state.route] || 0); updateReviewTools(); restoreOrientation(); });
+    requestAnimationFrame(() => {
+      // Honor deep links like /settings#settings-analysis after the section
+      // exists in the DOM. Pure same-page hash clicks are handled natively.
+      if (!fromHistory) {
+        const hash = location.hash;
+        if (hash && hash.length > 1) {
+          try {
+            const anchor = document.querySelector(hash);
+            if (anchor) { anchor.scrollIntoView({ block: 'start' }); updateReviewTools(); restoreOrientation(); return; }
+          } catch (_) {}
+        }
+      }
+      updateReviewTools(); restoreOrientation();
+    });
     return value;
   });
   wrap(app, '_navigateTo', original => (path, options = {}) => {
