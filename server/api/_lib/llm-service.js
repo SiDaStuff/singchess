@@ -1,29 +1,33 @@
 // Unified LLM service for the AI Coach.
 //
 // Inference runs on NVIDIA ONLY. There is no Fast/Strong tier anymore — the
-// feature set was simplified to a single model, with a cheap fallback:
+// feature set was simplified to a single model:
 //
-//   model list = [ nvidia/nemotron-3-ultra-550b-a55b, openai/gpt-oss-120b, openai/gpt-oss-20b ]
+//   model list = [ nvidia/nemotron-3-ultra-550b-a55b ]
 //
-// chatCompletion tries the list in order. If a model is unavailable (quota
-// exhausted, rate-limited, or any error), it falls through to the next model
-// so the coach keeps answering. All models are OpenAI-compatible; no adapter
-// is needed.
+// chatCompletion tries the list in order. (The former gpt-oss-120b/20b
+// fallbacks reached end-of-life on NVIDIA NIM in Sept 2026 — every call
+// returned HTTP 410 "Gone" — so they were removed. Additional models can be
+// supplied via NVIDIA_MODELS env.) All models are OpenAI-compatible.
 //
-// API keys live ONLY on the server (process.env.NVIDIA_API_KEY) and never reach
-// the browser.
+// `reasoning: false` (chatCompletion opt) disables the model's built-in
+// chain-of-thought via chat_template_kwargs.thinking=false. Nemotron 3 is a
+// thinking hybrid: without the switch it renders its reasoning as output
+// tokens, which for short-explanation endpoints (coach-overview.js with a 700
+// max-token cap) means the budget is exhausted mid-thought and the user sees
+// the raw chain of thought instead of the answer.
 
 const { fetchCompat } = require('./fetch-compat');
 
 const NVIDIA_BASE_URL = process.env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1';
 
-// Ordered model fallback list. Nemotron Ultra is primary; GPT-OSS models are
-// fallbacks when it is unavailable.
+// Ordered model list. Nemotron Ultra is the only default (the former gpt-oss
+// fallbacks were removed — they return HTTP 410 "end of life" since Sept 2026).
 // The first configured, non-empty entry wins per-run (all listed are tried in
 // order until one succeeds).
 function nvidiaModelList() {
   const fromEnv = String(process.env.NVIDIA_MODELS || '').split(',').map((m) => m.trim()).filter(Boolean);
-  const defaults = ['nvidia/nemotron-3-ultra-550b-a55b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+  const defaults = ['nvidia/nemotron-3-ultra-550b-a55b'];
   return fromEnv.length ? fromEnv : defaults;
 }
 
@@ -32,10 +36,19 @@ function keySet(name) { return !!String(process.env[name] || '').trim(); }
 // ── OpenAI-shape helpers ─────────────────────────────────────────
 
 // Build the OpenAI request body (used by the OpenAI providers directly).
-function buildOpenAIBody({ messages, tools, toolChoice, model, stream, maxTokens, temperature }) {
+// `opts.reasoning === false` disables the model's chain-of-thought so the token
+// budget goes to the answer (see chatCompletion's contract below).
+function buildOpenAIBody({ messages, tools, toolChoice, model, stream, maxTokens, temperature, reasoning }) {
   const body = { model, messages, stream: !!stream };
   if (typeof temperature === 'number') body.temperature = temperature;
   if (typeof maxTokens === 'number') body.max_tokens = maxTokens;
+  if (reasoning === false) {
+    // Nemotron 3 (thinking hybrid) renders its chain of thought as output
+    // tokens unless the template flag is off. Without this, a short-explanation
+    // call (coach overview) burned the whole max_tokens budget on "Wait, let me
+    // parse the FEN…" and the user saw raw reasoning instead of an answer.
+    body.chat_template_kwargs = { ...(body.chat_template_kwargs || {}), thinking: false };
+  }
   if (Array.isArray(tools) && tools.length) {
     body.tools = tools;
     body.tool_choice = toolChoice || 'auto';
@@ -170,6 +183,11 @@ async function callNvidia({ opts, model }) {
     err.code = 'llm_not_configured';
     throw err;
   }
+  // Unknown/legacy models reject chat_template_kwargs with 400. Only send the
+  // thinking switch when the model is known to support it (or unknown-but-new
+  // nemotron-3+ family); everything else falls back to prompt-only control.
+  const wantsNoThinking = opts.reasoning === false
+    && (process.env.NVIDIA_NO_THINKING === '1' || /nemotron-(3|4)/i.test(model));
   const res = await fetchCompat(`${NVIDIA_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -177,7 +195,7 @@ async function callNvidia({ opts, model }) {
       'Content-Type': 'application/json',
       Accept: opts.stream ? 'text/event-stream' : 'application/json',
     },
-    body: JSON.stringify(buildOpenAIBody({ ...opts, model })),
+    body: JSON.stringify(buildOpenAIBody({ ...opts, model, reasoning: wantsNoThinking ? false : undefined })),
     // Headers timeout only — guards against a hung connect/DNS that would
     // otherwise park the coach SSE forever (the stream stall watchdog only
     // starts once response headers arrive). Streaming reads are not cut off;
@@ -217,11 +235,12 @@ function isRetryable(err) {
   return sc === 429 || (sc >= 500 && sc <= 599);
 }
 
-// chatCompletion tries each model in nvidiaModelList() in order (120b first,
-// then 20b). Goal is SPEED: on a quota-exhaustion/rate-limit error from a model
-// we fail over to the next model IMMEDIATELY (no retry backoff on the one that
-// is out) so the user isn't stuck waiting while 120b restarts. `opts.model` is
-// accepted for back-compat but IGNORED — the model list fully governs.
+// chatCompletion tries each model in nvidiaModelList() in order. Goal is SPEED:
+// on a quota-exhaustion/rate-limit error from a model we fail over to the next
+// model IMMEDIATELY (no retry backoff on the one that is out).
+// `opts.model` is accepted for back-compat but IGNORED — the model list fully
+// governs. When `opts.reasoning === false`, each call additionally disables the
+// model's built-in chain-of-thought (see buildOpenAIBody).
 async function chatCompletion(opts) {
   if (!keySet('NVIDIA_API_KEY')) {
     const err = new Error('No LLM provider configured (set NVIDIA_API_KEY).');

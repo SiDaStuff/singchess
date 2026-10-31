@@ -408,6 +408,11 @@ exports.streamHandler = async (req, res) => {
       stream: true,
       maxTokens,
       temperature: 0.4,
+      // Short-explanation endpoint: the token budget must go to the answer, not
+      // the model's chain of thought. Without this, the thinking-hybrid primary
+      // model spends ~1100 tokens re-parsing the FEN ("Wait, there's a
+      // discrepancy…") and the raw reasoning is what the user sees.
+      reasoning: false,
     });
 
     let assistantText = '';

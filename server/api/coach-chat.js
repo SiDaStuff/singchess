@@ -501,7 +501,11 @@ async function runConversation({ res, llmMessages, user, context, tokenUsage, ou
   let roundReasoning = '';
   llmMessages.push({ role: 'system', content: 'Answer the user now in plain prose using the information you already have. Do not call any more tools.' });
   const finalRes = await llm.chatCompletion({
+    // Final answer turn: no tools remain, so the budget must go to prose.
+    // reasoning:false keeps the thinking-hybrid model from burning tokens on a
+    // silent chain of thought the user never sees.
     messages: llmMessages, stream: true, temperature: 0.4, maxTokens: nextBudget(),
+    reasoning: false,
   });
   onModel?.(finalRes.__singChessModel);
   const finalStream = await llm.streamDeltas(finalRes, emit, {
