@@ -17,6 +17,19 @@ const SCRIPT_ELEM_HOSTS = [
   'https://singchess-sd.firebaseapp.com',
 ].join(' ');
 
+// `blob:` is required in the DOCUMENT script-src-elem, not just the worker
+// policy. Netlify combines every matching `_headers` rule into one response
+// header (it cannot unset a header for a single path), so /src/stockfish.worker.js
+// is served with the document policy AND the worker policy, and browsers enforce
+// the intersection. The worker loads its patched Stockfish glue through
+// importScripts(blob:) (see src/stockfish.worker.js), so without blob: here the
+// engine init is blocked on Netlify with "This document requires
+// 'TrustedScriptURL' assignment" / "script ... violates script-src-elem".
+// This does not meaningfully widen the document's attack surface: a blob: URL
+// can only be minted by JavaScript that is already running, and script.src
+// still requires a TrustedScriptURL under require-trusted-types-for 'script'.
+const SCRIPT_ELEM_BLOB = 'blob:';
+
 export function siteOutputPlugin() {
   let backend;
   return {
@@ -47,7 +60,7 @@ export function siteOutputPlugin() {
       const scriptHashes = [...new Set(hashes)].join(' ');
       const policy = draft
         .replace(/script-src [^;]+/, `script-src ${scriptHashes} 'sha256-5A3NWzXjNO0S6Fhf43TKDvk4Zo+rKWmsxGnzPlrbBiE=' 'strict-dynamic' 'wasm-unsafe-eval'`)
-        .replace(/script-src-elem [^;]+/, `script-src-elem ${scriptHashes} 'sha256-5A3NWzXjNO0S6Fhf43TKDvk4Zo+rKWmsxGnzPlrbBiE=' 'self' ${SCRIPT_ELEM_HOSTS}`);
+        .replace(/script-src-elem [^;]+/, `script-src-elem ${scriptHashes} 'sha256-5A3NWzXjNO0S6Fhf43TKDvk4Zo+rKWmsxGnzPlrbBiE=' 'self' ${SCRIPT_ELEM_BLOB} ${SCRIPT_ELEM_HOSTS}`);
       fs.writeFileSync(indexPath, html);
       fs.writeFileSync(policyPath, JSON.stringify({ policy, workerPolicy }));
       fs.writeFileSync(path.join(directory, '_headers'), `/*\n  Content-Security-Policy: ${policy}\n  Link: </llms.txt>; rel="describedby"; type="text/markdown"\n/src/stockfish.worker.js\n  Content-Security-Policy: ${workerPolicy}\n`);
@@ -96,7 +109,7 @@ export function siteOutputPlugin() {
       const policy = [
         "default-src 'self'",
         `script-src ${hashes.join(' ')} 'sha256-5A3NWzXjNO0S6Fhf43TKDvk4Zo+rKWmsxGnzPlrbBiE=' 'strict-dynamic' 'wasm-unsafe-eval'`,
-        `script-src-elem ${hashes.join(' ')} 'sha256-5A3NWzXjNO0S6Fhf43TKDvk4Zo+rKWmsxGnzPlrbBiE=' 'self' ${SCRIPT_ELEM_HOSTS}`,
+        `script-src-elem ${hashes.join(' ')} 'sha256-5A3NWzXjNO0S6Fhf43TKDvk4Zo+rKWmsxGnzPlrbBiE=' 'self' ${SCRIPT_ELEM_BLOB} ${SCRIPT_ELEM_HOSTS}`,
         "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob: https:", "font-src 'self'",
         `connect-src 'self' ${[...origins].join(' ')} https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://lichess.org https://*.lichess.org https://api.chess.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com https://www.google.com https://www.gstatic.com`,
         "frame-src https://*.firebaseapp.com",

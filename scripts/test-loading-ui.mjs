@@ -22,7 +22,13 @@ try {
     const inlined = await page.locator('link[data-inline-css]').evaluateAll(nodes => nodes.map(node => node.href));
     check(!requests.some(url => inlined.includes(url)), `${width}: inlined critical CSS is not downloaded again`);
     check(!requests.some(url => /\/pieces\/(celtic|fantasy|merida|spatial)\//.test(url)), `${width}: hidden appearance previews do not download other piece sets`);
-    check(response.headers()['content-security-policy']?.includes("'strict-dynamic'"), `${width}: strict CSP is served`);
+    const csp = response.headers()['content-security-policy'] || '';
+    check(csp.includes("'strict-dynamic'"), `${width}: strict CSP is served`);
+    // Netlify combines every matching _headers rule into one response header,
+    // so /src/stockfish.worker.js is also governed by this document policy. The
+    // worker loads its patched Stockfish glue via importScripts(blob:), so blob:
+    // must be present here or engine init fails on the deployed site.
+    check(/script-src-elem [^;]*\bblob:/.test(csp), `${width}: document CSP permits the engine worker's blob script`);
     check(await page.evaluate(() => {
       const node = document.createElement('div');
       node.innerHTML = '<img src="/assets/icon.svg" onerror="alert(1)"><script>alert(1)</script>';
