@@ -1442,6 +1442,7 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		      if (this.coachChat.active) this._renderCoachGate();
 		    } else if (name === 'auth' && this.elAuthPagePanel) {
 		      this.elAuthPagePanel.hidden = false;
+		      this._prepareSpaAuthPage();
 		      this._bindSpaAuthPageEvents();
 	    } else if (name === 'privacy' && this.elPrivacyPage) {
 	      this.elPrivacyPage.hidden = false;
@@ -1949,6 +1950,28 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		    if (signupBtn && !signupBtn.dataset.spaBound) {
 		      signupBtn.addEventListener('click', () => this._navigateTo('/signup'));
 		      signupBtn.dataset.spaBound = '1';
+		    }
+		  }
+
+		  // The reset page has two modes driven by the URL: the normal "send me a
+		  // reset email" form, and the "choose a new password" form Firebase links
+		  // to (/auth?mode=resetPassword&oobCode=...). The new-password inputs are
+		  // display:none in the template — show them (and relabel the submit
+		  // button) only when a valid reset code is present, so the reset link
+		  // actually works instead of failing on empty fields.
+		  _prepareSpaAuthPage() {
+		    const params = new URLSearchParams(window.location.search);
+		    const resetMode = params.get('mode') === 'resetPassword' && params.get('oobCode');
+		    const area = this.elSpaResetNewPasswordArea;
+		    const resetBtn = document.getElementById('btn-reset-password');
+		    if (area) area.style.display = resetMode ? '' : 'none';
+		    if (resetBtn) resetBtn.textContent = resetMode ? 'Update password' : 'Send reset link';
+		    if (resetMode) {
+		      // Prefill the email that owned the reset link when Firebase
+		      // included it, to reduce typos.
+		      const email = params.get('email');
+		      if (this.elSpaResetEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '')) this.elSpaResetEmail.value = email;
+		      this.elSpaResetNewPassword?.focus();
 		    }
 		  }
 

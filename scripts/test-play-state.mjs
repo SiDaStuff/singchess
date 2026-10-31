@@ -22,4 +22,12 @@ await consumeNdjson(response, event => events.push(event)); assert.equal(events.
 const sseEvents = [];
 await consumeSse(new Response(': keep-alive\n\ndata: {"type":"gameState","moves":"e2e4"}\n\n'), event => sseEvents.push(event));
 assert.equal(sseEvents.length, 1); assert.equal(sseEvents[0].moves, 'e2e4');
-console.log('PASS Play control restrictions, authoritative replay/castling/promotion, terminal results, real PGN round-trip and split NDJSON streaming');
+// Activity tracking: consumeSse/consumeNdjson touch activity.at when bytes
+// arrive, letting the caller detect a silently-dropped (half-open) stream.
+const activity = { at: 0 };
+await consumeSse(new Response(': keep-alive\n\n'), () => {}, null, activity);
+assert.notEqual(activity.at, 0, 'activity.at should be updated by heartbeat bytes');
+const ndActivity = { at: 0 };
+await consumeNdjson(new Response('{"type":"ping"}\n'), () => {}, null, ndActivity);
+assert.notEqual(ndActivity.at, 0, 'activity.at should be updated by NDJSON bytes');
+console.log('PASS Play control restrictions, authoritative replay/castling/promotion, terminal results, real PGN round-trip, split NDJSON streaming and stream activity tracking');

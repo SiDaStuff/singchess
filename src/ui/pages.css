@@ -45,6 +45,20 @@
 #page-auth .standalone-actions .btn:not(:first-child) { flex: 1; font-size: .8rem; }
 #reset-new-password-area .field { margin-top: 18px; }
 
+/* Account-help welcome (reset password): chess-first intro art beside the
+   form on wide screens, story-only on small screens. Scoped to #page-auth so
+   the login/signup single-column forms keep their focused layout. */
+#page-auth { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, .96fr); align-items: center; gap: clamp(32px, 6vw, 88px); width: min(1040px, 100%); padding-block: 28px; }
+#page-auth .auth-intro .auth-story-heading { margin: 16px 0 20px; color: var(--text-primary); font-size: clamp(2.15rem, 4vw, 3.4rem); font-weight: 600; letter-spacing: -.055em; line-height: 1.1; }
+#page-auth .auth-intro > p:not(.auth-story-heading) { color: var(--text-secondary); line-height: 1.8; font-size: .95rem; max-width: 39ch; }
+.auth-scene { display: flex; align-items: flex-end; gap: 24px; margin-top: 36px; }
+.auth-scene-board { display: grid; grid-template-columns: repeat(4, 1fr); width: 224px; aspect-ratio: 1; flex: 0 0 auto; overflow: hidden; border-radius: 8px; background: var(--sq-light); box-shadow: var(--shadow-sm); }
+.auth-scene-board > span { display: grid; place-items: center; background: var(--sq-light); aspect-ratio: 1; }
+.auth-scene-board > span:nth-child(8n + 2), .auth-scene-board > span:nth-child(8n + 4),
+.auth-scene-board > span:nth-child(8n + 5), .auth-scene-board > span:nth-child(8n + 7) { background: var(--sq-dark); }
+.auth-scene-board img { width: 85%; height: 85%; object-fit: contain; }
+.auth-scene-caption { color: var(--text-muted); font-size: .74rem; line-height: 1.7; max-width: 100px; padding-bottom: 4px; }
+
 /* Onboarding and native selection controls. */
 .onboarding-page { width: min(900px, 100%); margin-inline: auto; }
 .onboarding-card { width: 100%; padding: clamp(24px, 4vw, 44px); }
@@ -317,6 +331,24 @@
 .coach-more-panel .coach-action-row { align-items: flex-start; flex-direction: column; gap: 7px; }
 .coach-more-panel .coach-action-label { margin-bottom: 2px; }
 .coach-more-panel .coach-action-btn { width: 100%; justify-content: flex-start; }
+
+/* Coach setup modal (SweetAlert form) content: the difficulty segments, color
+   cards and adjust row share the app's pill/chip design language. */
+.swal-form-grid { display: grid; gap: 14px; min-width: 0; text-align: left; }
+.coach-difficulty-segments { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.coach-color-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.coach-seg, .coach-color-grid > .radio-card { position: relative; display: flex; min-width: 0; cursor: pointer; }
+.coach-seg input, .coach-color-grid > .radio-card input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.coach-seg span, .coach-color-grid > .radio-card span { display: flex; align-items: center; justify-content: center; width: 100%; padding: 9px 6px; min-height: 36px; border-radius: 6px; font-size: 12px; color: var(--text-secondary); background: var(--bg-muted); border: 1px solid var(--border-color); transition: background .15s, border-color .15s, color .15s; }
+.coach-seg:hover span, .coach-color-grid > .radio-card:hover span { border-color: var(--text-muted); }
+.coach-seg input:checked + span, .coach-color-grid > .radio-card input:checked + span { color: var(--accent); background: var(--surface-selected); border-color: var(--accent); }
+.coach-seg input:focus-visible + span, .coach-color-grid > .radio-card input:focus-visible + span { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.coach-adjust-toggle { border-top: 1px solid var(--border-soft); padding-top: 12px; }
+.coach-adjust-style-field { min-width: 0; }
+.coach-adjust-style-field select { width: 100%; }
+@media (max-width: 380px) {
+  .coach-difficulty-segments { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .coach-chat-locked { display: grid; gap: 16px; flex: 1; align-content: center; justify-items: center; text-align: center; padding: 35px 25px; }
 .coach-locked-icon { font-size: 32px; color: var(--accent); }
 .coach-chat-locked h2 { font-size: 1.7rem; margin: 0; letter-spacing: -.04em; }
@@ -403,7 +435,10 @@
   .plan-tier { padding-inline: 20px; }
 }
 @media (max-width: 800px) {
-  .auth-page { grid-template-columns: minmax(0, 1fr); max-width: 500px; gap: 26px; padding-block: 8px; }
+  #page-auth { grid-template-columns: minmax(0, 1fr); width: min(500px, 100%); gap: 26px; padding-block: 8px; }
+  #page-auth .auth-intro .auth-story-heading { margin: 10px 0 12px; font-size: 2.5rem; }
+  #page-auth .auth-intro > p:not(.auth-story-heading) { display: none; }
+  #page-auth .auth-scene { display: none; }
   .settings-workspace { grid-template-columns: minmax(0, 1fr); gap: 18px; }
   .settings-nav { position: static; display: flex; gap: 7px; overflow-x: auto; padding-bottom: 8px; }
   .settings-nav a { flex: 0 0 auto; padding: 10px 12px; border: 1px solid var(--border-color); font-size: .77rem; }
@@ -424,6 +459,7 @@
   .page-card-head { gap: 10px; margin-bottom: 25px; }
   .page-card-head h1 { font-size: 1.8rem; }
   .page-card-head p { font-size: .84rem; }
+  #page-auth .auth-intro .auth-story-heading { font-size: 2rem; }
   .onboard-appearance-grid { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .onboarding-card { padding: 23px 18px; }
   .settings-section { padding: 22px 18px; }
@@ -458,8 +494,8 @@
   .coach-identity { gap: 9px; }
   .coach-identity h1 { font-size: .93rem; }
   .coach-coming-soon { max-width: 125px; font-size: .68rem; }
-  .coach-page .coach-card-header { align-items: flex-start; gap: 10px; }
-  .coach-chat-header-actions { max-width: 100%; gap: 5px; }
+  .coach-page .coach-card-header { align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+  .coach-chat-header-actions { width: 100%; max-width: 100%; justify-content: flex-start; gap: 5px; }
   .coach-more-menu { flex: 1 1 100%; }
   .coach-more-panel { position: static; width: 100%; min-width: 0; margin-top: 8px; box-shadow: none; }
   .coach-action-btn { min-height: 32px; padding: 5px 9px; font-size: .72rem; }

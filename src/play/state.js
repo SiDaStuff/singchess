@@ -47,13 +47,14 @@ export function completedPgn(full, state) {
   const pgn = chess.pgn();
   return chess.history().length ? pgn : pgn.replace(/\r?\n(?=(?:1-0|0-1|1\/2-1\/2|\*)\s*$)/, '\n\n');
 }
-export async function consumeNdjson(response, onEvent, signal) {
+export async function consumeNdjson(response, onEvent, signal, activity = null) {
   if (!response.body) throw new Error('Live streaming is unavailable in this browser.');
   const reader = response.body.getReader(), decoder = new TextDecoder();
   let buffer = '';
   try {
     while (!signal?.aborted) {
       const { value, done } = await reader.read();
+      if (activity) activity.at = Date.now();
       buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
       let index;
       while ((index = buffer.indexOf('\n')) >= 0) {
@@ -66,13 +67,18 @@ export async function consumeNdjson(response, onEvent, signal) {
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
 
-export async function consumeSse(response, onEvent, signal) {
+export async function consumeSse(response, onEvent, signal, activity = null) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   while (true) {
     if (signal?.aborted) { await reader.cancel(); return; }
     const { value, done } = await reader.read();
+    // The server emits a `: keep-alive` comment every 15s, so bytes (even a
+    // comment) are a reliable liveness signal — a half-open connection that
+    // drops without an error event stops producing them. activity.at lets the
+    // caller abort and reconnect instead of hanging forever.
+    if (activity) activity.at = Date.now();
     buffer += decoder.decode(value || new Uint8Array(), { stream: !done }).replace(/\r\n/g, '\n');
     if (buffer.length > 1048576) throw new Error('The live game response exceeded its safe size.');
     let boundary;

@@ -10,6 +10,8 @@ function write(res, event) {
   if (res.writableLength > 262144) { res.destroy(); return; }
   // SSE comments keep proxies and browsers from buffering an otherwise idle
   // game. Named messages are unnecessary: every payload has its own type.
+  // Track the last write per subscriber so idle-close can be activity-based.
+  res._playLastWrite = Date.now();
   res.write(event == null ? ': keep-alive\n\n' : `data: ${JSON.stringify(event)}\n\n`);
 }
 async function readNDJSON(body, onEvent, onHeartbeat = () => {}) {
@@ -36,12 +38,27 @@ class PlayStreamHub {
   }
   subscribe(req, res) {
     clearTimeout(this.idle); streamHeaders(res); this.listeners.add(res);
+    res._playLastWrite = Date.now();
     if (this.full) write(res, this.full);
     if (this.ready) write(res, { type: 'connection', status: 'connected' });
-    const lifetime = setTimeout(() => res.end(), 25 * 60000); lifetime.unref?.();
+    // No hard end-of-life for a healthy subscriber: games regularly run past
+    // 25 minutes, and ending the browser connection mid-game forced a visible
+    // reconnect blip. Instead idle-close only when THIS subscriber has had
+    // nothing written to it for 25 minutes (the 15s hub heartbeats reset it).
+    const idleKeep = setInterval(() => {
+      if (res.writableEnded || res.destroyed) { clearInterval(idleKeep); return; }
+      if (Date.now() - (res._playLastWrite || Date.now()) > 25 * 60000) res.end();
+    }, 60000);
+    idleKeep.unref?.();
     res.once('close', () => {
-      clearTimeout(lifetime); this.listeners.delete(res);
-      if (!this.listeners.size) { this.idle = setTimeout(() => this.stop(), 5000); this.idle.unref?.(); }
+      clearInterval(idleKeep); this.listeners.delete(res);
+      if (!this.listeners.size) {
+        // Keep a LIVE game's provider stream alive a while after the last tab
+        // disconnects: the client reconnects within ~1s (backoff after that),
+        // and dropping the Lichess stream makes it re-fetch gameFull on return.
+        this.idle = setTimeout(() => this.stop(), this.channel.startsWith('game:') ? 30000 : 5000);
+        this.idle.unref?.();
+      }
     });
     if (!this.running) this.running = this.run();
   }

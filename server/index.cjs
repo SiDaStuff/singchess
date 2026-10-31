@@ -442,7 +442,15 @@ if (serveStatic) {
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
             if (builtPolicy) {
               const hash = require('node:crypto').createHash('sha256').update(apiConfigScript.slice(8, -9)).digest('base64');
-              res.setHeader('Content-Security-Policy', builtPolicy.replace('script-src ', `script-src 'sha256-${hash}' `));
+              // The policy contains BOTH script-src and script-src-elem (CSP3
+              // applies script-src-elem to <script> elements). Adding the hash
+              // to script-src alone leaves the injected config script blocked
+              // with a "violates ... script-src-elem" console error, which also
+              // takes down the page's API config on every protected route.
+              const withHash = builtPolicy
+                .replace('script-src ', `script-src 'sha256-${hash}' `)
+                .replace('script-src-elem ', `script-src-elem 'sha256-${hash}' `);
+              res.setHeader('Content-Security-Policy', withHash);
             }
             return res.send(cachedIndexHtml);
           } catch (err) {

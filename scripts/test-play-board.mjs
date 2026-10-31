@@ -43,7 +43,11 @@ silent.destroy();
 // provider. Delayed old-stream callbacks must never touch a newly selected game.
 const experienceSource = await fs.readFile(new URL('../src/play/index.js', import.meta.url), 'utf8');
 const classSource = experienceSource.slice(experienceSource.indexOf('export class PlayExperience'), experienceSource.indexOf('\nexport function mountPlay')).replace('export class', 'class');
-const Experience = new Function('isFinished', 'INITIAL', `${classSource}; return PlayExperience;`)(isFinished, new (createRequire(import.meta.url)('chess.js').Chess)().fen());
+// Module-scope constants the class methods close over (BASE_DELAY_MS etc.) must
+// be evaluated in the same scope as the sliced class. Extract them from the
+// real source so the test never drifts from the values play/index.js uses.
+const constBlock = [...experienceSource.matchAll(/^const (STREAM_STALL_MS|STALL_CHECK_MS|NEVER_SIGNAL|BASE_DELAY_MS|MAX_RECONNECT_MS) = .*;$/gm)].map(match => match[0]).join('\n');
+const Experience = new Function('isFinished', 'INITIAL', `${constBlock}\n${classSource}; return PlayExperience;`)(isFinished, new (createRequire(import.meta.url)('chess.js').Chess)().fen());
 const experience = Object.create(Experience.prototype), streams = [], jobs = [], frames = [], elements = new Map();
 let stops = 0, orientations = 0;
 experience.$ = name => {
@@ -85,6 +89,11 @@ await Promise.all(jobs);
 check(experience.gameController === null && experience.full.id === 'bbbbbbbb' && experience.state.status === 'mate', 'completed stream releases resources and retains final game data');
 
 const require = createRequire(import.meta.url);
+// Strip ESM imports (including multi-line `import { ... } from '...'` blocks and
+// bare side-effect imports) so module files can run as plain page scripts.
+const stripImports = source => source
+  .replace(/^import\s*['"][^'"]+['"];?\r?\n/gm, '')
+  .replace(/^import\s[\s\S]*?from\s+['"][^'"]+['"];?\r?\n/gm, '');
 const [boardSource, inputSource, prefSource, css, playCss, chessSource] = await Promise.all([
   fs.readFile(new URL('../src/board.js', import.meta.url), 'utf8'),
   fs.readFile(new URL('../src/play/live-game-input.js', import.meta.url), 'utf8'),
@@ -93,6 +102,7 @@ const [boardSource, inputSource, prefSource, css, playCss, chessSource] = await 
   fs.readFile(new URL('../src/play/play.css', import.meta.url), 'utf8'),
   fs.readFile(require.resolve('chess.js'), 'utf8'),
 ]);
+const inputScriptSource = stripImports(inputSource).replace('export class LiveGameInput', 'window.LiveGameInput = class LiveGameInput');
 const browser = await chromium.launch({ headless: true });
 try {
   for (const width of [640, 320]) {
@@ -107,7 +117,7 @@ try {
     await page.addScriptTag({ content: prefSource.replace(/^export /gm, '') });
     await page.addScriptTag({ content: 'window.getPieceSvgUri = piece => `/assets/pieces/cburnett/${piece}.svg`;' });
     await page.addScriptTag({ content: boardSource });
-    await page.addScriptTag({ content: inputSource.replace(/^import .*;\r?\n/gm, '').replace('export class LiveGameInput', 'window.LiveGameInput = class LiveGameInput') });
+    await page.addScriptTag({ content: inputScriptSource });
     await page.evaluate(() => {
       window.moves = []; window.premoves = [];
       window.board = new LiveGameInput(new ChessBoard('board'), { onMove: move => moves.push(move), onPremoveChange: move => premoves.push(move) });

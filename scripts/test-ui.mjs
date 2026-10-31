@@ -349,6 +349,9 @@ try {
         await page.keyboard.press('Escape');
         assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
       }
+      // "Play bot" lives in the collapsed "More" dropdown — open it first so the
+      // button is clickable (it is intentionally not a top-level action).
+      if ((await page.locator('#coach-more-menu').getAttribute('open')) === null) await page.locator('#coach-more-menu summary').click();
       await page.locator('#btn-coach-play-bot').click();
       await page.locator('.swal2-popup').waitFor({ state: 'visible' });
       assert.ok(await page.locator('.swal2-popup').isVisible(), 'Coach setup retains its interactive form');
@@ -361,6 +364,7 @@ try {
 
     if (width === 1440 || width === 390) {
       await check(`${width}px real browser bot reply`, async () => {
+        if ((await page.locator('#coach-more-menu').getAttribute('open')) === null) await page.locator('#coach-more-menu summary').click();
         await page.locator('#btn-coach-play-bot').click();
         await page.locator('.swal2-confirm').click();
         await page.waitForFunction(() => window.app.coachMode.active && window.app.engine?.ready && window.app.gameMoves.length === 0);

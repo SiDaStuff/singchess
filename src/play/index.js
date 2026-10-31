@@ -9,6 +9,16 @@ const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&a
 const icon = name => `<span class="material-symbols-outlined" aria-hidden="true">${name}</span>`;
 const INITIAL = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 const TERMINAL_EVENTS = new Set(['challengeCanceled', 'challengeDeclined']);
+// The server emits a `: keep-alive` comment every 15s on every play stream, so
+// 45s without ANY bytes means the connection died silently (proxy dropped it,
+// half-open TCP, background throttle). Abort the attempt and reconnect.
+const STREAM_STALL_MS = 45000;
+const STALL_CHECK_MS = 5000;
+const NEVER_SIGNAL = { aborted: false, addEventListener() {}, removeEventListener() {} };
+// Reconnect backoff bounds. Start fast so a blip costs ~half a second, cap low
+// enough that a long outage still recovers promptly when the network returns.
+const BASE_DELAY_MS = 500;
+const MAX_RECONNECT_MS = 15000;
 
 export class PlayExperience {
   constructor(app, root) {
@@ -51,6 +61,15 @@ export class PlayExperience {
     window.addEventListener('online', () => { this.reconnectNow(); });
     document.addEventListener('visibilitychange', () => { if (!document.hidden && this.connected) { this.reconnectNow(); this.run(() => this.refresh()); } });
     this.refreshTimer = setInterval(() => { if (!document.hidden && this.connected && (!this.full || isFinished(this.state?.status))) this.run(() => this.refresh()); }, 60000);
+    // Health watchdog: if a game stream ended for any reason while the game is
+    // still live (a 4xx break, a bug, a missed error), restart it so the board
+    // keeps ticking. This is the "backup connection" — the game stream has a
+    // single sunk-cost connection that auto-heals instead of needing a refresh.
+    this.healthTimer = setInterval(() => {
+      if (document.hidden || !this.connected) return;
+      if (!this.full || isFinished(this.state?.status)) return;
+      if (!this.gameController) { this.gameConnection = 'reconnecting'; this.run(() => this.resume(this.full.id)); }
+    }, 15000);
     // Arrow keys browse the move history during a live game. Capture phase wins
     // over the board's square-focus arrows for Left/Right.
     this._playKeydown = event => this.keydown(event);
@@ -274,14 +293,33 @@ export class PlayExperience {
     try { const result = await this.api.post('/challenge', { username, time: this.control.time, increment: this.control.increment, rated: this.rated, color: this.$('friend-color').value }); this.challenge = result.challenge || result; this.$('outgoing').hidden = false; this.$('outgoing').innerHTML = `<p>Challenge sent to <strong>${escape(username)}</strong>.</p><button type="button" class="btn-link" data-action="cancel-search">Cancel challenge</button>`; } finally { this.renderSetup(); }
   }
   async listenEvents() {
-    const controller = new AbortController(); this.eventController = controller; let delay = 1000;
-    while (!controller.signal.aborted && this.connected) {
-      try { await this.api.stream('/events', event => { if (!controller.signal.aborted && this.eventController === controller) this.handleEvent(event); }, { signal: controller.signal }); delay = 1000; }
-      catch (error) { if (controller.signal.aborted) break; if ([401, 403].includes(error.status)) { this.message('Your account connection expired. Connect Lichess again to continue.', true); this.connected = false; this.renderAccount(); break; } delay = error.status === 429 ? Math.max(60000, error.retryAfter * 1000) : Math.min(delay * 2, 30000); }
-      if (this.eventController === controller) this.eventReady = false;
-      if (!controller.signal.aborted) await this.delay(delay, controller.signal);
-    }
-    if (this.eventController === controller) this.eventController = null;
+    const controller = new AbortController(); this.eventController = controller; let delay = BASE_DELAY_MS + Math.random() * BASE_DELAY_MS;
+    try {
+      while (!controller.signal.aborted && this.connected) {
+        // Per-attempt controller: the stall watcher aborts ONLY this attempt,
+        // so the enclosing loop reconnects while the session stays under the
+        // lifecycle of this.eventController (closeStreams etc.).
+        const attempt = new AbortController();
+        const sessionAbort = () => attempt.abort();
+        controller.signal.addEventListener('abort', sessionAbort, { once: true });
+        if (controller.signal.aborted) attempt.abort();
+        const activity = { at: Date.now() };
+        const stopStall = this.watchAttemptStall(attempt, activity);
+        try {
+          await this.api.stream('/events', event => { if (!controller.signal.aborted && this.eventController === controller) this.handleEvent(event); }, { signal: attempt.signal, activity });
+          delay = BASE_DELAY_MS + Math.random() * BASE_DELAY_MS;
+        } catch (error) {
+          if (controller.signal.aborted) break;
+          if ([401, 403].includes(error.status)) { this.message('Your account connection expired. Connect Lichess again to continue.', true); this.connected = false; this.renderAccount(); break; }
+          delay = error.status === 429 ? Math.max(60000, error.retryAfter * 1000) : Math.min(delay * 2 + Math.random() * BASE_DELAY_MS, MAX_RECONNECT_MS);
+        } finally {
+          stopStall();
+          controller.signal.removeEventListener('abort', sessionAbort);
+        }
+        if (this.eventController === controller) this.eventReady = false;
+        if (!controller.signal.aborted) await this.delay(delay, controller.signal);
+      }
+    } finally { if (this.eventController === controller) this.eventController = null; }
   }
   handleEvent(event) {
     if (event.type === 'connection') {
@@ -323,9 +361,15 @@ export class PlayExperience {
     this.$('board-loading').hidden = preserve; this.$('turn').textContent = preserve ? 'Reconnecting…' : 'Connecting…'; this.$('search').hidden = true; this.$('outgoing').hidden = true;
     if (preserve && isFinished(this.state?.status)) this.renderResult(); else this.showGame();
     this.updateConnection();
-    const controller = new AbortController(); this.gameController = controller; this.currentGameId = id; let delay = 1000;
+    const controller = new AbortController(); this.gameController = controller; this.currentGameId = id; let delay = BASE_DELAY_MS + Math.random() * BASE_DELAY_MS;
     this.run(async () => {
       try { while (!controller.signal.aborted && this.gameController === controller) {
+        const attempt = new AbortController();
+        const sessionAbort = () => attempt.abort();
+        controller.signal.addEventListener('abort', sessionAbort, { once: true });
+        if (controller.signal.aborted) attempt.abort();
+        const activity = { at: Date.now() };
+        const stopStall = this.watchAttemptStall(attempt, activity);
         try {
           await this.api.stream(`/game/${id}/stream`, event => {
             if (controller.signal.aborted || this.gameController !== controller) return;
@@ -346,13 +390,16 @@ export class PlayExperience {
               error.status = event.code === 'play_authorization_expired' ? 401 : event.code === 'play_action_forbidden' ? 403 : 400;
               throw error;
             }
-          }, { signal: controller.signal });
+          }, { signal: attempt.signal, activity });
           if (controller.signal.aborted || this.gameController !== controller) break;
-          if (isFinished(this.state?.status)) break; delay = 1000;
+          if (isFinished(this.state?.status)) break; delay = BASE_DELAY_MS + Math.random() * BASE_DELAY_MS;
         } catch (error) {
           if (controller.signal.aborted || this.gameController !== controller) break;
           if ([400, 401, 403, 404, 409].includes(error.status)) { this.message([401, 403].includes(error.status) ? 'Reconnect your Lichess account to resume this game.' : error.message || 'This game is unavailable. Refresh your active games.', true); this.gameConnection = 'disconnected'; this.updateConnection(); this.$('board-loading').hidden = true; break; }
-          delay = error.status === 429 ? Math.max(60000, error.retryAfter * 1000) : Math.min(delay * 2, 30000);
+          delay = error.status === 429 ? Math.max(60000, error.retryAfter * 1000) : Math.min(delay * 2 + Math.random() * BASE_DELAY_MS, MAX_RECONNECT_MS);
+        } finally {
+          stopStall();
+          controller.signal.removeEventListener('abort', sessionAbort);
         }
         if (!controller.signal.aborted && this.gameController === controller) { this.gameConnection = 'reconnecting'; this.board.setPending(true); this.updateConnection(); await this.delay(delay, controller.signal); }
       } } finally { if (this.gameController === controller) this.gameController = null; }
@@ -495,10 +542,26 @@ export class PlayExperience {
     }
   }
   async sendMove(move) {
-    if (!this.full || this.pending || isFinished(this.state?.status) || this.gameConnection !== 'connected') { this.board.setPending(Boolean(this.pending)); return; }
-    const id = this.full.id, ply = this.position.ply, token = { move, ply }; this.pending = token;
+    if (!this.full || this.pending || isFinished(this.state?.status)) { this.board.setPending(Boolean(this.pending)); return; }
+    const id = this.full.id, ply = this.position?.ply;
+    if (ply == null) { this.board.setPending(false); return; }
+    const token = { move, ply }; this.pending = token;
     this.board.showOptimisticMove(move); this.board.setPending(true); this.$('turn').textContent = 'Opponent’s move';
     try {
+      // If the stream briefly dropped, HOLD the move instead of discarding it —
+      // queue it until the connection is back, then submit with a fresh-ply
+      // check so a stale move is never sent.
+      const deadline = Date.now() + MAX_RECONNECT_MS;
+      while (this.gameConnection !== 'connected') {
+        if (this.pending !== token || this.full?.id !== id || isFinished(this.state?.status)) return;
+        if (Date.now() > deadline) throw new Error('The connection dropped and did not recover. Tap the board to try that move again.');
+        const sessionSignal = this.gameController?.signal;
+        // During an active reconnect the session signal is aborted/null — wait
+        // the full tick instead of spinning on an instantly-resolving delay.
+        const signal = sessionSignal && !sessionSignal.aborted ? sessionSignal : NEVER_SIGNAL;
+        await this.delay(300, signal);
+      }
+      if (this.pending !== token || this.full?.id !== id || isFinished(this.state?.status) || this.position.ply !== ply) return;
       await this.api.post(`/game/${id}/move`, { move, ply });
       if (this.pending === token) this.pendingTimer = setTimeout(() => { if (this.pending === token) { this.message('Confirming your move…'); this.gameController?.abort(); this.gameController = null; this.run(() => this.resume(id)); } }, 7000);
     } catch (error) {
@@ -571,6 +634,17 @@ export class PlayExperience {
     this.preferences = { ...this.preferences, [key]: value }; savePlayPreferences(this.preferences); this.board.setPreferences(this.preferences); this.sounds.setPreferences(this.preferences);
   }
   delay(ms, signal) { return new Promise(resolve => { if (signal.aborted) return resolve(); const finish = () => { clearTimeout(timer); signal.removeEventListener('abort', finish); resolve(); }; const timer = setTimeout(finish, ms); signal.addEventListener('abort', finish, { once: true }); }); }
+  // Detect a silently-dead stream: the server heartbeats every 15s, so if no
+  // bytes arrive for STREAM_STALL_MS the connection is gone (browser throttling,
+  // proxy timeout, half-open TCP). Abort only the current attempt so the outer
+  // reconnect loop takes over immediately with a fresh connection.
+  watchAttemptStall(attempt, activity, ms = STREAM_STALL_MS) {
+    const timer = setInterval(() => {
+      if (!attempt.signal.aborted && Date.now() - activity.at > ms) attempt.abort();
+    }, STALL_CHECK_MS);
+    timer.unref?.();
+    return () => clearInterval(timer);
+  }
   async waitForEvents() {
     if (this.eventReady) return;
     if (!this.eventController) this.listenEvents();
@@ -585,7 +659,7 @@ export class PlayExperience {
   }
   reconnectNow() { if (this.full && !isFinished(this.state?.status)) { const id = this.full.id; this.gameController?.abort(); this.gameController = null; this.run(() => this.resume(id)); } }
   closeStreams() { for (const key of ['gameController', 'eventController', 'seekController']) { this[key]?.abort(); this[key] = null; } clearTimeout(this.pendingTimer); clearTimeout(this.noticeTimer); this.message(''); }
-  destroy() { this.closeStreams(); clearInterval(this.refreshTimer); document.removeEventListener('keydown', this._playKeydown, true); this.clocks.destroy(); this.board.destroy(); }
+  destroy() { this.closeStreams(); clearInterval(this.refreshTimer); clearInterval(this.healthTimer); document.removeEventListener('keydown', this._playKeydown, true); this.clocks.destroy(); this.board.destroy(); }
 }
 
 export function mountPlay(app = window.app) {

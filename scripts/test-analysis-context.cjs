@@ -9,7 +9,12 @@ const root = path.resolve(__dirname, '..');
 const appContext = { Chess, console, onReady() {}, window: { Chess }, document: { addEventListener() {}, hidden: false }, setTimeout, clearTimeout };
 vm.createContext(appContext);
 vm.runInContext(fs.readFileSync(path.join(root, 'src/chess-core.js'), 'utf8'), appContext);
-const appSource = fs.readFileSync(path.join(root, 'src/app.js'), 'utf8').replace(/^import .*;\r?\n/gm, '');
+// Strip ESM imports (including multi-line `import { ... } from '...'` blocks and
+// bare side-effect imports) so the file can run as a plain vm script.
+const stripImports = source => source
+  .replace(/^import\s*['"][^'"]+['"];?\r?\n/gm, '')
+  .replace(/^import\s[\s\S]*?from\s+['"][^'"]+['"];?\r?\n/gm, '');
+const appSource = stripImports(fs.readFileSync(path.join(root, 'src/app.js'), 'utf8'));
 vm.runInContext(`${appSource}\nwindow.ChessReviewApp = ChessReviewApp;`, appContext);
 const { MoveAnalyzer, ChessReviewApp } = appContext.window;
 let count = 0;

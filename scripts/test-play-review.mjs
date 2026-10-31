@@ -26,10 +26,15 @@ const response = status => ({ ok: true, json: async () => status });
 await test('guest analysis unlocks only after initial authentication resolves', async () => {
   const { app, guard } = fixture();
   app.authState.initialized = false;
-  assert.equal(await guard.verify(), false);
+  // Before auth resolves the guard cannot be verified, but with no known live
+  // games it must NOT lock the review page (fail-open, reason 'verification').
+  assert.equal(await guard.verify(), true);
+  assert.equal(guard.isBlocked(), false);
+  assert.equal(guard.snapshot().verified, false);
   app.authState.initialized = true;
   assert.equal(await guard.onAuth(), true);
   assert.equal(guard.isBlocked(), false);
+  assert.equal(guard.snapshot().verified, true);
 });
 await test('unfinished game latch survives refresh and signing out', async () => {
   const { guard } = fixture(['abcdefgh']);
@@ -99,8 +104,15 @@ await test('cross-tab game events pause engines before requesting fresh provider
   assert.equal(guard.isBlocked(), true);
 });
 
-const appSource = (await fs.readFile(new URL('../src/app.js', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/gm, '');
-const engineSource = (await fs.readFile(new URL('../src/engine.js', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/gm, '');
+// Strip ESM syntax (multi-line `import { ... } from '...'` blocks, bare
+// side-effect imports, and trailing `export { ... }` lists) so module files can
+// run as plain vm scripts.
+const stripImports = source => source
+  .replace(/^import\s*['"][^'"]+['"];?\r?\n/gm, '')
+  .replace(/^import\s[\s\S]*?from\s+['"][^'"]+['"];?\r?\n/gm, '')
+  .replace(/^export\s*\{[\s\S]*?\};?\r?\n/gm, '');
+const appSource = stripImports(await fs.readFile(new URL('../src/app.js', import.meta.url), 'utf8'));
+const engineSource = stripImports(await fs.readFile(new URL('../src/engine.js', import.meta.url), 'utf8'));
 const bodyClasses = new Set(['play-focus-mode']);
 const host = Object.assign(new EventTarget(), { CustomEvent, location: { pathname: '/play' },
   history: { pushState() {}, replaceState() {} }, __API_BASE: '' });
@@ -112,7 +124,7 @@ vm.runInContext(`${appSource}\nwindow.ChessReviewApp = ChessReviewApp;`, context
 vm.runInContext(engineSource, context);
 const App = host.ChessReviewApp;
 
-await test('Play and OAuth callback are recognized routes with their own page', () => {
+await test('Play and OAuth callback are recognized routes with their own page', async () => {
   const app = Object.create(App.prototype), shown = [], events = [];
   Object.assign(app, { liveEvalToken: 0, liveDepthToken: 0,
     _closeMobileNav() {}, _trackPageView() {}, _stopReviewPlayback() {}, _enterInAppLayout() {},
@@ -121,6 +133,8 @@ await test('Play and OAuth callback are recognized routes with their own page', 
   assert.equal(app._isKnownAppRoute('/play'), true);
   assert.equal(app._isKnownAppRoute('/play/callback'), true);
   app._applyRoute('/play/callback', { skipHistory: true });
+  // The play:route dispatch happens after _applyRoute's internal awaits.
+  await Promise.resolve(); await Promise.resolve(); await new Promise(resolve => setTimeout(resolve, 0));
   assert.deepEqual(shown, ['play']); assert.deepEqual(events, ['/play/callback']);
   app._applyRoute('/settings', { skipHistory: true });
   assert.equal(bodyClasses.has('play-focus-mode'), false);

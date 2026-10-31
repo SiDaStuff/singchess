@@ -54,6 +54,15 @@ try {
     response = { code: 'account_closed', reason: 'Fixture restriction', error: 'Account Closed.' };
     await page.evaluate(() => window.app._loadUserProfile({ uid: 'auth-qa', email: 'qa@example.com' }));
     check(await page.evaluate(() => window.__banCalls === 1), `${width}: actual account restrictions remain enforced`);
+    // Reset-password mode: navigating to /auth?mode=resetPassword&oobCode=...
+    // must reveal the new-password form (and relabel the button).
+    await page.evaluate(() => window.app._navigateTo('/auth?mode=resetPassword&oobCode=fixturecode&email=qa%40example.com'));
+    check(await page.evaluate(() => window.getComputedStyle(window.app.elSpaResetNewPasswordArea).display !== 'none'), `${width}: reset-code mode shows the new-password fields`);
+    check(await page.evaluate(() => document.getElementById('btn-reset-password')?.textContent === 'Update password'), `${width}: reset-code mode relabels the submit button`);
+    check(await page.evaluate(() => window.app.elSpaResetEmail?.value === 'qa@example.com'), `${width}: reset-code mode prefills the owner email`);
+    await page.evaluate(() => window.app._navigateTo('/auth'));
+    check(await page.evaluate(() => window.getComputedStyle(window.app.elSpaResetNewPasswordArea).display === 'none'), `${width}: plain /auth keeps the send-email form`);
+    check(await page.evaluate(() => document.getElementById('btn-reset-password')?.textContent === 'Send reset link'), `${width}: plain /auth keeps the send-email label`);
     check(!errors.length, `${width}: no runtime errors`);
     await context.close();
   }

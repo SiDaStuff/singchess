@@ -18,8 +18,8 @@ export class PlayApi {
     return stream ? response : response.json();
   }
   post(path, body = {}, options = {}) { return this.request(path, { ...options, method: 'POST', body }); }
-  async stream(path, onEvent, { signal, body } = {}) {
+  async stream(path, onEvent, { signal, body, activity } = {}) {
     const response = await this.request(path, { signal, stream: true, ...(body ? { method: 'POST', body } : {}) });
-    return consumeSse(response, onEvent, signal);
+    return consumeSse(response, onEvent, signal, activity);
   }
 }

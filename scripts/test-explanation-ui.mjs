@@ -49,7 +49,7 @@ try {
     const page = await context.newPage(), errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(base);
-    await page.waitForFunction(() => window.app?.authState?.initialized && window.MoveExplanationUI);
+    await page.waitForFunction(() => window.app?.authState?.initialized);
     await page.evaluate(({ pgn, result }) => {
       const app = window.app;
       app.authState.user = { uid: 'qa-explanation', getIdToken: async () => 'isolated' };
@@ -59,6 +59,9 @@ try {
       app._goToMove(result.moveIndex);
       app.elLiveEval.hidden = false;
     }, { pgn, result: rookResult });
+    // MoveExplanationUI loads with the /review teaching chunk — wait for it
+    // after navigating, not on the home page where it hasn't loaded yet.
+    await page.waitForFunction(() => window.MoveExplanationUI);
     const state = () => page.evaluate(() => ({ fen: window.app.chess.fen(), index: window.app.currentMoveIndex, board: window.app.board.position, highlights: window.app.board.highlights, arrows: window.app.board.userArrows, best: window.app.board.bestMoveArrow, history: window.app.chess.history() }));
     const original = await state();
     const reply = page.locator('#insight-coach button').filter({ hasText: /^Rd6$/ }).first();

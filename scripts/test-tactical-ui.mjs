@@ -30,7 +30,7 @@ try {
     const page = await context.newPage(), errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(base);
-    await page.waitForFunction(() => window.app?.authState?.initialized && window.TacticalCoachUI && window.TacticsCoach);
+    await page.waitForFunction(() => window.app?.authState?.initialized);
     await page.evaluate(({ pgn, result }) => {
       const app = window.app;
       app.authState.user = { uid: 'qa-tactical', getIdToken: async () => 'isolated' };
@@ -38,6 +38,8 @@ try {
       app.analysisResults = [{ ...result, classification: window.MoveClassification.BEST }];
       app._goToMove(0); app.elLiveEval.hidden = false;
     }, { pgn, result });
+    // Tactical coach globals load with the /review teaching chunk.
+    await page.waitForFunction(() => window.TacticalCoachUI && window.TacticsCoach);
     const state = () => page.evaluate(() => ({ fen: window.app.chess.fen(), index: window.app.currentMoveIndex,
       history: window.app.chess.history(), interactive: window.app.board.interactive, position: window.app.board.position,
       annotations: window.app.board.coachAnnotations }));
