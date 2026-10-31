@@ -53,10 +53,24 @@ function makeTrustedScriptUrl(url) {
   try {
     if (self.trustedTypes) {
       if (!workerScriptPolicy) {
-        workerScriptPolicy = self.trustedTypes.getPolicy('singchess-worker-script')
-          || (self.trustedTypes.createPolicy && self.trustedTypes.createPolicy('singchess-worker-script', {
+        // Create the policy directly. Chrome's TrustedTypePolicyFactory
+        // getPolicy(name) THROWS a TypeError when no such policy exists, so it
+        // cannot be used to probe for an existing policy — an ignored throw here
+        // used to leave workerScriptPolicy null and pass the raw blob: URL
+        // through to importScripts, which CSP blocks under
+        // require-trusted-types-for 'script'. createPolicy succeeds whenever the
+        // name is allowlisted (it is: `trusted-types ... singchess-worker-script`).
+        try {
+          workerScriptPolicy = self.trustedTypes.createPolicy('singchess-worker-script', {
             createScriptURL: (input) => input,
-          }));
+          });
+        } catch (createErr) {
+          // Duplicate creation throws when a policy with this name already
+          // exists in the worker realm — fall back to retrieving it.
+          if (createErr && /already exists/i.test(String(createErr.message || ''))) {
+            try { workerScriptPolicy = self.trustedTypes.getPolicy('singchess-worker-script'); } catch (_e) { /* remains null */ }
+          }
+        }
       }
       if (workerScriptPolicy) return workerScriptPolicy.createScriptURL(String(url));
     }
