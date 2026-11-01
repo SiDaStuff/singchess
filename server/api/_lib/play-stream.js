@@ -40,7 +40,11 @@ class PlayStreamHub {
     clearTimeout(this.idle); streamHeaders(res); this.listeners.add(res);
     res._playLastWrite = Date.now();
     if (this.full) write(res, this.full);
-    if (this.ready) write(res, { type: 'connection', status: 'connected' });
+    // Tell the client the real hub state. A cached gameFull with NO connection
+    // event used to make fresh subscribers believe the stream was live when the
+    // hub was actually mid-reconnect — their moves then failed with
+    // "Reconnect to synchronize the position" until the next provider event.
+    write(res, { type: 'connection', status: this.ready ? 'connected' : 'reconnecting', retryAfter: 1 });
     // No hard end-of-life for a healthy subscriber: games regularly run past
     // 25 minutes, and ending the browser connection mid-game forced a visible
     // reconnect blip. Instead idle-close only when THIS subscriber has had

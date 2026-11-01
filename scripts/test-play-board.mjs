@@ -65,6 +65,7 @@ experience.api = { stream: (path, onEvent, { signal }) => new Promise((resolve, 
   streams.push({ path, resolve, emit: event => { try { onEvent(event); } catch (error) { reject(error); } } });
   signal.addEventListener('abort', resolve, { once: true });
 }) };
+experience.apiPost = (path, body) => Promise.resolve({ ok: true, path, body });
 experience.full = { id: 'aaaaaaaa' }; experience.state = { status: 'started' };
 const Chess = createRequire(import.meta.url)('chess.js').Chess, retained = new Chess(); retained.move('e4');
 experience.position = { chess: retained, lastMove: 'e2e4' };
@@ -72,6 +73,48 @@ await experience.resume('aaaaaaaa');
 check(experience.full.id === 'aaaaaaaa' && frames.at(-1).fen === retained.fen() && !frames.at(-1).options.interactive && stops === 0, 'reconnecting preserves the last board and running clock estimates');
 streams[0].emit({ type: 'gameFull', white: { id: 'self' }, state: { status: 'started' } });
 check(orientations === 0, 'reconnecting preserves a manually flipped board');
+
+// Move submission resilience: moves submit IMMEDIATELY (no 15s hold loop), a
+// stale-ply 409 triggers one resync+retry, and an unconfirmed move surfaces a
+// visible timeout error instead of hanging an optimistic piece forever.
+{
+  const posts = [];
+  const savedPosition = experience.position;
+  experience.gameConnection = 'reconnecting'; // even a blip must not hold the move
+  experience.pending = null;
+  experience.board = Object.assign(experience.board, { showOptimisticMove: () => true, setPending() {}, restoreAuthoritative() {}, _legalMove: () => true });
+  experience.position = { chess: new Chess(), ply: 4 };
+  experience.full = { id: 'cccccccc' };
+  experience.api.post = async (path, body) => {
+    posts.push({ path, body });
+    if (posts.length === 1) { const error = new Error('The board has changed.'); error.code = 'play_stale_position'; error.status = 409; throw error; }
+    return { ok: true };
+  };
+  let resumed = 0; experience.resume = async () => {
+    resumed++;
+    experience.gameConnection = 'connected';
+    experience.full = { id: 'cccccccc' };
+    experience.state = { status: 'started' };
+    experience.position = { chess: new Chess(), ply: 4 };
+    experience.color = 'white';
+  };
+  await experience.sendMove('d2d4');
+  check(posts.length === 2 && posts[0].body.ply === 4 && posts[1].body.ply === 4, 'stale-ply rejection resyncs and resubmits once without user error');
+  check(resumed >= 1 && experience.lastMessage !== 'The board has changed.', 'stale resync did not surface an error to the player');
+  check(posts[1].body.move === 'd2d4', 'resubmission carries the same intended move');
+  // Fatal rejection (illegal move) is NOT retried — it surfaces immediately.
+  posts.length = 0; resumed = 0; experience.pending = null; experience.position = { chess: new Chess(), ply: 6 };
+  experience.api.post = async () => { posts.push(1); const error = new Error('That move is not legal.'); error.code = 'invalid_move'; error.status = 400; throw error; };
+  await experience.sendMove('e2e4');
+  check(posts.length === 1, 'an invalid move is never retried');
+  clearTimeout(experience.pendingTimer); clearTimeout(experience.pendingTimeoutTimer);
+  experience.pending = null; experience.gameConnection = 'connected';
+  // Restore the shared fixtures my stubs replaced (the later stream-lifecycle
+  // tests drive the REAL resume/api/board).
+  experience.resume = Experience.prototype.resume;
+  experience.api.post = (path, body) => experience.apiPost(path, body);
+  experience.position = savedPosition; experience.full = { id: 'aaaaaaaa' }; experience.state = { status: 'started' };
+}
 await experience.resume('bbbbbbbb');
 streams[0].emit({ type: 'gameFull', white: { id: 'old-player' }, state: { status: 'mate' } });
 check(experience.full === null, 'late full state from an old controller cannot replace a new game');

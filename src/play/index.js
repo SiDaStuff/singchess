@@ -354,7 +354,7 @@ export class PlayExperience {
     if (this.full?.id === id && this.gameController && !this.gameController.signal.aborted) { isFinished(this.state?.status) ? this.renderResult() : this.showGame(); return; }
     const preserve = this.full?.id === id && Boolean(this.position);
     this.gameController?.abort(); this.seekController?.abort(); this.seekController = null; this.challenge = null; this.pending = null;
-    clearTimeout(this.pendingTimer);
+    clearTimeout(this.pendingTimer); clearTimeout(this.pendingTimeoutTimer);
     this.gameConnection = preserve ? 'reconnecting' : 'connecting';
     if (preserve) this.board.setPosition(this.position.chess.fen(), { lastMove: this.position.lastMove, playerColor: this.color, interactive: false, pending: true });
     else { this.full = null; this.state = null; this.position = null; this.replayIndex = null; this._displayFen = null; this.board.setPosition(INITIAL, { interactive: false }); this.clocks.stop(); this.$('moves').replaceChildren(); this.$('replay-bar').hidden = true; }
@@ -409,7 +409,7 @@ export class PlayExperience {
     const previous = this.state, previousPly = this.position?.ply;
     if (previous && ['moves', 'status', 'winner', 'wtime', 'btime', 'wdraw', 'bdraw'].every(key => previous[key] === state[key])) { this.$('board-loading').hidden = true; this.updateConnection(); return; }
     const position = reconstructGame(this.full, state); this.state = state; this.position = position;
-    if (this.pending && (position.ply > this.pending.ply || isFinished(state.status))) { this.pending = null; clearTimeout(this.pendingTimer); }
+    if (this.pending && (position.ply > this.pending.ply || isFinished(state.status))) { this.pending = null; clearTimeout(this.pendingTimer); clearTimeout(this.pendingTimeoutTimer); }
     this.$('board-loading').hidden = true;
     const finished = isFinished(state.status);
     if (!finished && !this.activeGames.some(g => gameId(g) === this.full.id)) { this.activityRevision++; this.activeGames.push({ gameId: this.full.id, color: this.color, opponent: this.full[this.color === 'white' ? 'black' : 'white'] }); window.PlayFairPlay?.setActiveGames(this.activeGames); }
@@ -444,6 +444,22 @@ export class PlayExperience {
   updateConnection() {
     const el = this.$('connection'), connected = this.gameConnection === 'connected';
     el.innerHTML = `<span class="status-dot ${connected ? '' : 'play-dot-offline'}"></span> ${isFinished(this.state?.status) ? 'Game complete' : connected ? 'Connected' : this.gameConnection === 'connecting' ? 'Connecting…' : this.gameConnection === 'disconnected' ? 'Disconnected · resume to reconnect' : 'Reconnecting…'}`;
+    // Visible instability warning: if the game stream keeps dropping while a
+    // live game is running, say so once instead of leaving a flapping status
+    // dot the player will not notice. Recovering cleanly clears it.
+    if (this.full && !isFinished(this.state?.status)) {
+      if (connected && this._unstableSince) {
+        this._unstableSince = null;
+        this._unstableNotice && this.message('');
+      } else if (!connected && !this._unstableSince) {
+        this._unstableSince = Date.now();
+      }
+      if (!connected && this._unstableSince && Date.now() - this._unstableSince > 10000 && !this._unstableNotice) {
+        this._unstableNotice = true;
+        this.message('Your connection to the game is unstable. Moves still submit, but the board may update late. Check your network if this continues.', true);
+      }
+      if (connected) this._unstableNotice = false;
+    }
     // Only re-paint the board when the connection flags actually change — the
     // stream (applyState) already keeps it current, so avoid redundant work
     // every time a gameState or connection event arrives.
@@ -548,27 +564,85 @@ export class PlayExperience {
     const token = { move, ply }; this.pending = token;
     this.board.showOptimisticMove(move); this.board.setPending(true); this.$('turn').textContent = 'Opponent’s move';
     try {
-      // If the stream briefly dropped, HOLD the move instead of discarding it —
-      // queue it until the connection is back, then submit with a fresh-ply
-      // check so a stale move is never sent.
-      const deadline = Date.now() + MAX_RECONNECT_MS;
-      while (this.gameConnection !== 'connected') {
-        if (this.pending !== token || this.full?.id !== id || isFinished(this.state?.status)) return;
-        if (Date.now() > deadline) throw new Error('The connection dropped and did not recover. Tap the board to try that move again.');
-        const sessionSignal = this.gameController?.signal;
-        // During an active reconnect the session signal is aborted/null — wait
-        // the full tick instead of spinning on an instantly-resolving delay.
-        const signal = sessionSignal && !sessionSignal.aborted ? sessionSignal : NEVER_SIGNAL;
-        await this.delay(300, signal);
-      }
-      if (this.pending !== token || this.full?.id !== id || isFinished(this.state?.status) || this.position.ply !== ply) return;
+      // Submit immediately: the server replays the authoritative move list and
+      // rejects a stale ply (409 play_stale_position), and Lichess is the final
+      // legality/turn authority. Holding moves locally during a stream blip
+      // just burned seconds and then failed — the worst of both worlds.
       await this.api.post(`/game/${id}/move`, { move, ply });
-      if (this.pending === token) this.pendingTimer = setTimeout(() => { if (this.pending === token) { this.message('Confirming your move…'); this.gameController?.abort(); this.gameController = null; this.run(() => this.resume(id)); } }, 7000);
+      if (this.pending === token) this.armMoveTimers(id);
     } catch (error) {
       if (this.pending !== token || this.full?.id !== id) return;
+      // A stale-ply rejection usually means the authoritative state arrived
+      // while we were submitting (or our stream is briefly behind). Resync once
+      // and retry the move from the fresh position instead of failing the user.
+      if (error.code === 'play_stale_position' || error.code === 'play_duplicate_move') {
+        this.pending = null;
+        await this.resyncAndRetryMove(id, move);
+        return;
+      }
       // A network failure may follow an accepted move. Fetch a fresh full state before another submission.
-      this.message(error.message, true); this.pending = null; this.board.restoreAuthoritative(); this.gameController?.abort(); this.gameController = null; await this.resume(id);
+      this.message(error.message, true); this.pending = null; this.board.restoreAuthoritative();
+      clearTimeout(this.pendingTimer); clearTimeout(this.pendingTimeoutTimer);
+      this.gameController?.abort(); this.gameController = null; await this.resume(id);
     }
+  }
+
+  // Move-confirmation watchdog: if the server never confirms the submitted ply,
+  // tell the player plainly instead of leaving an optimistic piece hanging.
+  // Stage 1 (7s): one forced resync (the move may have landed without the
+  // stream relaying it). Stage 2 (14s): visible timeout error; the player can
+  // act on the real authoritative position.
+  armMoveTimers(id) {
+    clearTimeout(this.pendingTimer);
+    this.pendingTimer = setTimeout(() => { if (this.pending && this.full?.id === id) { this.message('Confirming your move…'); this.gameController?.abort(); this.gameController = null; this.run(() => this.resume(id)); } }, 7000);
+    clearTimeout(this.pendingTimeoutTimer);
+    this.pendingTimeoutTimer = setTimeout(() => {
+      if (this.pending && this.full?.id === id) {
+        this.pending = null; clearTimeout(this.pendingTimer); clearTimeout(this.pendingTimeoutTimer);
+        this.board.restoreAuthoritative(); this.board.setPending(false);
+        this.message('Your move timed out before the server confirmed it. The board shows the latest position — try again if it is still your turn.', true);
+      }
+    }, 14000);
+  }
+
+  // Resync from a fresh authoritative stream and resubmit a move that was
+  // rejected as stale. Retries once with a hard deadline; every failure path
+  // restores the authoritative board so the player can act on the real position.
+  async resyncAndRetryMove(id, move) {
+    const deadline = Date.now() + 6000;
+    let lastError = null;
+    while (Date.now() < deadline) {
+      this.gameController?.abort(); this.gameController = null;
+      try {
+        await this.resume(id);
+        await new Promise(resolve => {
+          const check = setInterval(() => {
+            if (this.gameConnection === 'connected' && this.full?.id === id && this.position?.ply != null) { clearInterval(check); resolve(); }
+          }, 120);
+          setTimeout(() => { clearInterval(check); resolve(); }, 2500);
+        });
+        if (this.full?.id !== id || isFinished(this.state?.status) || this.pending) return;
+        const ply = this.position?.ply;
+        if (ply == null) return;
+        // The resync may have delivered our move already (server accepted it
+        // before the connection blip) — the optimistic ply check handles that:
+        // only retry when it is still our turn at the same expected ply.
+        const legal = this.position.chess.turn() === this.color[0] && this.board?._legalMove?.(move.slice(0, 2), move.slice(2, 4), move[4]);
+        if (!legal) return;
+        this.pending = { move, ply };
+        this.board.showOptimisticMove(move); this.board.setPending(true);
+        await this.api.post(`/game/${id}/move`, { move, ply });
+        if (this.pending) this.armMoveTimers(id);
+        return;
+      } catch (error) {
+        lastError = error;
+        if ([400, 401, 403].includes(error.status)) break;
+        await this.delay(400, NEVER_SIGNAL);
+      }
+    }
+    if (this.pending || this.full?.id !== id) return;
+    this.message(lastError?.message || 'The move could not be confirmed. Check the board and try again.', true);
+    this.pending = null; clearTimeout(this.pendingTimer); clearTimeout(this.pendingTimeoutTimer); this.board.restoreAuthoritative();
   }
   async gameAction(action) { if (!this.full || isFinished(this.state?.status)) return; await this.api.post(`/game/${this.full.id}/action`, { action }); }
   renderResult() {
@@ -658,7 +732,7 @@ export class PlayExperience {
     this.message('');
   }
   reconnectNow() { if (this.full && !isFinished(this.state?.status)) { const id = this.full.id; this.gameController?.abort(); this.gameController = null; this.run(() => this.resume(id)); } }
-  closeStreams() { for (const key of ['gameController', 'eventController', 'seekController']) { this[key]?.abort(); this[key] = null; } clearTimeout(this.pendingTimer); clearTimeout(this.noticeTimer); this.message(''); }
+  closeStreams() { for (const key of ['gameController', 'eventController', 'seekController']) { this[key]?.abort(); this[key] = null; } clearTimeout(this.pendingTimer); clearTimeout(this.pendingTimeoutTimer); clearTimeout(this.noticeTimer); this.message(''); }
   destroy() { this.closeStreams(); clearInterval(this.refreshTimer); clearInterval(this.healthTimer); document.removeEventListener('keydown', this._playKeydown, true); this.clocks.destroy(); this.board.destroy(); }
 }
 

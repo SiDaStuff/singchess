@@ -510,5 +510,5 @@
 @media (prefers-reduced-motion: reduce) {
   .onboard-wizard-progress-fill, .chip, .select-row-item, .app-switch-track, .app-switch-track::after, .coach-usage-fill { transition: none; }
   .coach-chat-messages { scroll-behavior: auto; }
-  .account-loading::before, .profile-loading::before, .coach-typing-icon, .coach-skeleton-bubble, .coach-bubble.assistant.streaming::after, .skeleton-line::after, .skeleton-shape::after, .coach-skeleton-line::after { animation: none; }
+  .account-loading::before, .profile-loading::before, .coach-typing-icon, .coach-skeleton-bubble, .coach-bubble.assistant.streaming::after, .skeleton-line::after, .skeleton-shape::after, .coach-skeleton-line::after, .insight-content.insight-skeleton::after { animation: none; }
 }

@@ -9587,11 +9587,16 @@ _showPuzzleSuccessOverlay() {
 
   // Debounce the Move Feedback render while the user is ratcheting through
   // moves with the arrow keys: the board updates instantly, the explanation
-  // panel follows once they settle on a move.
+  // panel follows once they settle on a move. While the panel content is
+  // pending, shade it with the skeleton instead of showing the previous move's
+  // explanation (which reads as lag/stale content).
   _scheduleInsights(result) {
     clearTimeout(this._insightsTimer);
     if (!result) { this._renderMoveInsights(null); return; }
     const moveIndex = result.moveIndex;
+    // While the debounced render is pending, shade the panel so a fast
+    // ratchet shows "loading" instead of the previous move's stale feedback.
+    this._showInsightSkeleton();
     this._insightsTimer = setTimeout(() => {
       this._insightsTimer = null;
       if (this.currentMoveIndex === moveIndex) this._renderMoveInsights(result);
@@ -10466,7 +10471,11 @@ _saveGameState() {
 	        line: result.moveSan ? `${result.classification?.name || 'Move'}: ${result.moveSan}` : '',
 	        meta: result.depth ? `Depth ${result.depth}` : '',
 	      });
-	      this._drawEvalGraph();
+	      // Eval graph + move-list highlighting are heavy DOM/canvas work —
+	      // coalesce them to the next frame so rapid arrow navigation never
+	      // queues one full canvas pass per keystroke (see
+	      // _scheduleNavigationPaint).
+	      this._scheduleNavigationPaint();
 	      if (!result.isCoachMove) {
 	        this._applyBestMoveArrow(result, { allowOnQuiet: false });
 	        // Only show badge when we have a real eval and classification
@@ -10498,7 +10507,7 @@ _saveGameState() {
         line: 'Original position loaded. Make a move to start live analysis.',
         meta: '',
       });
-      this._drawEvalGraph();
+      this._scheduleNavigationPaint();
       this.elMoveBadge.style.display = 'none';
       this._renderIdleEngineInfo();
       this._resetInsightPanel();
@@ -10519,6 +10528,7 @@ _saveGameState() {
           meta: '',
         });
       }
+      this._scheduleNavigationPaint();
       this._requestLiveEvaluation(
         index >= 0 ? `Analyzing move ${index + 1}` : 'Analyzing original position...',
         index >= 0 && lastMoveObj ? {
@@ -10531,11 +10541,66 @@ _saveGameState() {
     }
 
 		    this._updateGameStatus();
+		    // Move-list highlighting + indicator/clock text are cheap class
+		    // toggles and text writes — keep them synchronous so keyboard
+		    // navigation feels instant. The heavy work (list rebuild, canvas
+		    // eval graph) is deferred to the next frame instead of running on
+		    // every keystroke.
 		    this._updateActiveMoveInList();
 		    this._updateCurrentMoveIndicator();
 		    this._updateClockDisplays();
 		    if (!this.isAnalyzing) this._saveGameState();
 		  }
+
+  // ---- Progressive per-move loading ---------------------------------------
+  // Navigating between moves used to do ALL of this synchronously on every
+  // arrow-key press: full move-list rebuild (one DOM row per move + sub-line
+  // rows), canvas eval-graph redraw, and the insights panel markdown/teaching
+  // render. On long games that is hundreds of DOM nodes + a canvas pass per
+  // step — the "crazy lag when going through the game". Instead:
+  //
+  // 1. The board/highlights/badge/eval-bar update instantly (what the eye is
+  //    on).
+  // 2. A lightweight skeleton shades the Move Feedback panel while its content
+  //    renders.
+  // 3. The heavy work (move list, eval graph) is coalesced to the next frame
+  //    and skipped entirely if the cursor moved on — the paint that finally
+  //    runs reflects the latest cursor, never a stale intermediate one.
+  // 4. Each stage paints only after the previous stage finished (little by
+  //    little), so one long task never blocks the next keystroke.
+
+  // Coalesce the deferred heavy paints. Multiple rapid arrow presses collapse
+  // into one frame of work.
+  _scheduleNavigationPaint() {
+    this._navPaintQueued = true;
+    if (this._navPaintFrame) return;
+    // requestAnimationFrame when available (snaps to the next paint); fall
+    // back to a 0ms timeout in environments without frames (tests, workers).
+    const schedule = typeof requestAnimationFrame === 'function'
+      ? fn => requestAnimationFrame(fn)
+      : fn => setTimeout(fn, 0);
+    this._navPaintFrame = schedule(() => {
+      this._navPaintFrame = null;
+      if (!this._navPaintQueued) return;
+      this._navPaintQueued = false;
+      this._updateActiveMoveInList();
+      this._drawEvalGraph();
+    });
+  }
+
+  // Shade the Move Feedback panel while its content is still rendering. The
+  // skeleton is a class on the existing container (no layout thrash) using the
+  // app-wide shimmer; _renderMoveInsights clears it when the real content is
+  // in the DOM.
+  _showInsightSkeleton() {
+    if (this.elInsightContent && this.elInsightContent.style.display !== 'none') {
+      this.elInsightContent.classList.add('insight-skeleton');
+    }
+  }
+
+  _clearInsightSkeleton() {
+    if (this.elInsightContent) this.elInsightContent.classList.remove('insight-skeleton');
+  }
 
   _updateEvalGraphHover(idx, clientX) {
     if (!this.elEvalGraphHover || !this.elEvalGraphWrap) return;
@@ -10557,6 +10622,10 @@ _saveGameState() {
   }
 
   _drawEvalGraph() {
+    // Deferred callers (the navigation coalescer) can fire when the panel is
+    // absent — stubbed tests, detached workspace, route transitions. No canvas,
+    // nothing to draw.
+    if (!this.evalGraphCtx || !this.elEvalGraph || !this.elEvalGraph.width) return;
     const ctx = this.evalGraphCtx;
     const w = this.elEvalGraph.width;
     const h = this.elEvalGraph.height;
@@ -12487,6 +12556,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
 
   _renderMoveInsights(result) {
     window.MoveExplanationUI?.clear();
+    this._clearInsightSkeleton();
     if (!result) {
       this._lastInsightKey = null;
       this._resetInsightPanel();
@@ -12502,6 +12572,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
     const key = `${result.moveIndex}:${result.evalAfter}:${result.bestMove || ''}:${result.classificationKey || (result.classification && result.classification.name) || ''}`;
     if (this._lastInsightKey === key) {
       if (this.elMoveInsights) this.elMoveInsights.hidden = false;
+      this._clearInsightSkeleton();
       return;
     }
     this._lastInsightKey = key;
@@ -12509,6 +12580,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
     if (!this.analyzer.matchesExplanationPosition(result, this.chess.fen())) {
       this._resetInsightPanel();
       if (this.elMoveInsights) this.elMoveInsights.hidden = false;
+      this._clearInsightSkeleton();
       if (this.elInsightEmpty) {
         this.elInsightEmpty.style.display = 'block';
         this.elInsightEmpty.textContent = 'Saved analysis does not match this position. Run a fresh review.';
@@ -12519,6 +12591,7 @@ _showMoveBadge(classification, targetSquare, options = {}) {
 
     if (this.elMoveInsights) this.elMoveInsights.hidden = false;
     if (this.elInsightEmpty) this.elInsightEmpty.style.display = 'none';
+    this._clearInsightSkeleton();
 
     // Feature gate: guests see only a teaser (move + classification) with a
     // sign-up prompt; the detailed rows, coach text, Explore Best Move, and Top

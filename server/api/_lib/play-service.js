@@ -50,6 +50,9 @@ class PlayService {
     this.accountActions = new Set();
     this.rateLimitedUntil = 0;
     this.requestTail = Promise.resolve();
+    // How long a move submission waits for a mid-reconnect hub to catch up
+    // before submitting anyway (the ply check still guards staleness).
+    this.moveSyncWaitMs = 1200;
   }
   database() { return this.users.initAdmin().db; }
   async exclusive(uid, action) {
@@ -311,9 +314,23 @@ class PlayService {
     gameId = id(gameId);
     if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(body.move || '') || !Number.isSafeInteger(body.ply) || body.ply < 0 || body.ply > 10000) throw fail(400, 'Provide a legal move and its current move number.', 'invalid_move');
     const connection = await this.connection(uid);
-    const { full, state, syncedAt } = await this.savedGame(uid, gameId);
+    let { full, state, syncedAt } = await this.savedGame(uid, gameId);
     if (FINISHED.has(state.status)) throw fail(409, 'This game has finished.', 'play_game_finished');
-    if (!this.hubs.get(`${uid}:game:${gameId}`)?.ready) throw fail(409, 'Reconnect to synchronize the position.', 'play_state_unavailable');
+    // The live hub is an observation channel, NOT a precondition for moving:
+    // Lichess validates turn and legality authoritatively, and the ply check
+    // below guards against stale snapshots. Give a reconnecting hub a short
+    // window to catch up (its fresh gameFull also unlocks uncertain
+    // reservations), then submit regardless — refusing moves while the stream
+    // blips is what produced constant "Reconnect to synchronize the position"
+    // failures during ordinary play. Re-read the snapshot afterwards so a hub
+    // that caught up during the wait is not judged with pre-wait data.
+    const hub = this.hubs.get(`${uid}:game:${gameId}`);
+    if (hub && !hub.ready && !hub.stopped) {
+      const deadline = Date.now() + this.moveSyncWaitMs;
+      while (!hub.ready && !hub.stopped && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 80));
+      ({ full, state, syncedAt } = await this.savedGame(uid, gameId));
+      if (FINISHED.has(state.status)) throw fail(409, 'This game has finished.', 'play_game_finished');
+    }
     const moves = (state.moves || '').split(' ').filter(Boolean);
     if (moves.length !== body.ply) throw fail(409, 'The board has changed. Synchronize before moving.', 'play_stale_position');
     const chess = full.initialFen && full.initialFen !== 'startpos' ? new Chess(full.initialFen) : new Chess();

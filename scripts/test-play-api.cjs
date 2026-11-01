@@ -165,6 +165,16 @@ async function main() {
   const beforeRetry = providerMoves; const uncertain = await service.value('moves/alice/retry123/0');
   assert.equal(uncertain.status, 'uncertain');
   assert.equal((await api('/game/retry123/move', uncertainMove)).status, 409, 'uncertain outcome cannot be immediately resubmitted');
+  // A mid-reconnect hub must NOT block moves: Lichess is the turn/legality
+  // authority and the ply check guards staleness, so a move submitted while the
+  // stream is briefly down goes through (the old code failed it with 409
+  // "Reconnect to synchronize the position" — the most common play bug).
+  // Scenario A: hub offline but the ply reservation is clean (no uncertain history).
+  await service.observe('alice', 'game:fresh123', { ...full, id: 'fresh123' }, connection);
+  service.hubs.set('alice:game:fresh123', { ready: false, stopped: false, stop() {} });
+  const freshMove = await api('/game/fresh123/move', { method: 'POST', body: { move: 'e2e4', ply: 0 } });
+  assert.equal(freshMove.status, 200, 'a move during a stream reconnect still submits instead of failing with 409');
+  service.hubs.delete('alice:game:fresh123');
   now += 5;
   await service.observe('alice', 'game:retry123', { ...full.state, type: 'gameState' }, connection);
   assert.equal((await api('/game/retry123/move', uncertainMove)).status, 409, 'ordinary gameState/clock correction cannot unlock uncertain request');
@@ -172,7 +182,7 @@ async function main() {
   await service.observe('alice', 'game:retry123', { ...full, id: 'retry123' }, connection);
   const retries = await Promise.all([api('/game/retry123/move', uncertainMove), api('/game/retry123/move', uncertainMove)]);
   assert.deepEqual(retries.map(result => result.status).sort(), [200, 409], 'fresh authoritative gameFull permits one new manual intent');
-  assert.equal(providerMoves, beforeRetry + 1, 'concurrent manual retries reserve a single generation');
+  assert.equal(providerMoves, beforeRetry + 2, 'concurrent manual retries reserve a single generation (reconnect-submit test added one)');
   assert.notEqual((await service.value('moves/alice/retry123/0')).generation, uncertain.generation);
   eventController.close();
   await waitFor(() => reconnects === 2, 'account stream did not reconnect after EOF');

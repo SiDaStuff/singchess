@@ -65,6 +65,9 @@ try {
     const state = () => page.evaluate(() => ({ fen: window.app.chess.fen(), index: window.app.currentMoveIndex, board: window.app.board.position, highlights: window.app.board.highlights, arrows: window.app.board.userArrows, best: window.app.board.bestMoveArrow, history: window.app.chess.history() }));
     const original = await state();
     const reply = page.locator('#insight-coach button').filter({ hasText: /^Rd6$/ }).first();
+    // The initial _goToMove above renders insights on the 120ms progressive-
+    // loading debounce — wait for the reply buttons to be in the DOM.
+    await reply.waitFor({ state: 'visible', timeout: 5000 });
     await reply.hover();
     check(await page.evaluate(() => window.app.elMoveBadge.style.visibility === 'hidden'), `${width}: main move badge is hidden during preview`);
     check(await page.evaluate(() => window.app.board.position.d6 === 'wR' && window.app.board.position.f3 === 'bR'), `${width}: reply hover shows Rd6 after Rf3`);
@@ -112,9 +115,13 @@ try {
       window.app.analysisResults[result.moveIndex] = { ...result, classification: window.MoveClassification.EXCELLENT };
       window.app._goToMove(result.moveIndex);
     }, mateResult);
+    // Insights render on a 120ms debounce (progressive move loading) — wait
+    // for the coach text to actually appear.
+    await page.waitForFunction(() => document.querySelector('#insight-coach')?.innerText?.includes('h1=Q#'), null, { timeout: 5000 }).catch(() => {});
     check(await page.locator('#insight-coach').innerText().then(text => text.includes('h1=Q#') && !text.includes('excellent') && !text.includes('0.00')), `${width}: real Kd1 position has mate explanation`);
     check(await page.locator('#insight-class').innerText().then(text => text.toLowerCase() === 'mate in 1'), `${width}: verified mate threat replaces stale Excellent badge`);
     const mate = page.locator('#insight-coach button').filter({ hasText: /^h1=Q#$/ });
+    await mate.waitFor({ state: 'visible', timeout: 5000 });
     await mate.hover();
     check(await page.evaluate(() => window.app.board.position.h1 === 'bQ' && window.app.board.checkSquare === 'd1' && window.app.board.userArrows.some(a => a.from === 'h1' && a.to === 'd1')), `${width}: checkmate preview shows queen, checked king and attack arrow`);
     check(await page.locator('#explanation-preview-status').innerText().then(text => text.includes('checkmate')), `${width}: checkmate is explicitly announced`);
@@ -126,17 +133,24 @@ try {
       for (const result of [trade, sacrifice]) app.analysisResults[result.moveIndex] = { ...result, classification: window.MoveClassification[result.classificationKey] };
       app._goToMove(trade.moveIndex);
     }, { pgn: operaPgn, trade: operaTrade, sacrifice: operaSacrifice });
+    // Insights render on the 120ms progressive-loading debounce.
+    await page.waitForFunction(() => document.querySelector('#insight-coach')?.innerText?.includes('gain of 2 material points'), null, { timeout: 5000 }).catch(() => {});
     check(await page.locator('#insight-coach').innerText().then(text => text.includes('gain of 2 material points') && !text.includes('resulting position is still worse')), `${width}: Opera trade explains material and continuation`);
     const lineMove = san => page.locator('#insight-coach button').filter({ hasText: new RegExp(`^${san.replace(/[+]/g, '\\+')}$`) }).first();
+    await page.locator('#insight-coach .explanation-variations summary').waitFor({ state: 'visible', timeout: 5000 });
     await page.locator('#insight-coach .explanation-variations summary').click();
     await page.waitForFunction(() => document.querySelector('#insight-coach .explanation-variations p'));
     await lineMove('Bxb5+').hover(); await lineMove('Nbd7').hover(); await lineMove('O-O-O').hover();
     check(await page.evaluate(() => window.app.board.position.c1 === 'wK' && window.app.board.position.d1 === 'wR' && window.app.board.position.d7 === 'bN' && window.app.currentMoveIndex === 19), `${width}: sequential line previews include castling without changing cursor`);
     const queenCapture = page.locator('#insight-coach button').filter({ hasText: /^Bxb4\+$/ }).last();
+    await queenCapture.waitFor({ state: 'visible', timeout: 5000 });
     await queenCapture.hover();
     check(await page.evaluate(() => window.app.board.position.b4 === 'bB'), `${width}: repeated queen-capture reference uses the correct branch`);
     await page.evaluate(() => window.app._goToMove(24));
+    // Progressive-loading debounce: wait for the sacrifice explanation.
+    await page.waitForFunction(() => document.querySelector('#insight-coach')?.innerText?.includes('after Nxd7, Bxe7 captures the queen on e7'), null, { timeout: 5000 }).catch(() => {});
     check(await page.locator('#insight-coach').innerText().then(text => text.includes('after Nxd7, Bxe7 captures the queen on e7') && !text.includes('bait')), `${width}: brilliant sacrifice explains the compensation`);
+    await page.locator('#insight-coach button').filter({ hasText: /^Bxe7$/ }).last().waitFor({ state: 'visible', timeout: 5000 });
     await page.locator('#insight-coach button').filter({ hasText: /^Bxe7$/ }).last().hover();
     check(await page.evaluate(() => window.app.board.position.e7 === 'wB'), `${width}: sacrifice capture explanation identifies the right bishop`);
     await page.mouse.move(0, 0);

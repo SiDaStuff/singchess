@@ -17,6 +17,11 @@
 
 .insight-coach-result, .summary-coach .insight-coach-result { margin-top: 8px; padding: 10px 12px; background: var(--bg-panel); border: 1px solid var(--border-soft); border-radius: 8px; }
 .insight-coach-result[hidden] { display: none; }
+/* Progressive move-loading skeleton: while a move's feedback content is still
+   rendering, shade the panel so the user sees "loading" instead of the previous
+   move's stale explanation. Uses the shared shimmer. */
+.insight-content.insight-skeleton { position: relative; }
+.insight-content.insight-skeleton::after { content: ''; position: absolute; inset: 0; background: var(--bg-panel); opacity: .55; animation: skeleton-sweep 1.05s linear infinite; pointer-events: none; border-radius: 8px; }
 .coach-skeleton { display: flex; flex-direction: column; gap: 8px; }
 /* Base skeleton line used by app._renderSkeletonLines() and static templates.
    Width comes from the --skeleton-width custom property, defaulting to full. */
