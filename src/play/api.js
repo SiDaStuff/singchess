@@ -12,6 +12,7 @@ export class PlayApi {
       const data = await response.json().catch(() => ({}));
       const error = new Error(data.error || (response.status === 429 ? 'Too many requests. Please wait a minute.' : 'Play could not connect. Please try again.'));
       error.status = response.status;
+      error.code = data.code;
       error.retryAfter = Number(response.headers.get('retry-after')) || 60;
       throw error;
     }

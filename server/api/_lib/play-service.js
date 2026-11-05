@@ -2,6 +2,7 @@
 const crypto = require('node:crypto');
 const { Chess } = require('chess.js');
 const users = require('./user-service');
+const liveReview = require('./live-review');
 
 const ORIGIN = 'https://lichess.org';
 const REDIRECT = 'https://chess.singdevelopments.com/play/callback';
@@ -304,6 +305,13 @@ class PlayService {
     }
     const state = event.type === 'gameFull' ? event.state : event.type === 'gameState' ? event : null;
     if (state && FINISHED.has(state.status)) { await this.ref(`active/${uid}`).remove(); await this.ref(`recent/${uid}`).remove(); }
+    // In-progress background review: on every move (and again on completion),
+    // kick an incremental analysis so the review is ready the moment the game
+    // ends. Fire-and-forget — never delays the live game stream.
+    if (state && event.type === 'gameState') {
+      const db = this.database();
+      liveReview.maybeReviewMove({ db, uid, gameId, movesUci: state.moves || '', finished: FINISHED.has(state.status), getProfile: this.users.getProfile }).catch(() => {});
+    }
   }
   async savedGame(uid, gameId) {
     const saved = await this.value(`games/${uid}/${id(gameId)}`);
@@ -362,6 +370,30 @@ class PlayService {
     if (![full.white?.id, full.black?.id].some(value => lower(value) === lower(connection.profile.id))) throw fail(403, 'You can only control your own games.');
     if (FINISHED.has(state.status)) throw fail(409, 'This game has finished.', 'play_game_finished');
     return this.json(`/api/board/game/${id(gameId)}/${actions[body.action]}`, { token: connection.token, method: 'POST' });
+  }
+  // Toggle in-progress background review for a played game. Max-plan only.
+  // Stores the toggle + initial FEN so the live-review hook can analyze moves
+  // as they arrive. Results are locked (ready:false) until the game is over.
+  async setBackgroundReview(uid, gameId, body) {
+    gameId = id(gameId);
+    const profile = await this.users.getProfile(uid);
+    if (!profile || this.users.activePlan(profile).plan !== 'max') throw fail(403, 'Background review requires Max.', 'live_review_plan');
+    const connection = await this.connection(uid);
+    const saved = await this.savedGame(uid, gameId);
+    const { full, state } = saved;
+    // Only the player who owns the game may toggle it.
+    if (![full.white?.id, full.black?.id].some(value => lower(value) === lower(connection.profile.id))) throw fail(403, 'You can only configure your own games.');
+    const enabled = Boolean(body?.enabled);
+    const initialFen = full.initialFen && full.initialFen !== 'startpos' ? full.initialFen : null;
+    await this.database().ref(`liveReviewPrivate/${uid}/${gameId}/meta`).set({ enabled, initialFen, gameId, startedAt: this.now(), ready: FINISHED.has(state.status) && enabled });
+    return { enabled };
+  }
+  // Read the in-progress background review status for a played game.
+  async backgroundReviewStatus(uid, gameId) {
+    gameId = id(gameId);
+    const meta = (await this.database().ref(`liveReviewPrivate/${uid}/${gameId}/meta`).once('value')).val() || {};
+    const seen = (await this.database().ref(`liveReviewPrivate/${uid}/${gameId}/seen`).once('value')).val() || {};
+    return { enabled: Boolean(meta.enabled), ready: Boolean(meta.ready), analyzedPly: Number(seen.analyzedPly) || 0, error: meta.error || null };
   }
   async challenge(uid, body) {
     const { control, rated, color } = validateControl(body, 'challenge');

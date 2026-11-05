@@ -101,7 +101,7 @@ export class LiveGameInput {
   showOptimisticMove(uci) {
     const preview = new Chess(this.fen);
     const move = preview.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), ...(uci[4] ? { promotion: uci[4] } : {}) });
-    if (!move) return false;
+    if (!move) return null;
     this.optimisticFen = preview.fen();
     this.rebuildQueuePosition();
     this.renderer.setChessInstance(preview);
@@ -109,7 +109,7 @@ export class LiveGameInput {
     this.renderer.setPositionFromFen(this.optimisticFen);
     this.lastMove = uci;
     this._paint();
-    return true;
+    return move;
   }
   restoreAuthoritative() {
     if (!this.optimisticFen) return;

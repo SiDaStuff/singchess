@@ -25,7 +25,22 @@ export class PlayExperience {
     this.app = app; this.root = root; this.api = new PlayApi(app);
     this.preferences = loadPlayPreferences(); this.control = TIME_CONTROLS.find(c => c.time === 10 && !c.increment); this.rated = false;
     try { const saved = JSON.parse(localStorage.getItem('sing.play.setup') || '{}'); this.control = TIME_CONTROLS.find(c => c.time === saved.time && c.increment === saved.increment) || this.control; this.rated = saved.rated === true; } catch {}
+    // Background (in-progress) review toggle. Defaults ON for games at least
+    // 5 minutes long, OFF for faster games. Recomputed when the time control
+    // changes until the player overrides it this session.
+    this._backgroundReviewExplicit = false;
+    this.backgroundReview = this._defaultBackgroundReview();
     this.profile = null; this.reviewStats = null; this.activeGames = []; this.recentGames = []; this.connected = false; this.full = null; this.state = null; this.identity = ''; this.sessionVersion = 0; this.activityRevision = 0;
+    // Tracks whether the account/connection status has actually been resolved
+    // (an auth result and an initial /status refresh). Until then the Play page
+    // stays on a neutral "checking…" state instead of flashing premature
+    // "Sign in required" / "Lichess is not connected" / "connect to load recent
+    // games" messages that are only correct after verification or a real error.
+    this.statusVerified = false;
+    // The ply of the player's own move that was already sounded optimistically
+    // (client-side, on submit). applyState skips replaying it so a single move
+    // never double-sounds — once immediately, once on server confirmation.
+    this._soundedOwnPly = -1;
     this.gameController = null; this.eventController = null; this.seekController = null; this.pending = null; this.challenge = null; this.gameConnection = 'connecting'; this.refreshTask = null;
     // Inline replay: replayIndex null = live position; a number = the ply being
     // viewed (0 is the starting position). Arrow keys / clicking a move enter it.
@@ -97,6 +112,7 @@ export class PlayExperience {
             <fieldset class="play-time-controls"><legend>Time control</legend>${['Bullet', 'Blitz', 'Rapid', 'Classical'].map(group => `<div class="play-time-group"><span>${group}</span><div>${TIME_CONTROLS.filter(c => c.group === group).map(c => `<button type="button" data-control="${c.time}+${c.increment}" aria-pressed="false" ${c.mode === 'unavailable' ? 'disabled title="Bullet is unavailable"' : ''}>${c.time}<small> + ${c.increment}</small></button>`).join('')}</div></div>`).join('')}</fieldset>
             <p class="play-control-note" data-play="control-note"></p>
             <div class="play-rated" role="group" aria-label="Game type"><button type="button" data-rated="false">Casual</button><button type="button" data-rated="true">Rated</button></div>
+            <label class="checkbox-row play-background-review"><input type="checkbox" data-play="background-review"><span><strong>Review as I play</strong><small>Analyze each move in the background so the review is ready the moment the game ends. <em>Max</em>.</small></span></label>
             <button type="button" class="btn btn-primary play-start" data-play="start" data-action="start">${icon('play_arrow')} <span data-play="start-label">Find match</span><span data-play="start-control">10 + 0</span></button>
             <div class="play-search" data-play="search" hidden><span class="spinner"></span><div><strong data-play="search-title">Finding your game</strong><small data-play="search-detail"></small></div><button type="button" class="btn btn-ghost btn-small" data-action="cancel-search">Cancel</button></div>
             <details class="play-friend" data-play="friend"><summary>Challenge a friend</summary><form data-play="friend-form"><label class="field"><span class="field-label">Lichess username</span><input class="input-select" data-play="friend-name" autocomplete="off" maxlength="30" pattern="[A-Za-z0-9_-]{2,30}" placeholder="Your friend’s username" required></label><label class="field"><span class="field-label">Your pieces</span><select class="input-select" data-play="friend-color"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></label><button type="submit" class="btn btn-secondary" data-play="challenge-button">Send challenge</button></form><div data-play="outgoing" class="play-outgoing" hidden></div></details>
@@ -144,7 +160,10 @@ export class PlayExperience {
   }
   authChanged() {
     const next = this.app.authState.user?.uid || '';
-    if (next === this.identity) { this.renderAccount(); return; }
+    // Once auth has actually initialized, treat this as a verified final state
+    // (whether signed in or out) even when the identity uid is unchanged.
+    if (this.app.authState?.initialized) this.statusVerified = true;
+    if (next === this.identity) { this.renderAccount(); this.renderHistory(); return; }
     this.identity = next; this.sessionVersion++; this.closeStreams(); this.refreshTask = null; this.profile = null; this.connected = false; this.activeGames = []; this.recentGames = []; this.full = null; this.state = null; this.pending = null; this.completionData = {};
     this.board?.setPosition(INITIAL, { interactive: false, playerColor: 'white' }); this.clocks?.stop(); this.eventReady = false; this.showLobby(); this.renderAccount(); this.renderHistory();
     if (next && location.pathname.startsWith('/play')) this.run(() => this.route());
@@ -162,6 +181,9 @@ export class PlayExperience {
         window.PlayFairPlay?.observeStatus?.(data);
         if (!window.PlayFairPlay?.observeStatus) window.PlayFairPlay?.setActiveGames(this.activeGames);
       }
+      // A successful status refresh means the connection verdict is final —
+      // surface the real account/game state now.
+      this.statusVerified = true;
       this.renderAccount(); this.renderHistory();
       if (data.connected && location.pathname.startsWith('/play') && !this.eventController) this.listenEvents();
       if (!data.connected) { this.eventController?.abort(); this.eventController = null; }
@@ -169,7 +191,9 @@ export class PlayExperience {
       if (version === this.sessionVersion && [401, 403].includes(error.status)) {
         this.connected = false; this.eventController?.abort(); this.eventController = null; this.eventReady = false; this.gameConnection = 'disconnected';
         if (this.full && !isFinished(this.state?.status)) { this.board.setPosition(this.position.chess.fen(), { interactive: false, pending: true }); this.updateConnection(); }
-        this.renderAccount();
+        // An auth error is a definitive disconnected verdict — surface it.
+        this.statusVerified = true;
+        this.renderAccount(); this.renderHistory();
       }
       throw error;
     }).finally(() => { if (version === this.sessionVersion) this.refreshTask = null; });
@@ -177,6 +201,15 @@ export class PlayExperience {
   }
   renderAccount() {
     const el = this.$('account');
+    // Before we've resolved auth + the first status check, show a neutral
+    // "checking…" state instead of premature sign-in / connect / error copy.
+    // Only surface those once verification has settled or a real error exists.
+    if (!this.statusVerified) {
+      const authPending = !this.app.authState?.initialized;
+      el.innerHTML = `<div><strong>${authPending ? 'Checking your account…' : 'Connecting to Lichess…'}</strong><p>Verifying your online connection, one moment.</p></div><span class="spinner"></span>`;
+      this.renderSetup();
+      return;
+    }
     if (!this.app.authState.user) el.innerHTML = `<div><strong>Sign in required</strong><p>Sign in before connecting Lichess.</p></div><a class="btn btn-secondary btn-small" href="/login" data-route="/login">Sign in</a>`;
     else if (!this.connected) el.innerHTML = `<div><strong>Lichess is not connected</strong><p>Connect your account to play online.</p></div><button type="button" class="btn btn-secondary btn-small" data-action="connect">Connect Lichess</button>`;
     else {
@@ -201,11 +234,28 @@ export class PlayExperience {
     this.$('start-label').textContent = this.control.mode === 'challenge' ? 'Challenge a friend' : 'Find match';
     this.$('start').disabled = Boolean(this.seekController || this.challenge || this.control.mode === 'unavailable');
     this.$('challenge-button').disabled = Boolean(!this.connected || this.seekController || this.challenge || this.control.mode === 'unavailable');
+    // Background review checkbox: reflect the session value. If the player has
+    // not toggled it manually, recompute the default from the selected time
+    // control (on for ≥5 min games, off for faster ones).
+    if (!this._backgroundReviewExplicit) this.backgroundReview = this._defaultBackgroundReview();
+    const bg = this.$('background-review');
+    if (bg) bg.checked = this.backgroundReview;
     if (!this.full || isFinished(this.state?.status) && !this.$('lobby').hidden) this.clocks?.sync({ white: this.control.time * 60000, black: this.control.time * 60000, running: null });
   }
   renderHistory() {
+    // Don't claim there are no games / "connect to view" until the status has
+    // actually been verified — flash-free on load.
+    if (!this.statusVerified) {
+      this.$('active-list').innerHTML = `<p class="play-empty">Checking…</p>`;
+      this.$('recent-list').innerHTML = `<p class="play-empty">Checking…</p>`;
+      return;
+    }
     this.$('active-list').innerHTML = this.activeGames.length ? this.activeGames.map(game => `<button type="button" class="play-game-row" data-resume="${escape(gameId(game))}"><span class="play-active-dot"></span><span><strong>vs ${escape(game.opponent?.username || game.opponent?.name || 'Opponent')}</strong><small>${escape(game.speed || game.perf || 'Online game')} · ${game.isMyTurn ? 'Your move' : 'In progress'}</small></span><span class="play-resume-label">Resume ${icon('arrow_forward')}</span></button>`).join('') : `<p class="play-empty">${this.connected ? 'No active games.' : 'Connect Lichess to view active games.'}</p>`;
-    const records = this.recentGames.length ? this.recentGames : this.savedGames();
+    // Recent games come only from the server (fresh on load) — never fall back
+    // to the localStorage snapshot, so a just-finished game is never hidden
+    // by a stale cached list. The localStorage record is still used when an
+    // actual PGN must be read to open a specific game for review.
+    const records = this.recentGames;
     this.$('recent-list').innerHTML = records.length ? records.slice(0, 8).map(game => {
       const white = game.players?.white || game.white, black = game.players?.black || game.black;
       const whiteName = white?.user?.name || white?.name || white?.username || (typeof white === 'string' ? white : 'White');
@@ -218,6 +268,22 @@ export class PlayExperience {
     }).join('') : `<p class="play-empty">${this.connected ? 'No completed games yet. Start a game above.' : 'Connect Lichess to load recent games.'}</p>`;
   }
   saveSetup() { try { localStorage.setItem('sing.play.setup', JSON.stringify({ time: this.control.time, increment: this.control.increment, rated: this.rated })); } catch {} }
+  // Default for the background review toggle: ON for games at least 5 minutes
+  // long, OFF for faster games (bullet/blitz-style controls).
+  _defaultBackgroundReview() {
+    const t = Number(this.control?.time) || 0;
+    return t >= 5;
+  }
+  // Tell the server to review this game in the background as moves are played
+  // (or to skip it), on the first time we load each game. Errors are silent —
+  // a failed toggle just means no background review for that game.
+  _configureBackgroundReview(gameId, initialFen) {
+    if (!gameId || !this.app.authState.user) return;
+    this._bgReviewedGames ||= new Set();
+    if (this._bgReviewedGames.has(gameId)) return;
+    this._bgReviewedGames.add(gameId);
+    this.run(() => this.api.post(`/game/${encodeURIComponent(gameId)}/background-review`, { enabled: this.backgroundReview, initialFen })).catch(() => {});
+  }
   async click(event) {
     const control = event.target.closest('[data-control]');
     if (control && !control.disabled && !this.seekController && !this.challenge) { this.control = TIME_CONTROLS.find(c => `${c.time}+${c.increment}` === control.dataset.control); this.saveSetup(); this.renderSetup(); return; }
@@ -277,7 +343,21 @@ export class PlayExperience {
     const controller = new AbortController(); this.seekController = controller; this.message('');
     this.$('search').hidden = false; this.$('search-title').textContent = 'Finding your game'; this.$('search-detail').textContent = `${this.control.time} + ${this.control.increment} · ${this.rated ? 'Rated' : 'Casual'} ${this.control.group}`; this.renderSetup();
     try {
-      await this.api.stream('/seek', event => { if (event.type === 'error' || event.error) throw new Error(event.error || 'Matchmaking stopped. Please try again.'); if (event.game) this.handleEvent({ type: 'gameStart', game: event.game }); }, { signal: controller.signal, body: { time: this.control.time, increment: this.control.increment, rated: this.rated, color: 'random' } });
+      // The server may reject a seek that lands before the live event hub is
+      // quietly ready ('play_events_required'). Rather than forcing a manual
+      // reload, re-wait for the event stream and retry a couple of times
+      // before surfacing the error.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await this.api.stream('/seek', event => { if (event.type === 'error' || event.error) throw new Error(event.error || 'Matchmaking stopped. Please try again.'); if (event.game) this.handleEvent({ type: 'gameStart', game: event.game }); }, { signal: controller.signal, body: { time: this.control.time, increment: this.control.increment, rated: this.rated, color: 'random' } });
+          break;
+        } catch (error) {
+          if (controller.signal.aborted || !this.seekController) throw error;
+          if (error.code !== 'play_events_required' || attempt === 2) throw error;
+          this.eventReady = false;
+          await this.waitForEvents();
+        }
+      }
       if (!controller.signal.aborted && !this.full) { await this.refresh(); if (this.activeGames.length) await this.resume(gameId(this.activeGames[0])); else this.message('The search ended. You can search again.'); }
     } finally { if (this.seekController === controller) { this.seekController = null; this.$('search').hidden = true; this.renderSetup(); } }
   }
@@ -378,7 +458,13 @@ export class PlayExperience {
               if (event.variant?.key && event.variant.key !== 'standard') { const error = new Error('This game uses a variant. Continue it on Lichess.'); error.status = 400; throw error; }
               const firstPosition = this.full?.id !== id;
               this.full = event; this.full.id = id; this.color = event.white?.id?.toLowerCase() === this.profile?.id?.toLowerCase() ? 'white' : 'black';
-              if (firstPosition) this.orientToPlayer();
+              if (firstPosition) {
+                this.orientToPlayer();
+                // Tell the server whether to review this game in the background
+                // (once per game). Skip on reconnect so re-subscribing never
+                // toggles the setting again mid-game.
+                this._configureBackgroundReview(gameId(event), event.start?.position);
+              }
               this.gameConnection = 'connected'; this.applyState(event.state);
             }
             else if (event.type === 'gameState' && this.full) { this.gameConnection = 'connected'; this.applyState(event); }
@@ -415,7 +501,7 @@ export class PlayExperience {
     if (!finished && !this.activeGames.some(g => gameId(g) === this.full.id)) { this.activityRevision++; this.activeGames.push({ gameId: this.full.id, color: this.color, opponent: this.full[this.color === 'white' ? 'black' : 'white'] }); window.PlayFairPlay?.setActiveGames(this.activeGames); }
     this.showPosition();
     this.clocks.sync({ white: state.wtime, black: state.btime, running: !finished && position.ply >= 2 ? position.chess.turn() === 'w' ? 'white' : 'black' : null });
-    if (previous && position.ply > previousPly && !finished) { const move = position.moves.at(-1); this.sounds.play(move.promotion ? 'promotion' : position.chess.in_check() ? 'check' : /[kq]/.test(move.flags) ? 'castle' : move.captured ? 'capture' : 'move'); }
+    if (previous && position.ply > previousPly && !finished) { const move = position.moves.at(-1); if (position.ply !== this._soundedOwnPly) this.sounds.play(move.promotion ? 'promotion' : position.chess.in_check() ? 'check' : /[kq]/.test(move.flags) ? 'castle' : move.captured ? 'capture' : 'move'); }
     else if (!previous && !finished) { this.sounds.play('start'); this.message(''); }
     this.updatePlayers(); this.updateConnection(); if (previous?.moves !== state.moves) this.renderMoves();
     this.$('game-caption').textContent = `${this.full.clock ? `${Math.round(this.full.clock.initial / 60000)} + ${Math.round(this.full.clock.increment / 1000)}` : 'Chess'} · ${this.full.rated ? 'Rated' : 'Casual'} · ${this.full.perf?.name || this.full.speed || 'Standard'}`;
@@ -428,6 +514,8 @@ export class PlayExperience {
       this.replayIndex = null; this._displayFen = null; this.$('replay-bar').hidden = true;
       if (!wasFinished) { this.sounds.play('end'); this.cacheGame(); this.run(() => this.enrichResult(this.full.id)); }
       this.renderResult(); this.run(() => this.refresh());
+      // Surface the in-progress background review state on the finished screen.
+      if (!wasFinished && this.backgroundReview) this.checkBackgroundReview(this.full.id);
     }
   }
   updatePlayers() {
@@ -470,6 +558,27 @@ export class PlayExperience {
         this.showPosition();
       }
     }
+  }
+  // Poll the in-progress background review to completion after a game ends.
+  // Once it's ready, tell the player (results stay ingame; review is instant).
+  async checkBackgroundReview(gameId) {
+    if (!gameId || !this.app.authState.user) return;
+    try {
+      let tries = 0;
+      while (tries < 12) {
+        tries++;
+        await new Promise(r => setTimeout(r, 2500));
+        let data;
+        try { data = await this.api.request(`/game/${encodeURIComponent(gameId)}/background-review`); } catch { return; }
+        if (data?.ready) {
+          this.message('Your background review finished — open Review to see it.');
+          const btn = this.root.querySelector('[data-action="review"]');
+          if (btn) btn.textContent = `✓ ${this.$('result-title').textContent} — Review ready`;
+          return;
+        }
+        if (this.full?.id !== gameId || !isFinished(this.state?.status)) return;
+      }
+    } catch { /* best-effort status */ }
   }
   renderMoves() {
     const moves = this.position.moves;
@@ -562,7 +671,10 @@ export class PlayExperience {
     const id = this.full.id, ply = this.position?.ply;
     if (ply == null) { this.board.setPending(false); return; }
     const token = { move, ply }; this.pending = token;
-    this.board.showOptimisticMove(move); this.board.setPending(true); this.$('turn').textContent = 'Opponent’s move';
+    const moved = this.board.showOptimisticMove(move); this.board.setPending(true); this.$('turn').textContent = 'Opponent’s move';
+    // Play the move sound locally the instant your own move is made — no waiting
+    // for the server round-trip. applyState skips the duplicate via _soundedOwnPly.
+    if (moved) { this._soundForMove(moved); this._soundedOwnPly = ply + 1; }
     try {
       // Submit immediately: the server replays the authoritative move list and
       // rejects a stale ply (409 play_stale_position), and Lichess is the final
@@ -585,6 +697,17 @@ export class PlayExperience {
       clearTimeout(this.pendingTimer); clearTimeout(this.pendingTimeoutTimer);
       this.gameController?.abort(); this.gameController = null; await this.resume(id);
     }
+  }
+
+  // Play the client-side sound for a just-made move (own move sent optimistically).
+  // move is a chess.js move object with flags/captured/promotion.
+  _soundForMove(move) {
+    if (!move) return;
+    const inCheck = (() => {
+      try { const probe = new Chess(this.position?.chess?.fen() || ''); probe.move({ from: move.from, to: move.to, ...(move.promotion ? { promotion: move.promotion } : {}) }); return probe.in_check(); } catch { return false; }
+    })();
+    const type = move.promotion ? 'promotion' : inCheck ? 'check' : /[kq]/.test(move.flags || '') ? 'castle' : move.captured ? 'capture' : 'move';
+    this.sounds.play(type);
   }
 
   // Move-confirmation watchdog: if the server never confirms the submitted ply,
@@ -703,6 +826,11 @@ export class PlayExperience {
     this.$('settings-fields').innerHTML = `<p class="play-small-note">Board and piece appearance use your main Appearance settings.</p>${select('reviewOrientation', 'Review orientation', [['white', 'White'], ['black', 'Black']])}${[['sounds', 'Game sounds'], ['legalMoves', 'Legal move highlights'], ['coordinates', 'Board coordinates'], ['autoQueen', 'Auto-queen'], ['premoves', 'Premoves'], ['touchConfirm', 'Confirm touch moves']].map(([key, name]) => `<label class="checkbox-row"><input type="checkbox" data-preference="${key}" ${this.preferences[key] ? 'checked' : ''}>${name}</label>`).join('')}<label class="field"><span class="field-label">Sound volume</span><input type="range" min="0" max="1" step="0.05" value="${this.preferences.volume}" data-preference="volume" aria-label="Sound volume"></label>`;
   }
   change(event) {
+    if (event.target.matches('[data-play="background-review"]')) {
+      this.backgroundReview = event.target.checked;
+      this._backgroundReviewExplicit = true;
+      return;
+    }
     const key = event.target.dataset.preference; if (!key) return;
     const value = event.target.type === 'checkbox' ? event.target.checked : key === 'volume' ? Number(event.target.value) : event.target.value;
     this.preferences = { ...this.preferences, [key]: value }; savePlayPreferences(this.preferences); this.board.setPreferences(this.preferences); this.sounds.setPreferences(this.preferences);

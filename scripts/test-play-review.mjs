@@ -165,8 +165,15 @@ await test('completed Play review uses existing import, orientation and engine r
   assert.ok(calls.some(call => call[0] === 'orientation' && call[1] === 'b'));
   assert.ok(calls.some(call => call[0] === 'review'));
   const before = calls.length;
-  await assert.rejects(app.openPlayReview({ pgn: pgn.replaceAll('1-0', '*') }), /after the game has finished/);
-  assert.equal(calls.length, before, 'unfinished PGN cannot replace a loaded review');
+  // A finished-but-indecisive PGN (Result "*", e.g. a timeout or a snapshot
+  // without a hard score) is still reviewable once the game is over. Review
+  // gating lives in the Play flow (isFinished) and the fair-play guard, not in
+  // a strict Result header here — that strict check falsely rejected finished
+  // games with "Review becomes available after the game has finished."
+  assert.equal(await app.openPlayReview({ pgn: pgn.replaceAll('1-0', '*') }), true);
+  assert.ok(calls.length > before, 'a Result "*" finished game still opens for review');
+  // A genuinely invalid PGN is still rejected up front.
+  await assert.rejects(app.openPlayReview({ pgn: 'not a game' }), /could not be read/);
 });
 await test('review cursor reaches every imported move and returns to the start', () => {
   const app = Object.create(App.prototype), chess = new Chess(); chess.load_pgn(pgn);

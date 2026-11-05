@@ -139,7 +139,20 @@ async function subscribe(service, uid, channel, req, res) {
 async function seek(service, uid, body, req, res) {
   const { control, rated, color } = validateControl(body);
   const connection = await service.connection(uid);
-  if (!service.hubs.get(`${uid}:events`)?.ready) throw fail(409, 'Wait for the live connection before searching.', 'play_events_required');
+  // The events hub must be LIVE before a seek can be found. On a fresh page load
+  // (or right after the events stream reconnects) the hub may still be spinning
+  // up, and instantly returning 'play_events_required' stranded the player on an
+  // error that forced a manual reload. Wait briefly for it to become ready; a
+  // genuinely dead hub that never connects clears the timeout on abort.
+  const eventsReady = async () => service.hubs.get(`${uid}:events`)?.ready === true;
+  if (!(await eventsReady())) {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline && !res.destroyed && !res.writableEnded) {
+      if (await eventsReady()) break;
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+  }
+  if (!(await eventsReady())) throw fail(409, 'Still connecting to the live event stream. Up to 5 seconds, try the queue again.', 'play_events_required');
   if ((await service.active(uid, connection, true)).length) throw fail(409, 'Resume your active game first.', 'play_active_game');
   const lease = service.ref(`seeks/${uid}`); const owner = require('node:crypto').randomBytes(16).toString('hex');
   const claim = await lease.transaction(value => value && value.expiresAt > service.now() ? undefined : { owner, expiresAt: service.now() + 60000 });

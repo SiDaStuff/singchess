@@ -65,8 +65,13 @@ try {
       check(await page.locator('[data-play="friend"]').getAttribute('open') !== null && seeks === 0, `${width}: blitz uses direct challenges without a public seek`);
       await page.locator('[data-play="friend-name"]').fill('Friend'); await page.locator('[data-play="challenge-button"]').click();
       await page.waitForFunction(() => window.Play.challenge?.id === 'chal1234'); check(await page.locator('[data-play="outgoing"]').innerText().then(text => text.includes('Friend')), `${width}: real challenge request and cancellation`);
-      await page.locator('[data-play="outgoing"] [data-action="cancel-search"]').click();
-      await page.locator('[data-control="10+0"]').click(); await page.locator('[data-play="start"]').click({ noWaitAfter: true });
+      await page.locator('[data-play="friend"] [data-action="cancel-search"]').click();
+      // Background review toggle: defaults ON for ≥5 min (10+0) and OFF for <5 min (3+2).
+      await page.locator('[data-control="3+2"]').click();
+      check(!(await page.locator('[data-play="background-review"]').isChecked()), `${width}: background review defaults OFF below 5 minutes`);
+      await page.locator('[data-control="10+0"]').click();
+      check(await page.locator('[data-play="background-review"]').isChecked(), `${width}: background review defaults ON for 5+ minute games`);
+      await page.locator('[data-play="start"]').click({ noWaitAfter: true });
       await page.waitForFunction(() => !!window.Play.seekController);
       check(seeks === 1 && await page.locator('[data-play="search"]').isVisible(), `${width}: casual matchmaking opens a real cancellable request`);
       await page.locator('[data-play="search"] [data-action="cancel-search"]').click(); await page.waitForFunction(() => !window.Play.seekController);

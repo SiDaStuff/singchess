@@ -825,8 +825,19 @@ class ChessBoard {
       this._animateNext = target.animate === true;
       this._skipNextSlide = !this._animateNext;
       this.setPositionFromFen(position.fen());
-      this.setHighlights(target.square ? [{ square: target.square, type: 'highlight' }]
-        : [{ square: target.from, type: 'highlight' }, { square: target.to, type: 'highlight' }]);
+      // Highlight a single square reference the same way right-clicking a
+      // square does — a persistent toggling `.inverted` overlay using the
+      // user's annotation highlight color — so square highlights match the
+      // manual right-click look instead of the move tint. Move references
+      // keep the from/to move-highlight style.
+      if (target.square) {
+        this.setHighlights([]);
+        this.invertedSquares.clear();
+        this.invertedSquares.add(target.square);
+        this._updateHighlights();
+      } else {
+        this.setHighlights([{ square: target.from, type: 'highlight' }, { square: target.to, type: 'highlight' }]);
+      }
       this.setBestMoveArrow(target.from ? target.from + target.to : null, { color: '#61b8df' });
       if (target.annotations) this.setCoachAnnotations(target.annotations);
       else this.clearCoachAnnotations();

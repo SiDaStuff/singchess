@@ -102,13 +102,11 @@ onReady(() => {
     if (name && (name === white || name === black)) app._setBoardOrientationForColor(name === black ? 'b' : 'w');
   }
   function showGames(source) {
-    const account = data.linked.find(entry => entry.source === source);
-    if (!account?.games?.length) return app._quickLoadSavedUsername(source);
-    app._navigateTo('/review', { skipImport: true });
-    app._showPgnModal();
-    app._importUsername = account.username;
-    app._renderImportResults(account.games);
-    app._setImportStatus(`Latest ${account.games.length} completed games for ${account.username}. Select a game to review.`, 'success');
+    // Always load fresh from the provider so just-finished games appear.
+    // The linked-account snapshot is a dashboard convenience; the import flow
+    // must show the user's most recent games, never a cached list.
+    app._navigateTo('/review', { skipImport: true, disableRestore: true });
+    return app._quickLoadSavedUsername(source);
   }
   async function openReview(id) {
     const { review: record } = await request(`/api/max-auto-review?id=${encodeURIComponent(id)}`);

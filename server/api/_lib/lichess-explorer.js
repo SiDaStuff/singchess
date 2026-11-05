@@ -100,6 +100,15 @@ async function fetchVariant(path, extraQuery) {
 // or { error } on transport failure. The opening NAME always comes from the
 // Masters explorer (the /lichess endpoint doesn't name openings); the game
 // COUNTS come from the chosen variant.
+// Bounded in-process cache for opening lookups. Opening data is stable
+// reference data, and the same positions recur constantly across users and
+// page loads, so caching eliminates repeated upstream Lichess explorer calls
+// (a ~hundreds-of-ms round trip each). Masters results are cached long; the
+// Lichess all-player variant is cached briefly to stay fresh for new games.
+const openingCache = new Map();
+const OPENING_CACHE_MAX = 1000;
+const OPENING_CACHE_TTL = { masters: 60 * 60 * 1000, lichess: 5 * 60 * 1000 };
+
 async function lookupOpening(uciPlay, options = {}) {
   const play = normalizePlay(uciPlay);
   if (!play) return { ...emptyResult() };
@@ -109,6 +118,9 @@ async function lookupOpening(uciPlay, options = {}) {
   if (variant === 'lichess') {
     const speeds = cleanFilter(options.speeds, VALID_SPEEDS);
     const ratings = cleanFilter(options.ratings, VALID_RATINGS, (x) => parseInt(x, 10));
+    const seed = `lichess|${play}|${speeds.join(',')}|${ratings.join(',')}`;
+    const cached = cachedOpening(seed, OPENING_CACHE_TTL.lichess);
+    if (cached) return cached;
     const extra = `${playParam}` +
       (speeds.length ? `&speeds=${encodeURIComponent(speeds.join(','))}` : '') +
       (ratings.length ? `&ratings=${encodeURIComponent(ratings.join(','))}` : '');
@@ -116,24 +128,42 @@ async function lookupOpening(uciPlay, options = {}) {
     if (stats.error) return { ...emptyResult(), error: stats.error };
     // Name the opening from Masters (the /lichess endpoint doesn't name openings).
     const opening = await mastersName(playParam);
-    return {
+    const result = {
       opening,
       white: stats.white, draws: stats.draws, black: stats.black,
       total: stats.total, whitePct: stats.whitePct, drawsPct: stats.drawsPct, blackPct: stats.blackPct,
       variant: 'lichess',
     };
+    storeCached(seed, result);
+    return result;
   }
 
+  const seed = `masters|${play}`;
+  const cached = cachedOpening(seed, OPENING_CACHE_TTL.masters);
+  if (cached) return cached;
   // masters: one call gives both name + counts.
   const stats = await fetchVariant('/masters', playParam);
   if (stats.error) return { ...emptyResult(), error: stats.error };
   const opening = await mastersName(playParam);
-  return {
+  const result = {
     opening,
     white: stats.white, draws: stats.draws, black: stats.black,
     total: stats.total, whitePct: stats.whitePct, drawsPct: stats.drawsPct, blackPct: stats.blackPct,
     variant: 'masters',
   };
+  storeCached(seed, result);
+  return result;
+}
+
+function cachedOpening(key, ttl) {
+  const entry = openingCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.at > ttl) { openingCache.delete(key); return null; }
+  return structuredClone(entry.value);
+}
+function storeCached(key, value) {
+  if (openingCache.size >= OPENING_CACHE_MAX) { const first = openingCache.keys().next().value; if (first) openingCache.delete(first); }
+  openingCache.set(key, { value, at: Date.now() });
 }
 
 // Fetch just the opening {eco,name} from the Masters explorer. Kept separate so

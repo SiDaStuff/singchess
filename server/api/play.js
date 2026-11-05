@@ -32,6 +32,8 @@ function createRouter(play = service, userService = users) {
   router.get('/game/:id/stream', route((uid, req, res) => streams.subscribe(play, uid, `game:${req.params.id}`, req, res)));
   router.post('/game/:id/move', route(async (uid, req, res) => res.json(await play.move(uid, req.params.id, req.body || {}))));
   router.post('/game/:id/action', route(async (uid, req, res) => res.json(await play.action(uid, req.params.id, req.body || {}))));
+  router.post('/game/:id/background-review', route(async (uid, req, res) => res.json(await play.setBackgroundReview(uid, req.params.id, req.body || {}))));
+  router.get('/game/:id/background-review', route(async (uid, req, res) => res.json(await play.backgroundReviewStatus(uid, req.params.id))));
   router.get('/game/:id/pgn', route(async (uid, req, res) => res.json(await play.pgn(uid, req.params.id))));
   return router;
 }

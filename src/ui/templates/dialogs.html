@@ -64,11 +64,7 @@
               <span class="import-source-note">Browser analysis is free.</span>
             </div>
             <div class="import-tabs" role="tablist" aria-label="Import source">
-              <button type="button" class="import-tab active" data-import-tab="pgn" role="tab" aria-selected="true">
-                <span class="material-symbols-outlined">content_paste</span>
-                <span class="import-tab-copy"><strong>Paste PGN</strong><small>From a file or clipboard</small></span>
-              </button>
-              <button type="button" class="import-tab" data-import-tab="lichess" role="tab" aria-selected="false">
+              <button type="button" class="import-tab active" data-import-tab="lichess" role="tab" aria-selected="true">
                 <span class="import-tab-logo lichess-logo" aria-hidden="true"></span>
                 <span class="import-tab-copy"><strong>Lichess</strong><small>Load public games</small></span>
               </button>
@@ -76,35 +72,15 @@
                 <span class="import-tab-logo chesscom-logo" aria-hidden="true"></span>
                 <span class="import-tab-copy"><strong>Chess.com</strong><small>Load public games</small></span>
               </button>
+              <button type="button" class="import-tab" data-import-tab="pgn" role="tab" aria-selected="false">
+                <span class="material-symbols-outlined">content_paste</span>
+                <span class="import-tab-copy"><strong>Paste PGN</strong><small>From a file or clipboard</small></span>
+              </button>
             </div>
 
             <div class="import-panels">
-              <!-- PGN panel -->
-              <div class="import-panel active" data-import-panel="pgn">
-                <div class="import-panel-heading">
-                  <h3>Paste a PGN</h3>
-                  <p class="import-panel-hint">Paste the moves and game details below.</p>
-                </div>
-                <label class="field" for="pgn-input">Your game (PGN)</label>
-                <textarea id="pgn-input" class="import-pgn-input input-select" placeholder="Paste your PGN here...&#10;&#10;Example:&#10;1. e4 e5 2. Nf3 Nc6 3. Bb5 a6..." rows="7"></textarea>
-                <div class="import-actions">
-                  <button type="button" id="btn-pgn-load" class="btn btn-primary import-load-btn">
-                    <span class="btn-content">
-                      <span class="material-symbols-outlined btn-symbol">play_arrow</span>
-                      <span class="btn-label">Load Game</span>
-                    </span>
-                  </button>
-                  <button type="button" id="btn-pgn-sample" class="btn btn-secondary import-sample-btn">
-                    <span class="btn-content">
-                      <span class="material-symbols-outlined btn-symbol">flash_on</span>
-                      <span class="btn-label">Try sample</span>
-                    </span>
-                  </button>
-                </div>
-              </div>
-
               <!-- Lichess panel -->
-              <div class="import-panel" data-import-panel="lichess">
+              <div class="import-panel active" data-import-panel="lichess">
                 <div class="import-panel-heading">
                   <h3>Load from Lichess</h3>
                   <p class="import-panel-hint">Enter a public username to load recent games.</p>
@@ -154,6 +130,30 @@
                     <span class="btn-content">
                       <span class="material-symbols-outlined btn-symbol">download</span>
                       <span class="btn-label">Load Games</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- PGN panel -->
+              <div class="import-panel" data-import-panel="pgn">
+                <div class="import-panel-heading">
+                  <h3>Paste a PGN</h3>
+                  <p class="import-panel-hint">Paste the moves and game details below.</p>
+                </div>
+                <label class="field" for="pgn-input">Your game (PGN)</label>
+                <textarea id="pgn-input" class="import-pgn-input input-select" placeholder="Paste your PGN here...&#10;&#10;Example:&#10;1. e4 e5 2. Nf3 Nc6 3. Bb5 a6..." rows="7"></textarea>
+                <div class="import-actions">
+                  <button type="button" id="btn-pgn-load" class="btn btn-primary import-load-btn">
+                    <span class="btn-content">
+                      <span class="material-symbols-outlined btn-symbol">play_arrow</span>
+                      <span class="btn-label">Load Game</span>
+                    </span>
+                  </button>
+                  <button type="button" id="btn-pgn-sample" class="btn btn-secondary import-sample-btn">
+                    <span class="btn-content">
+                      <span class="material-symbols-outlined btn-symbol">flash_on</span>
+                      <span class="btn-label">Try sample</span>
                     </span>
                   </button>
                 </div>

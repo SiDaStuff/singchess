@@ -13,8 +13,21 @@ function normalizeStats(raw = {}) {
   };
 }
 
+let _statsCache = null, _statsCacheAt = 0;
+const STATS_CACHE_TTL_MS = 15000;
+
+// Public counters are read on every homepage/footer render, and the client
+// deliberately sends these with cache:'no-store' (so the response Cache-Control
+// is bypassed). A short in-process memo lets a page-load burst re-use one DB
+// read instead of hitting the RTDB once per request. Invalidated simply by the
+// TTL — writes via incrementPublicStats go through their own transaction and
+// this read-side cache is short enough (15s) that staleness is imperceptible.
 async function getPublicStats() {
-  return normalizeStats((await database().ref('publicStats').once('value')).val() || {});
+  const now = Date.now();
+  if (_statsCache && now - _statsCacheAt < STATS_CACHE_TTL_MS) return _statsCache;
+  const stats = normalizeStats((await database().ref('publicStats').once('value')).val() || {});
+  _statsCache = stats; _statsCacheAt = now;
+  return stats;
 }
 async function incrementPublicStats(delta = {}) {
   const names = ['gamesAnalyzed', 'movesAnalyzed', 'coachGamesPlayed', 'brilliantMoves', 'puzzlesSolved', 'siteVisitorsTotal'];

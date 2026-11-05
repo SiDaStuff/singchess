@@ -320,11 +320,14 @@ class ChessReviewApp {
     if (!parsed.load_pgn(this._normalizePgnText(pgn), { sloppy: true })) {
       throw new Error('The completed game PGN could not be read.');
     }
-    const headers = parsed.header();
-    if (!['1-0', '0-1', '1/2-1/2'].includes(headers.Result)
-      && !['aborted', 'noStart'].includes(headers.Termination)) {
-      throw new Error('Review becomes available after the game has finished.');
-    }
+    // A game is reviewable once it is over, which the Play flow already gates
+    // on BEFORE calling this (see Play.review → isFinished). Do not require a
+    // decisive PGN `Result` header here: finished games can legitimately carry
+    // `Result "*"` in Lichess's PGN (e.g. a timeout, or a PGN snapshot without
+    // a hard score), and rejecting those produced the false "becomes available
+    // after the game has finished" error on games that were already over.
+    // Any PGN with moves is fine to review — an unfinished import is still
+    // analyzable to the moves played.
     // The fetched PGN is sufficient for future review: no provider token or
     // ongoing Play connection is passed into the established review system.
     this._navigateTo('/review', { skipImport: true, disableRestore: true });
@@ -3605,7 +3608,10 @@ return window.firebase;
 	  }
 
   async _quickLoadSavedUsername(source) {
-    if (window.LinkedChessHub?.hasGames(source)) return window.LinkedChessHub.showGames(source);
+    // Always fetch games fresh from the provider. A linked account's cached
+    // snapshot is fine for the accounts dashboard, but the import flow must
+    // show the user's most recent games — a cached list (stale for Lichess up
+    // to 5 min, Chess.com up to 15 min) hides newly finished games.
     const s = this.authState.savedUsernames || {};
     const username = s[source];
     if (!username) return;
@@ -3618,9 +3624,6 @@ return window.firebase;
     });
     const siteLabel = source === 'chesscom' ? 'Chess.com' : 'Lichess';
     this._setImportStatus(`Loading ${siteLabel} games for ${username}…`, 'loading');
-    // Show a clear loading popup so the user sees the fetch is in progress,
-    // whether they kicked it off from the home screen or the import modal.
-    const closeLoading = this._showLoadingPopup(`Loading ${siteLabel} games…`);
     try {
       const games = source === 'chesscom'
         ? await this._fetchChessComGames(username, 10)
@@ -3634,8 +3637,6 @@ return window.firebase;
     } catch (err) {
       console.error('Quick load failed:', err);
       this._setImportStatus(err.message || 'Could not load games.', 'error');
-    } finally {
-      closeLoading();
     }
   }
 
@@ -5602,14 +5603,20 @@ if (this.elBtnAnticheatRefresh) {
       return;
     }
     this._setImportToolStatus(scope, 'Loading game…', 'loading');
-    if (scope === 'home') this._navigateTo('/review', { skipImport: true });
-    const modalTool = this._getImportTool('modal');
-    const modalPgnInput = modalTool?.querySelector('.import-pgn-input');
-    if (modalPgnInput) modalPgnInput.value = pgn;
+    if (scope === 'home') {
+      // Home card loads its own PGN; multi-game pastes list inline, a single
+      // game docks straight into the review board. No modal needed here.
+      try {
+        this._loadPgn('home');
+      } catch (err) {
+        this._setImportToolStatus(scope, err.message || 'Could not load PGN.', 'error');
+      }
+      return;
+    }
     this._enterReviewMode();
     this._showPgnModal();
     try {
-      this._loadPgn();
+      this._loadPgn('modal');
       this._setImportToolStatus(scope, this.elPgnModal?.style.display !== 'none' ? 'Pick a game from the list.' : '', this.elPgnModal?.style.display !== 'none' ? 'success' : '');
     } catch (err) {
       this._setImportToolStatus(scope, err.message || 'Could not load PGN.', 'error');
@@ -5624,10 +5631,17 @@ if (this.elBtnAnticheatRefresh) {
       return;
     }
     this._setImportToolStatus(scope, 'Loading games…', 'loading');
-    if (scope === 'home') this._navigateTo('/review', { skipImport: true });
+    if (scope === 'home') {
+      // Home card is self-sufficient: show the game list inline right here.
+      // The results render into #home-import-results; clicking one docks into
+      // the review board.
+      this._loadGamesByUsername(source, username, limit, 'home')
+        .catch(() => {});
+      return;
+    }
     this._enterReviewMode();
     this._showPgnModal();
-    this._loadGamesByUsername(source, username, limit)
+    this._loadGamesByUsername(source, username, limit, 'modal')
       .then(() => this._setImportToolStatus(scope, 'Pick a game from the list.', 'success'))
       .catch((err) => this._setImportToolStatus(scope, err.message || 'Could not load games.', 'error'));
   }
@@ -6175,15 +6189,24 @@ if (this.elBtnAnticheatRefresh) {
     // aria-hidden bookkeeping lives in _openDialog/_closeDialog now (the old
     // removeAttribute here was a no-op — nothing ever set the attribute).
     this._openDialog(this.elPgnModal);
-    this._setImportStatus('');
-    this._renderImportResults([]);
+    // Preserve the last game list across opens so closing and reopening the
+    // popup doesn't discard loaded games. A fresh search clears the list via
+    // _loadGamesByUsername (which calls _renderImportResults([]) itself).
+    if (!this._getImportResults('modal')?.firstChild) {
+      this._setImportStatus('');
+    }
     // Render saved username quick-load bar (logged-in users only)
     this._renderSavedUsernameBar();
     // Show "link this username" row after a successful username import
     this._renderLinkUsernameRow();
     const tabs = this.elPgnModal.querySelector('.import-tabs');
     if (tabs) {
-      tabs.querySelector('[data-import-tab="pgn"]')?.click();
+      // Default the popup to the Lichess tab (username import) unless the user
+      // already has another tab selected, so opening is an obvious next step.
+      const active = tabs.querySelector('.import-tab.active');
+      if (!active || active.dataset.importTab === 'pgn') {
+        tabs.querySelector('[data-import-tab="lichess"]')?.click();
+      }
     }
     // Value-before-signup: if the user came from the "Try a sample review" CTA
     // (or is a guest), pre-fill a sample PGN so the first review is one click.
@@ -8783,9 +8806,9 @@ _showPuzzleSuccessOverlay() {
 	    `;
 	  }
 
-  _loadPgn() {
-    const modalTool = this._getImportTool('modal');
-    const pgn = (modalTool?.querySelector('.import-pgn-input')?.value || '').trim();
+  _loadPgn(scope = 'modal') {
+    const tool = this._getImportTool(scope);
+    const pgn = (tool?.querySelector('.import-pgn-input')?.value || '').trim();
     if (!pgn) return;
     // Direct PGN paste has no username context — clear any imported-username
     // auto-flip so the board keeps its default orientation.
@@ -8801,10 +8824,11 @@ _showPuzzleSuccessOverlay() {
             ...this._formatImportedGameLabel(game, 'pgn', index),
           };
         });
-        this._setImportStatus(`Found ${items.length} games. Click one to load it.`, 'success');
-        this._renderImportResults(this._sortImportedGamesByRecent(items));
+        this._setImportToolStatus(scope, `Found ${items.length} games. Click one to load it.`, 'success');
+        this._renderImportResults(this._sortImportedGamesByRecent(items), scope);
         return;
       }
+      if (scope === 'home') this._navigateTo('/review', { skipImport: true, disableRestore: true });
       this._loadPgnText(pgn);
       this._hidePgnModal();
     } catch (err) {
@@ -8976,9 +9000,17 @@ _showPuzzleSuccessOverlay() {
     status.className = `import-status ${kind}`.trim();
   }
 
-  _renderImportResults(items) {
+  _getImportResults(scope = 'modal') {
+    if (scope === 'home') {
+      const homeTool = this._getImportTool('home');
+      return homeTool?.querySelector('.import-results') || document.getElementById('home-import-results');
+    }
     const modalTool = this._getImportTool('modal');
-    const results = modalTool?.querySelector('.import-results') || this.elImportResults;
+    return modalTool?.querySelector('.import-results') || this.elImportResults;
+  }
+
+  _renderImportResults(items, scope = 'modal') {
+    const results = this._getImportResults(scope);
     if (!results) return;
     results.innerHTML = '';
 
@@ -9009,6 +9041,9 @@ _showPuzzleSuccessOverlay() {
       `;
       button.addEventListener('click', () => {
         try {
+          // A result picked from the home card has no review layout yet —
+          // dock into /review first so it lands on the board, then load.
+          if (scope === 'home') this._navigateTo('/review', { skipImport: true, disableRestore: true });
           this._loadPgnText(item.pgn, item.headers || {});
           this._hidePgnModal();
         } catch (err) {
@@ -9044,26 +9079,25 @@ _showPuzzleSuccessOverlay() {
     return { text: '*', className: 'unknown' };
   }
 
-  async _loadGamesByUsername(source, username, limit) {
+  async _loadGamesByUsername(source, username, limit, scope = 'modal') {
     source = source || 'lichess';
     username = (username || '').trim();
     limit = parseInt(limit || '10', 10);
 
     if (!username) {
-      this._setImportStatus('Enter a username first.', 'error');
+      this._setImportToolStatus(scope, 'Enter a username first.', 'error');
       throw new Error('Username required');
     }
 
     const siteLabel = source === 'chesscom' ? 'Chess.com' : 'Lichess';
-    this._setImportStatus(`Loading ${siteLabel} games...`, 'loading');
+    this._setImportToolStatus(scope, `Loading ${siteLabel} games...`, 'loading');
     // Remember the imported username so the board auto-flips to them when a
     // game is loaded (see _playerColorFromHeaders).
     this._importUsername = username;
-    const tool = this._getImportTool('modal');
+    const tool = this._getImportTool(scope);
     const btn = tool?.querySelector(`.import-load-username-btn[data-source="${source}"]`);
     if (btn) btn.disabled = true;
-    this._renderImportResults([]);
-    const closeLoading = this._showLoadingPopup(`Loading ${siteLabel} games…`);
+    this._renderImportResults([], scope);
 
     try {
       const games = source === 'chesscom'
@@ -9071,20 +9105,19 @@ _showPuzzleSuccessOverlay() {
         : await this._fetchLichessGames(username, limit);
 
       if (!games.length) {
-        this._setImportStatus('No recent games were found for that user.', 'error');
+        this._setImportToolStatus(scope, 'No recent games were found for that user.', 'error');
         return;
       }
 
-      this._setImportStatus(`Showing the last ${games.length} games for ${username}. Click one to load it.`, 'success');
-      this._renderImportResults(games);
+      this._setImportToolStatus(scope, `Showing the last ${games.length} games for ${username}. Click one to load it.`, 'success');
+      this._renderImportResults(games, scope);
       // Re-render the link-username row now that games loaded successfully
       this._renderLinkUsernameRow();
     } catch (err) {
       console.error('Username import failed:', err);
-      this._setImportStatus(err.message || 'Could not load games for that user.', 'error');
+      this._setImportToolStatus(scope, err.message || 'Could not load games for that user.', 'error');
       throw err;
     } finally {
-      closeLoading();
       if (btn) btn.disabled = false;
     }
   }
