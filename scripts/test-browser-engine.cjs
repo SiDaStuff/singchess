@@ -239,6 +239,16 @@ async function main() {
   assert.ok(final.lines.length >= 1, 'engine still returns PV lines at the end');
   console.log(`post-storm sanity: ${final.lines.length} lines, depth=${final.lines[0].depth}`);
 
+  // Phase 5: the AI coach's stockfish tool caps the search at depth 20
+  // (maxDepth) — it must stop well before the 20s timeout and return a line.
+  const startedAt = Date.now();
+  const capped = await engine.evaluateInfinite(fens[0], 20000, () => {}, 20);
+  const elapsed = Date.now() - startedAt;
+  assert.ok(capped.depth >= 15, `depth-cap search returned a real evaluation (got depth ${capped.depth})`);
+  assert.ok((capped.bestMove || capped.pv), 'depth-cap search returned a best line');
+  assert.ok(elapsed < 15000, `depth-cap stopped before the timeout (elapsed ${elapsed}ms)`);
+  console.log(`depth-cap@20: depth=${capped.depth} elapsed=${elapsed}ms`);
+
   assert.strictEqual(fatal, 0, 'no fatal engine errors allowed under rapid navigation');
   console.log('PASS: browser engine survived rapid navigation without crashing.');
 }

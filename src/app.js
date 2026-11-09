@@ -386,7 +386,6 @@ class ChessReviewApp {
 	    this.elBtnMenuCoach = document.getElementById('btn-menu-coach');
 		    this.elBtnMenuPuzzles = document.getElementById('btn-menu-puzzles');
 		    this.elBtnMenuAnticheat = document.getElementById('btn-menu-anticheat');
-		    this.elCoachFab = document.getElementById('coach-fab');
 		    // HTML uses `btn-menu-plans` (Plans page replaced Boost page). The
 		    // home feature card is the only place this lives; keep an alias
 		    // so legacy code that referenced `btn-menu-boost` keeps working.
@@ -1343,17 +1342,6 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		        if (linkPath === currentPath) link.classList.add('active');
 		      }
 		    });
-		    this._updateCoachFab();
-		  }
-
-		  // Show/hide the persistent floating Coach button. Visible whenever the
-		  // user is signed in and NOT already on the coach route (it's redundant
-		  // there — the panel is the coach). Requires login, so hide for guests.
-		  _updateCoachFab() {
-		    if (!this.elCoachFab) return;
-		    const signedIn = !!(this.authState && this.authState.user);
-		    const onCoach = this._normalizeRoute(window.location.pathname || '/') === '/coach';
-		    this.elCoachFab.hidden = !signedIn || onCoach;
 		  }
 
 	  // Mobile nav drawer open/close helpers. Toggle the scrim, body scroll-lock,
@@ -2996,8 +2984,6 @@ return window.firebase;
               // Coach chat: re-evaluate the Max gate after auth resolves (src/coach-chat.js
               // owns model pref + history hydration on mount).
               if (this.coachChat.active && window.CoachChat) window.CoachChat.onAuth(this);
-              // Persistent floating Coach button reacts to login/logout state.
-              this._updateCoachFab();
               // Part 1c: a signed-in user who hasn't completed onboarding is
               // sent to the wizard — but never mid-session (don't yank them out
               // of an active review/coach/puzzle/anticheat run).
@@ -5000,9 +4986,6 @@ this._syncAnticheatForm();
 	    this.elBtnMenuPuzzles?.addEventListener('click', () => this._navigateTo('/puzzles', { disableRestore: true }));
 	    this.elBtnMenuAnticheat?.addEventListener('click', () => this._navigateTo('/anticheat', { disableRestore: true }));
     this.elBtnMenuBoost?.addEventListener('click', () => this._navigateTo('/plans', { disableRestore: true }));
-    // Persistent floating Coach button — one-tap access to the AI coach from
-    // any route. Always navigates to /coach (a no-op if already there).
-    this.elCoachFab?.addEventListener('click', () => this._navigateTo('/coach', { disableRestore: true }));
     // Unified import-tool controls (home + modal share the same component classes)
     this._initImportToolTabs();
     document.querySelectorAll('.import-tool').forEach((tool) => {
@@ -9666,8 +9649,11 @@ _showPuzzleSuccessOverlay() {
     }
     if (this.currentMoveIndex === idx) {
       this._applyLiveResultToUI(liveResult, { context: { moveObj } });
+      // Only repaint the eval bar when the deepened move is the one the user is
+      // actually viewing — a stale deepening pass for a move they've left must
+      // not keep re-animating the bar (the "eval bar lags while navigating" bug).
+      this._updateEvalBar(liveResult.evalAfter);
     }
-    this._updateEvalBar(liveResult.evalAfter);
     // liveEvalHistory is a SLIDING WINDOW: both push sites trim to the last
     // 60 evals with shift(), so an absolute moveIndex stops addressing this
     // array once the window slides — and idx >= 60 SPARSE-EXTENDS it with
@@ -11578,28 +11564,42 @@ _showMoveBadge(classification, targetSquare, options = {}) {
 			    // here would race with it.
 		
 			    try {
-				      const response = await apiFetch('/api/analyze/stream', {
-				        method: 'POST',
-				        headers: await this._authHeaders({ 'Content-Type': 'application/json', Accept: 'text/event-stream' }),
-			        signal: controller.signal,
-			        cache: 'no-store',
-			        body: JSON.stringify({
-			          moves: this.gameMoves,
-			          headers: this.gameHeaders || {},
-			          initialFen: this.initialFen,
-				          profile: (() => {
-				            const serverStrength = this.engineSettings.serverStrength || 'normal';
-				            if (serverStrength === 'fast') {
-				              return { key: 'fast', strength: 'fast', depth: 10, multiPv: 2, timeoutMs: 3000, serverEngine: 'lite' };
-				            }
-				            if (serverStrength === 'strong' && this._isPaidOrAbove('boost')) {
-				              const tier = window.getReviewStrengthTier ? window.getReviewStrengthTier('thorough') : getReviewStrengthTier('thorough');
-				              return { key: 'thorough', strength: 'strong', depth: tier.depth, multiPv: tier.multiPv, timeoutMs: tier.timeoutMs, serverEngine: 'full' };
-				            }
-				            return { key: reviewProfile.key, strength: 'standard', depth: reviewProfile.depth, multiPv: reviewProfile.multiPv, timeoutMs: reviewProfile.timeoutMs, serverEngine: 'lite' };
-				          })()
-			        }),
-			      });
+      const connectController = new AbortController();
+      const connectTimer = setTimeout(() => connectController.abort(), 20000);
+      const response = await Promise.race([
+        apiFetch('/api/analyze/stream', {
+          method: 'POST',
+          headers: await this._authHeaders({ 'Content-Type': 'application/json', Accept: 'text/event-stream' }),
+          signal: controller.signal,
+          cache: 'no-store',
+          body: JSON.stringify({
+            moves: this.gameMoves,
+            headers: this.gameHeaders || {},
+            initialFen: this.initialFen,
+            profile: (() => {
+              const serverStrength = this.engineSettings.serverStrength || 'normal';
+              if (serverStrength === 'fast') {
+                return { key: 'fast', strength: 'fast', depth: 10, multiPv: 2, timeoutMs: 3000, serverEngine: 'lite' };
+              }
+              if (serverStrength === 'strong' && this._isPaidOrAbove('boost')) {
+                const tier = window.getReviewStrengthTier ? window.getReviewStrengthTier('thorough') : getReviewStrengthTier('thorough');
+                return { key: 'thorough', strength: 'strong', depth: tier.depth, multiPv: tier.multiPv, timeoutMs: tier.timeoutMs, serverEngine: 'full' };
+              }
+              return { key: reviewProfile.key, strength: 'standard', depth: reviewProfile.depth, multiPv: reviewProfile.multiPv, timeoutMs: reviewProfile.timeoutMs, serverEngine: 'lite' };
+            })()
+          }),
+        }),
+        new Promise((_, reject) => {
+          // The caller's own Stop still aborts via controller.signal; only
+          // our connect timeout turns into a quick browser-fallback error.
+          if (controller.signal.aborted) { reject(new Error('Server review cancelled.')); return; }
+          connectController.signal.addEventListener('abort', () => {
+            if (controller.signal.aborted) reject(new Error('Server review cancelled.'));
+            else { const e = new Error('Server review is taking too long to connect. Trying your browser instead.'); e.retryable = true; reject(e); }
+          }, { once: true });
+        }),
+      ]);
+      clearTimeout(connectTimer);
 			      if (!response.ok) {
 			        const text = await response.text().catch(() => '');
 			        throw new Error(text || `Server analysis failed with ${response.status}`);

@@ -897,7 +897,9 @@ class ChessBoard {
     overlay.innerHTML = `
       <span class="board-loading-spinner material-symbols-outlined" aria-hidden="true">progress_activity</span>
       <span class="board-loading-text"></span>
+      <span class="board-loading-pct" aria-hidden="true"></span>
       <div class="board-loading-progress"><div class="board-loading-progress-fill"></div></div>
+      <span class="board-loading-fun" aria-hidden="true"></span>
       <div class="board-skeleton" aria-hidden="true">
         <div class="board-skeleton-row"></div>
         <div class="board-skeleton-row"></div>
@@ -1027,13 +1029,34 @@ class ChessBoard {
     const text = overlay.querySelector('.board-loading-text');
     if (text) text.textContent = this.loadingMessage;
 
+    const hasProgress = (typeof this.loadingProgress === 'number' && Number.isFinite(this.loadingProgress));
+
+    // Big percentage readout above the progress bar.
+    const pctEl = overlay.querySelector('.board-loading-pct');
+    if (pctEl) {
+      pctEl.textContent = hasProgress ? `${Math.max(0, Math.min(100, Math.round(this.loadingProgress)))}%` : '';
+      pctEl.classList.toggle('active', hasProgress);
+    }
+
     // Progress bar: visible only when a numeric progress has been set.
     const fill = overlay.querySelector('.board-loading-progress-fill');
     const bar = overlay.querySelector('.board-loading-progress');
     if (bar && fill) {
-      const hasProgress = (typeof this.loadingProgress === 'number' && Number.isFinite(this.loadingProgress));
       bar.classList.toggle('active', hasProgress);
       fill.style.width = hasProgress ? `${Math.max(0, Math.min(100, this.loadingProgress))}%` : '0%';
+    }
+
+    // A short rotating "fun" line under the bar (e.g. "Getting your blunders
+    // ready…") — cycles through a small set as progress climbs so the on-board
+    // reviewer feels alive rather than stuck. Shown once a percentage exists.
+    const funEl = overlay.querySelector('.board-loading-fun');
+    if (funEl) {
+      const msgs = this._loadingFunMessages();
+      const idx = hasProgress
+        ? Math.min(msgs.length - 1, Math.floor((this.loadingProgress / 100) * msgs.length))
+        : 0;
+      funEl.textContent = hasProgress ? msgs[idx] : '';
+      funEl.classList.toggle('active', hasProgress);
     }
 
     overlay.classList.add('active');
@@ -1047,6 +1070,20 @@ class ChessBoard {
       overlay.style.left = '50%';
       overlay.style.top = '50%';
     }
+  }
+
+  // Light, chess-flavored status lines shown under the on-board review progress.
+  _loadingFunMessages() {
+    return [
+      'Getting your blunders ready…',
+      'Asking Stockfish what it thinks…',
+      'Weighing your brilliant moves…',
+      'Counting your misses…',
+      'Polishing your accuracy…',
+      'Sniffing out winning plans…',
+      'Filing away the inaccuracies…',
+      'Almost there…',
+    ];
   }
 
   // Drag and drop

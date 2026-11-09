@@ -75,9 +75,13 @@ body.no-piece-animations .piece { animation: none; }
 .board-loading-overlay.active { opacity: 1; }
 .board-loading-spinner { font-size: 28px; animation: spin .8s linear infinite; }
 .board-loading-text { font-size: 11px; text-align: center; }
+.board-loading-pct { display: none; font: 700 26px var(--font-mono); line-height: 1; }
+.board-loading-pct.active { display: block; }
 .board-loading-progress { width: 120px; height: 4px; background: var(--border-color); border-radius: 4px; overflow: hidden; display: none; }
 .board-loading-progress.active { display: block; }
 .board-loading-progress-fill { height: 100%; background: var(--accent); transition: width .2s; }
+.board-loading-fun { display: none; font-size: 10.5px; color: var(--text-muted); text-align: center; font-style: italic; max-width: 180px; }
+.board-loading-fun.active { display: block; }
 /* Skeleton loading state shown inside the board loading overlay. */
 .board-skeleton { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; width: 140px; }
 .board-skeleton-row { height: 10px; border-radius: 4px; background: var(--border-color); animation: board-skeleton-pulse 1.4s ease-in-out infinite; }

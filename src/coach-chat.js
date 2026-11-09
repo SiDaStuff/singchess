@@ -969,8 +969,9 @@
       return;
     }
 
-    // Use iterative deepening — no fixed depth cap. Show progress on each
-    // depth increase so the user sees the engine working.
+    // Iterative deepening capped at depth 20 (the coach's stockfish tool uses a
+    // fixed depth so an eval is returned promptly and consistently). Show
+    // progress on each depth increase so the user sees the engine working.
     showTyping('Analyzing position…');
     let lastDepth = 0;
     const result = await app.engine.evaluateInfinite(fen, 20000, (info) => {
@@ -978,7 +979,7 @@
         lastDepth = info.depth;
         showTyping(`Depth ${info.depth}${info.score !== undefined ? ` (${info.scoreType === 'mate' ? `#${info.score}` : (info.score / 100).toFixed(2)})` : ''}…`);
       }
-    });
+    }, 20);
     if (repairedNote) result.repaired = repairedNote;
 
     // Guard against a useless/empty result. A timed-out search returns

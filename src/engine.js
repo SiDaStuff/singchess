@@ -121,11 +121,11 @@ class UciEngine {
    * Calls `onDepth(info)` on every depth increase so the UI can show progress.
    * Returns the final result (same shape as evaluate()).
    */
-  async evaluateInfinite(fen, timeoutMs = 20000, onDepth = null) {
-    return this._runExclusive(() => this._evaluateInfinite(fen, timeoutMs, onDepth));
+  async evaluateInfinite(fen, timeoutMs = 20000, onDepth = null, maxDepth = null) {
+    return this._runExclusive(() => this._evaluateInfinite(fen, timeoutMs, onDepth, maxDepth));
   }
 
-  async _evaluateInfinite(fen, timeoutMs = 20000, onDepth = null) {
+  async _evaluateInfinite(fen, timeoutMs = 20000, onDepth = null, maxDepth = null) {
     await globalThis.window?.PlayFairPlay?.assertCanAnalyze();
     if (!this.ready) {
       if (this.crashedError) {
@@ -188,6 +188,13 @@ class UciEngine {
                 nodes: info.nodes,
                 time: info.time,
               });
+            }
+            // Depth cap: once we've reached the requested depth, stop this
+            // search and return the best line found so far (e.g. the AI coach's
+            // stockfish tool caps at depth 20). The engine emits the final
+            // "bestmove" after _safeStop(), which resolves via finish() below.
+            if (typeof maxDepth === 'number' && info.depth >= maxDepth && !settled) {
+              this._safeStop();
             }
           }
         }

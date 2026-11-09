@@ -12,8 +12,8 @@ kbd { font: 11px var(--font-mono); padding: 3px 6px; border: 1px solid var(--bor
 .board-stage { position: relative; width: 100%; aspect-ratio: 1; }
 .eval-bar-container { position: absolute; top: 0; left: calc(-1 * var(--eval-offset)); width: 22px; height: 100%; }
 .eval-bar { width: 12px; height: 100%; overflow: hidden; border-radius: 4px; display: flex; flex-direction: column; background: #eee; border: 1px solid var(--border-color); }
-.eval-bar-black { background: #323831; height: 50%; width: 100%; flex: 0 0 auto; transition: height .3s; }
-.eval-bar-white { background: #f0eee4; height: 50%; width: 100%; flex: 0 0 auto; transition: height .3s; }
+.eval-bar-black { background: #323831; height: 50%; width: 100%; flex: 0 0 auto; transition: height .1s; }
+.eval-bar-white { background: #f0eee4; height: 50%; width: 100%; flex: 0 0 auto; transition: height .1s; }
 .eval-score { position: absolute; top: calc(100% + 8px); left: 0; font: 10px var(--font-mono); text-align: left; color: var(--text-secondary); }
 .analysis-panel { grid-area: analysis; min-width: 0; display: flex; flex-direction: column; gap: 14px; padding-top: 3px; }
 .analysis-tabs { display: flex; gap: 4px; background: var(--bg-panel); border: 1px solid var(--border-soft); border-radius: 8px; padding: 4px; }
