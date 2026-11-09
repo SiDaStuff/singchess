@@ -95,12 +95,8 @@ class ChessReviewApp {
 	    this.liveMoveResults = [];
 	    this.explorerReturnState = null;
     this.exploreLineMode = false;
-    // Guided review + try-again state
+    // Review mode = 'summary' (Guided Review / Self Analysis removed).
     this.reviewMode = 'summary';
-    this.guidedKeyMoves = [];
-    this.guidedIndex = -1;
-    this._guidingDuringTryAgain = false;
-    this.tryAgainState = null;
     // "Explore Best Move" preview state — when set, the board is showing the
     // position after the engine's recommended move as a read-only preview.
     // _exitBestMovePreview() restores the saved board. No move can be played
@@ -390,6 +386,7 @@ class ChessReviewApp {
 	    this.elBtnMenuCoach = document.getElementById('btn-menu-coach');
 		    this.elBtnMenuPuzzles = document.getElementById('btn-menu-puzzles');
 		    this.elBtnMenuAnticheat = document.getElementById('btn-menu-anticheat');
+		    this.elCoachFab = document.getElementById('coach-fab');
 		    // HTML uses `btn-menu-plans` (Plans page replaced Boost page). The
 		    // home feature card is the only place this lives; keep an alias
 		    // so legacy code that referenced `btn-menu-boost` keeps working.
@@ -640,31 +637,7 @@ class ChessReviewApp {
 
     this.elCriticalMoments = document.getElementById('critical-moments');
     this.elCriticalList = document.getElementById('critical-list');
-    // Guided review + review-mode switcher + try-again
-    this.elReviewModeBar = document.getElementById('review-mode-bar');
-    this.elReviewModeBtns = [...document.querySelectorAll('.review-mode-btn')];
-    this.elGuidedReview = document.getElementById('guided-review');
-    this.elGuidedProgress = document.getElementById('guided-progress');
-    this.elGuidedCount = document.getElementById('guided-count');
-    this.elGuidedPrevKey = document.getElementById('btn-guided-prev-key');
-    this.elGuidedNextKey = document.getElementById('btn-guided-next-key');
-    this.elGuidedMoveNumber = document.getElementById('guided-move-number');
-    this.elGuidedMoveSan = document.getElementById('guided-move-san');
-    this.elGuidedClassBadge = document.getElementById('guided-class-badge');
-    this.elGuidedWhy = document.getElementById('guided-why');
-    this.elGuidedExplanation = document.getElementById('guided-explanation');
-    this.elGuidedTryAgain = document.getElementById('btn-guided-try-again');
-    this.elGuidedBestLineBtn = document.getElementById('btn-guided-best-line');
-    this.elGuidedBestCont = document.getElementById('guided-best-cont');
-    this.elGuidedBestLine = document.getElementById('guided-best-line');
-    this.elTryAgainPanel = document.getElementById('try-again-panel');
-    this.elTryAgainCopy = document.getElementById('try-again-copy');
-    this.elTryAgainResult = document.getElementById('try-again-result');
-    this.elTryAgainSolution = document.getElementById('btn-try-again-solution');
-    this.elTryAgainDone = document.getElementById('btn-try-again-done');
-    this.elTryAgainClose = document.getElementById('btn-try-again-close');
-    this.elBtnReviewStartGuided = document.getElementById('btn-review-start-guided');
-    this.elBtnReviewSelf = document.getElementById('btn-review-self');
+    // Play Again (Guided Review & Self Analysis removed).
     this.elBtnReviewPlayAgain = document.getElementById('btn-review-play-again');
 
     this.elPgnModal = document.getElementById('pgn-modal');
@@ -1370,6 +1343,17 @@ if (this.elTermsPage) this.elTermsPage.hidden = true;
 		        if (linkPath === currentPath) link.classList.add('active');
 		      }
 		    });
+		    this._updateCoachFab();
+		  }
+
+		  // Show/hide the persistent floating Coach button. Visible whenever the
+		  // user is signed in and NOT already on the coach route (it's redundant
+		  // there — the panel is the coach). Requires login, so hide for guests.
+		  _updateCoachFab() {
+		    if (!this.elCoachFab) return;
+		    const signedIn = !!(this.authState && this.authState.user);
+		    const onCoach = this._normalizeRoute(window.location.pathname || '/') === '/coach';
+		    this.elCoachFab.hidden = !signedIn || onCoach;
 		  }
 
 	  // Mobile nav drawer open/close helpers. Toggle the scrim, body scroll-lock,
@@ -3012,6 +2996,8 @@ return window.firebase;
               // Coach chat: re-evaluate the Max gate after auth resolves (src/coach-chat.js
               // owns model pref + history hydration on mount).
               if (this.coachChat.active && window.CoachChat) window.CoachChat.onAuth(this);
+              // Persistent floating Coach button reacts to login/logout state.
+              this._updateCoachFab();
               // Part 1c: a signed-in user who hasn't completed onboarding is
               // sent to the wizard — but never mid-session (don't yank them out
               // of an active review/coach/puzzle/anticheat run).
@@ -5014,6 +5000,9 @@ this._syncAnticheatForm();
 	    this.elBtnMenuPuzzles?.addEventListener('click', () => this._navigateTo('/puzzles', { disableRestore: true }));
 	    this.elBtnMenuAnticheat?.addEventListener('click', () => this._navigateTo('/anticheat', { disableRestore: true }));
     this.elBtnMenuBoost?.addEventListener('click', () => this._navigateTo('/plans', { disableRestore: true }));
+    // Persistent floating Coach button — one-tap access to the AI coach from
+    // any route. Always navigates to /coach (a no-op if already there).
+    this.elCoachFab?.addEventListener('click', () => this._navigateTo('/coach', { disableRestore: true }));
     // Unified import-tool controls (home + modal share the same component classes)
     this._initImportToolTabs();
     document.querySelectorAll('.import-tool').forEach((tool) => {
@@ -7635,9 +7624,10 @@ _showPuzzleSuccessOverlay() {
   }
 
   // ── AI Coach chat ───────────────────────────────────────────────────
-  // /coach is now a streaming chat with a Cerebras-backed LLM that can call
-  // tools (stockfish runs in THIS browser via this.engine.evaluate; web_search
-  // + coach_games run server-side). Max-users-only. History persists server-side.
+  // /coach is a streaming chat backed by the configured LLM provider
+  // (freeinference.org / qwen3.6-35b) that can call tools (stockfish runs in
+  // THIS browser via this.engine.evaluate; web_search + coach_games run
+  // server-side). Available to signed-in plans under the daily token allowance.
 
   async _enterCoachChat() {
     // /coach is its own full-screen page-panel route. The chat experience
@@ -10583,6 +10573,12 @@ _saveGameState() {
 		    this._updateCurrentMoveIndicator();
 		    this._updateClockDisplays();
 		    if (!this.isAnalyzing) this._saveGameState();
+		    // Auto-show the AI coach's per-move explanation inline (debounced)
+		    // when the user lands on a move in a finished review — a live
+		    // inline coach instead of the small hidden "Ask Coach" button.
+		    if (!this.isAnalyzing && !window.PlayFairPlay?.isBlocked()) {
+		      this._coachInlineOnMove(index);
+		    }
 		  }
 
   // ---- Progressive per-move loading ---------------------------------------
@@ -10780,11 +10776,10 @@ _saveGameState() {
   }
 
   // ---- Review-mode switcher: Game Summary / Guided Review / Self Analysis ----
+  // Review completion: show the game-summary view. Guided Review and Self
+  // Analysis modes were removed (2026-11); the summary is the only review view.
   _revealGuidedReview() {
     if (!this.analysisResults || !this.analysisResults.length) return;
-    this._buildGuidedKeyMoves();
-    if (this.elReviewModeBar) this.elReviewModeBar.hidden = false;
-    // Default to the summary mode once analysis completes.
     this._setReviewMode('summary');
   }
 
@@ -10795,236 +10790,18 @@ _saveGameState() {
   }
 
   _bindReviewModeControls() {
-    (this.elReviewModeBtns || []).forEach((btn) => {
-      btn.addEventListener('click', () => this._setReviewMode(btn.dataset.reviewMode));
-    });
-    if (this.elGuidedPrevKey) this.elGuidedPrevKey.addEventListener('click', () => this._guidedStep(-1));
-    if (this.elGuidedNextKey) this.elGuidedNextKey.addEventListener('click', () => this._guidedStep(1));
-    if (this.elGuidedTryAgain) this.elGuidedTryAgain.addEventListener('click', () => this._startTryAgain());
-    if (this.elGuidedBestLineBtn) this.elGuidedBestLineBtn.addEventListener('click', () => this._toggleGuidedBestLine());
-    if (this.elTryAgainClose) this.elTryAgainClose.addEventListener('click', () => this._exitTryAgain());
-    if (this.elTryAgainDone) this.elTryAgainDone.addEventListener('click', () => this._exitTryAgain());
-    if (this.elTryAgainSolution) this.elTryAgainSolution.addEventListener('click', () => this._revealTryAgainSolution());
-    if (this.elBtnReviewStartGuided) this.elBtnReviewStartGuided.addEventListener('click', () => this._setReviewMode('guided'));
-    if (this.elBtnReviewSelf) this.elBtnReviewSelf.addEventListener('click', () => this._setReviewMode('self'));
     if (this.elBtnReviewPlayAgain) this.elBtnReviewPlayAgain.addEventListener('click', () => this._playAgainFromReview());
   }
 
-  _setReviewMode(mode) {
-    if (!['summary', 'guided', 'self'].includes(mode)) mode = 'summary';
-    this.reviewMode = mode;
-    (this.elReviewModeBtns || []).forEach((btn) => {
-      const active = btn.dataset.reviewMode === mode;
-      btn.classList.toggle('active', active);
-      btn.setAttribute('aria-selected', String(active));
-    });
-    if (this.elReviewSummary) this.elReviewSummary.style.display = mode === 'summary' ? 'block' : 'none';
-    if (this.elCriticalMoments) this.elCriticalMoments.style.display = mode === 'summary' && this.analysisResults ? 'block' : 'none';
-    if (this.elGuidedReview) this.elGuidedReview.hidden = mode !== 'guided';
-    if (this.elTryAgainPanel) this.elTryAgainPanel.hidden = mode !== 'guided' || !this.tryAgainState;
-    if (mode === 'guided') {
-      if (!this.guidedKeyMoves.length) this._buildGuidedKeyMoves();
-      if (this.guidedIndex < 0 && this.guidedKeyMoves.length) { this.guidedIndex = 0; this._renderGuidedMove(); }
-      else if (this.guidedKeyMoves.length) this._renderGuidedMove();
-      else this._renderGuidedEmpty();
-    }
+  // Summary is the only review mode now (Guided Review / Self Analysis removed).
+  // Kept as a thin helper so the summary + eval graph stay visible.
+  _setReviewMode() {
+    this.reviewMode = 'summary';
+    if (this.elReviewSummary) this.elReviewSummary.style.display = 'block';
+    if (this.elCriticalMoments && this.analysisResults) this.elCriticalMoments.style.display = 'block';
     this._drawEvalGraph();
   }
 
-  _buildGuidedKeyMoves() {
-    this.guidedKeyMoves = [];
-    if (!this.analysisResults || !this.analysisResults.length) return;
-    const results = this.analysisResults;
-    const isErrorKey = (k) => ['INACCURACY', 'MISTAKE', 'BLUNDER', 'MISS'].includes(k);
-    const goodKey = (k) => ['BRILLIANT', 'GREAT', 'BEST', 'EXCELLENT'].includes(k);
-    const scored = results
-      .filter((m) => m && !m.isCoachMove && m.moveIndex >= 0)
-      .map((m) => {
-        const key = m.classificationKey || this._classificationKey(m.classification) || '';
-        let score = 0;
-        // Mistakes and missed opportunities rank highest.
-        if (isErrorKey(key)) score += (m.severityScore || 0) * 3;
-        // Severe evaluation swings are always worth revisiting.
-        score += Math.min(12, Math.abs(m.cpLoss || 0) / 40);
-        // Tactical motifs (misses, mate threats) matter.
-        if (key === 'MISS') score += 10;
-        if (key === 'BLUNDER') score += 6;
-        if (key === 'MISTAKE') score += 4;
-        if (m.isCriticalMoment) score += 6;
-        // Big swings that changed who was winning.
-        if ((m.playerEdgeBefore || 0) !== null && (m.playerEdgeAfter || 0) !== null) {
-          score += Math.min(8, Math.abs((m.playerEdgeAfter || 0) - (m.playerEdgeBefore || 0)) * 2);
-        }
-        // Key good moves (turning point wins) are worth surfacing too.
-        if (goodKey(key)) score += Math.min(6, (m.swing || 0) > 0 ? 3 : 0) + (m.isCriticalMoment ? 3 : 0);
-        return { move: m, score };
-      })
-      .filter((entry) => entry.score >= 6)
-      .sort((a, b) => b.score - a.score);
-
-    // Deterministic: primary sort by score, secondary by move order.
-    this.guidedKeyMoves = scored
-      .sort((a, b) => b.score - a.score || a.move.moveIndex - b.move.moveIndex)
-      .slice(0, 12)
-      .map((entry) => entry.move);
-  }
-
-  _renderGuidedEmpty() {
-    if (this.elGuidedProgress) this.elGuidedProgress.textContent = 'No key moments were found in this game.';
-    if (this.elGuidedCount) this.elGuidedCount.textContent = '0';
-    if (this.elGuidedMoveSan) this.elGuidedMoveSan.textContent = '—';
-    if (this.elGuidedWhy) this.elGuidedWhy.textContent = '';
-    if (this.elGuidedExplanation) this.elGuidedExplanation.textContent = 'Move through the whole game in Self Analysis, or flip to the Moves tab to inspect every move.';
-    if (this.elGuidedClassBadge) this.elGuidedClassBadge.innerHTML = '';
-  }
-
-  _renderGuidedMove() {
-    const move = this.guidedKeyMoves[this.guidedIndex];
-    if (!move) { this._renderGuidedEmpty(); return; }
-    if (this.elGuidedProgress) this.elGuidedProgress.textContent = `Key moment ${this.guidedIndex + 1} of ${this.guidedKeyMoves.length}`;
-    if (this.elGuidedCount) this.elGuidedCount.textContent = `${this.guidedIndex + 1}/${this.guidedKeyMoves.length}`;
-    if (this.elGuidedMoveNumber) this.elGuidedMoveNumber.textContent = `${move.moveNumber}${move.isWhite ? '.' : '...'}`;
-    if (this.elGuidedMoveSan) this.elGuidedMoveSan.textContent = move.moveSan || '';
-    const key = this._classificationKey(move.classification) || '';
-    if (this.elGuidedClassBadge) this.elGuidedClassBadge.innerHTML = this._classificationIconHtml(move.classification, 'guided-class-badge');
-    if (this.elGuidedWhy) {
-      this.elGuidedWhy.textContent = move.classification?.name || key.charAt(0) + key.slice(1).toLowerCase() || '';
-    }
-    // Explanation.
-    let explanation = null;
-    try { explanation = this.analyzer?.explainResult ? this.analyzer.explainResult(move) : (move.coachText || null); }
-    catch (_e) { explanation = move.coachText || null; }
-    if (this.elGuidedExplanation) this.elGuidedExplanation.textContent = explanation || (move.coachText || '');
-    // Best move + continuation.
-    if (this.elGuidedBestLine) {
-      const bestSan = move.bestMoveSan || move.opponentBestMoveSan || '';
-      const line = move.bestMovePvSan || move.opponentPvSan || '';
-      this.elGuidedBestLine.textContent = bestSan ? `${bestSan}${line && !bestSan ? '' : line ? ` — ${line}` : ''}` : (line || '');
-    }
-    if (this.elGuidedBestCont) this.elGuidedBestCont.hidden = true;
-    // Navigate the board to this move.
-    this._goToMove(move.moveIndex);
-  }
-
-  _guidedStep(dir) {
-    if (!this.guidedKeyMoves.length) return;
-    const next = (this.guidedIndex + dir + this.guidedKeyMoves.length) % this.guidedKeyMoves.length;
-    this.guidedIndex = next;
-    this._renderGuidedMove();
-  }
-
-  _toggleGuidedBestLine() {
-    if (!this.elGuidedBestCont) return;
-    this.elGuidedBestCont.hidden = !this.elGuidedBestCont.hidden;
-  }
-
-  // ---- Try Again: return to a position, hide best move, try a better one ----
-  _startTryAgain() {
-    if (this.tryAgainState) { this._exitTryAgain(); return; }
-    const move = this.guidedKeyMoves[this.guidedIndex];
-    if (!move || !['INACCURACY', 'MISTAKE', 'BLUNDER', 'MISS'].includes(this._classificationKey(move.classification))) return;
-    // The move BEFORE the error is the position to retry from.
-    const idx = move.moveIndex;
-    const beforeIndex = idx - 1;
-    if (beforeIndex < 0) return;
-    this.tryAgainState = { moveIndex: idx, beforeIndex, targetMoveSan: move.moveSan, bestMove: move.bestMove, attempts: 0, improved: false };
-    this._guidingDuringTryAgain = true;
-    // Go to the pre-mistake position.
-    this._goToMove(beforeIndex);
-    // Hide the best-move arrow for the retry position and let the user play.
-    this.board.clearBestMoveArrow();
-    this.board.interactive = true;
-    this._prevOnMove = this.board.onMove;
-    this.board.onMove = (from, to) => { this._onTryAgainMove({ from, to }); return false; };
-    if (this.elTryAgainPanel) { this.elTryAgainPanel.hidden = false; }
-    if (this.elTryAgainCopy) this.elTryAgainCopy.textContent = `The move ${this.tryAgainState.targetMoveSan} allowed an advantage to slip. Play a better move from this position.`;
-    if (this.elTryAgainResult) { this.elTryAgainResult.hidden = true; this.elTryAgainResult.innerHTML = ''; }
-    this._syncPlayerNameplates();
-  }
-
-  _exitTryAgain() {
-    this.tryAgainState = null;
-    this._guidingDuringTryAgain = false;
-    if (this.board) {
-      this.board.interactive = false;
-      this.board.clearBestMoveArrow();
-      this.board.onMove = this._prevOnMove || ((from, to) => this._handleBoardMove(from, to));
-      this._prevOnMove = null;
-    }
-    if (this.elTryAgainPanel) this.elTryAgainPanel.hidden = true;
-    if (this.guidedKeyMoves.length && this.guidedIndex >= 0) this._goToMove(this.guidedKeyMoves[this.guidedIndex].moveIndex);
-    else if (this.analysisResults?.length) this._goToMove(Math.min(this.currentMoveIndex, this.analysisResults.length - 1));
-  }
-
-  _onTryAgainMove(detail) {
-    if (!this.tryAgainState || !detail) return;
-    const { from, to } = detail;
-    this.tryAgainState.attempts += 1;
-    const target = this.tryAgainState;
-    const playedMove = `${from}${to}`;
-    // Try to apply the move so the board shows the consequence.
-    try {
-      const move = this.chess.move({ from, to });
-      this.board.setChessInstance(this.chess);
-      this.board.animateNextUpdate();
-      this._updateBoard();
-    } catch (_e) { /* illegal move — ignore */ }
-    // Find the analysis result for the retry position (beforeIndex) to compare.
-    const beforeResult = this.analysisResults?.[target.beforeIndex];
-    const best = beforeResult?.bestMove || '';
-    const isBest = !!(best && playedMove === best);
-    const cpBefore = beforeResult?.evalBefore != null ? beforeResult.evalBefore : null;
-    let verdict = '';
-    if (isBest) {
-      verdict = `Good — that's the engine's best move. This keeps the position strong (evaluation ${this._cpText(cpBefore)}).`;
-      target.improved = true;
-    } else if (beforeResult?.alternatives?.length) {
-      // Check if the played move is among the engine's alternatives.
-      const alt = beforeResult.alternatives.find((a) => a.moveUci === playedMove);
-      if (alt) {
-        const diff = cpBefore != null && alt.eval != null ? Math.abs(cpBefore - alt.eval) : null;
-        verdict = diff != null && diff <= 60
-          ? `A reasonable move — it improves on the blunder and keeps close to the best play.`
-          : `This is better than the move played — a solid step up. Booking this pattern is a win.`;
-        target.improved = true;
-      } else {
-        verdict = `That move isn't one of the engine's top alternatives here. Try another, or press Show Solution.`;
-        target.improved = false;
-      }
-    } else {
-      verdict = `That isn't the engine's best line here. Keep looking — or press Show Solution.`;
-      target.improved = false;
-    }
-    if (this.elTryAgainResult) {
-      this.elTryAgainResult.hidden = false;
-      this.elTryAgainResult.className = 'try-again-result' + (target.improved ? ' good' : ' bad');
-      this.elTryAgainResult.innerHTML = `<span class="material-symbols-outlined" aria-hidden="true">${target.improved ? 'check_circle' : 'error'}</span><span>${verdict}</span>`;
-    }
-    return false;
-  }
-
-  _cpText(cp) {
-    if (cp == null) return '0.0';
-    if (Math.abs(cp) >= 9000) return cp > 0 ? 'mate' : '-mate';
-    return ((cp / 100).toFixed(1));
-  }
-
-  _revealTryAgainSolution() {
-    if (!this.tryAgainState) return;
-    const beforeResult = this.analysisResults?.[this.tryAgainState.beforeIndex];
-    const best = beforeResult?.bestMove || '';
-    if (best && this.elTryAgainResult) {
-      this.elTryAgainResult.hidden = false;
-      this.elTryAgainResult.className = 'try-again-result good';
-      const bestSan = beforeResult.bestMoveSan || best;
-      const line = beforeResult.bestMovePvSan || '';
-      this.elTryAgainResult.innerHTML = `<span class="material-symbols-outlined" aria-hidden="true">psychology</span><span>The best move is <strong>${bestSan}</strong>.${line ? ` Best continuation: ${line}` : ''}</span>`;
-      // Show the best-move arrow on the retry position.
-      if (this.board && beforeResult.moveIndex === this.tryAgainState.beforeIndex) {
-        this.board.setBestMoveArrow(best);
-      }
-    }
-  }
 
   _playNamedSound(name) {
     this.boardSounds.play(name === 'promote' ? 'promotion' : name);
@@ -13051,6 +12828,40 @@ _showMoveBadge(classification, targetSquare, options = {}) {
     const idx = this.currentMoveIndex;
     if (idx == null || !this.analysisResults?.[idx]) return;
     this._streamCoachOverview(this.elInsightCoachResult, 'move', { moveIndex: idx });
+  }
+
+  // Auto-show the per-move AI coach explanation inline (debounced). Turns the
+  // small hidden "Ask Coach" insight button into a live coach that explains
+  // each move as you navigate a finished review. Fires only for a real
+  // reviewed move of the main line in a completed review; never in
+  // live/explorer/sub-line/preview states. Debounced so arrow-key navigation
+  // coalesces onto the settled move. The user can disable it per session via
+  // a persistent flag (default ON).
+  _coachInlineOnMove(index) {
+    const el = this.elInsightCoachResult;
+    if (!el) return;
+    // Only auto-explain reviewed main-line moves (not sub-lines / previews).
+    if (index == null || index < 0) return;
+    const result = this.analysisResults?.[index];
+    if (!result || result.isCoachMove || !result.fen) return;
+    // Don't auto-run while a live search / deepening is in flight.
+    if (this.isAnalyzing) return;
+    // Respect the per-session inline-coach toggle (default ON).
+    try { if (localStorage.getItem('sidastuff.coachInline') === 'off') return; } catch (_) {}
+    // Quota safety: don't AUTOMATICALLY burn a near-empty daily allowance on
+    // move navigation — the manual "Explain" button stays available for a
+    // deliberate spend. Skips auto-generation once usage is high.
+    const coachUsage = this.authState?.usage?.coachUsagePercent;
+    if (typeof coachUsage === 'number' && coachUsage >= 80) return;
+    // Debounce: rapid arrow navigation should only stream once the user rests
+    // on a move. The last pending timer wins; each call also aborts any prior
+    // overview stream for this element via _streamCoachOverview's token guard.
+    clearTimeout(this._coachInlineTimer);
+    this._coachInlineTimer = setTimeout(() => {
+      if (this.currentMoveIndex !== index) return; // user moved on
+      if (this.bestMovePreview || (this.activeLine && this.activeLine.kind === 'sub')) return;
+      this._streamCoachOverview(el, 'move', { moveIndex: index });
+    }, 700);
   }
 
   _askCoachForGame() {

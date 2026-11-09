@@ -1,0 +1,48 @@
+/* Floating Coach button + inline per-move coach (#sing chess review). */
+/* Lives in critical.css as the floating button is part of the app shell. */
+
+/* ── Persistent floating Coach button (FAB) ───────────────────────── */
+.coach-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border: none;
+  border-radius: 999px; /* pill */
+  background: var(--accent, #3e6f35);
+  color: var(--accent-contrast, #fff);
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+  transition: transform 120ms ease, background 120ms ease, box-shadow 120ms ease;
+  font: inherit;
+  line-height: 1;
+}
+.coach-fab:hover { background: var(--accent-hover, #31592b); transform: translateY(-1px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28); }
+.coach-fab:focus-visible { outline: 3px solid var(--accent, #3e6f35); outline-offset: 2px; }
+.coach-fab .coach-fab-icon { display: inline-flex; }
+.coach-fab .coach-fab-label { font-weight: 600; }
+.coach-fab[hidden] { display: none; }
+
+/* Don't overlap the review board controls on short screens — keep it clear
+   of the bottom-right action cluster < 760px. */
+@media (max-width: 760px) {
+  .coach-fab {
+    right: 14px;
+    bottom: 14px;
+    left: auto;
+    padding: 12px 14px;
+  }
+  .coach-fab .coach-fab-label { display: none; } /* icon-only on phones */
+}
+
+/* ── Inline per-move coach explanation ─────────────────────────────── */
+/* The coach is a supported first-class feature — if a Beta badge is ever
+   added back to the insight/game coach buttons, it is hidden. */
+#btn-insight-coach .beta-badge,
+#btn-game-coach .beta-badge {
+  display: none;
+}

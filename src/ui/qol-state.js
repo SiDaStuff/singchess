@@ -7,6 +7,7 @@ export const DEFAULTS = Object.freeze({
   contrast: 'normal', palette: 'default', reducedMotion: false, fontSize: 12,
   boardSize: 640, panelWidth: 420, firstMistake: true, notifications: false,
   tenths: true, multiPremoves: false, puzzleTheme: 'mix', puzzleDifficulty: 'normal',
+  inlineCoach: true,
 });
 export function normalizePreferences(input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) input = {};

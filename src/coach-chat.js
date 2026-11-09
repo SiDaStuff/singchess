@@ -9,7 +9,8 @@
 // History sent to the backend on each request (the backend no longer persists).
 
 (function () {
-  // The server uses Nemotron Ultra first, then GPT-OSS fallbacks.
+  // The server uses qwen3.6-35b (freeinference.org) first, with optional env
+  // fallbacks.
 
   const state = {
     app: null,            // the ChessReviewApp instance (for auth + engine)
@@ -551,9 +552,11 @@
       await readStream(response, {
         onInit: (data) => { if (data && data.pid) state.chatPid = data.pid; },
         onModel: (model) => {
-          if (/gpt-oss/i.test(String(model || ''))) {
-            appendBubble('notice', 'Model fallback: this reply used a smaller GPT-OSS model because the primary model was unavailable. Verify important analysis with Stockfish.');
-          }
+          // When more than one model is configured (LLM_MODELS), a non-primary
+          // model means the primary was unavailable mid-run — flag it so the
+          // user knows to double-check engine claims.
+          if (/qwen/i.test(String(model || ''))) return; // primary — no notice
+          appendBubble('notice', 'Model fallback: this reply used a fallback model because the primary was unavailable. Verify important analysis with Stockfish.');
         },
         onReasoning: showReasoning,
         onToken: (t) => {

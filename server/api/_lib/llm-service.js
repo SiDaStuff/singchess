@@ -1,33 +1,45 @@
 // Unified LLM service for the AI Coach.
 //
-// Inference runs on NVIDIA ONLY. There is no Fast/Strong tier anymore — the
-// feature set was simplified to a single model:
+// Inference is OpenAI-compatible and hosted by a single configurable provider
+// (currently https://freeinference.org/v1). There is no Fast/Strong tier
+// anymore — the feature set was simplified to a single default model:
 //
-//   model list = [ nvidia/nemotron-3-ultra-550b-a55b ]
+//   model list = [ qwen3.6-35b ]
 //
-// chatCompletion tries the list in order. (The former gpt-oss-120b/20b
-// fallbacks reached end-of-life on NVIDIA NIM in Sept 2026 — every call
-// returned HTTP 410 "Gone" — so they were removed. Additional models can be
-// supplied via NVIDIA_MODELS env.) All models are OpenAI-compatible.
+// chatCompletion tries the list in order, so extra fallbacks can be supplied
+// via LLM_MODELS. All models are OpenAI-compatible.
+//
+// CONFIGURATION. The provider is fully env-driven so the key never has to be
+// hard-coded:
+//   LLM_BASE_URL  (default https://freeinference.org/v1)
+//   LLM_API_KEY   (required; the provider's API key)
+//   LLM_MODELS    (comma-separated ordered model ids; default qwen3.6-35b)
+// Legacy NVIDIA_* vars (NVIDIA_BASE_URL / NVIDIA_API_KEY / NVIDIA_MODELS) are
+// still honored as fallbacks so existing deployments keep working untouched;
+// the LLM_* vars win when both are set.
 //
 // `reasoning: false` (chatCompletion opt) disables the model's built-in
-// chain-of-thought via chat_template_kwargs.thinking=false. Nemotron 3 is a
-// thinking hybrid: without the switch it renders its reasoning as output
-// tokens, which for short-explanation endpoints (coach-overview.js with a 700
-// max-token cap) means the budget is exhausted mid-thought and the user sees
-// the raw chain of thought instead of the answer.
+// chain-of-thought. Qwen3 is a thinking hybrid: without the switch it renders
+// its reasoning as output tokens, which for short-explanation endpoints
+// (coach-overview.js with a 700 max-token cap) means the budget is exhausted
+// mid-thought and the user sees the raw chain of thought instead of the answer.
+// The disable signal differs per provider — NVIDIA/Bedrock-style endpoints
+// (nemotron) use chat_template_kwargs.thinking=false; vllm-hosted Qwen3 uses
+// chat_template_kwargs.enable_thinking=false. buildOpenAIBody picks the right
+// one for the model family.
 
 const { fetchCompat } = require('./fetch-compat');
 
-const NVIDIA_BASE_URL = process.env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1';
+function env(name, alt) { return String(process.env[name] || (alt && process.env[alt]) || '').trim(); }
 
-// Ordered model list. Nemotron Ultra is the only default (the former gpt-oss
-// fallbacks were removed — they return HTTP 410 "end of life" since Sept 2026).
-// The first configured, non-empty entry wins per-run (all listed are tried in
-// order until one succeeds).
-function nvidiaModelList() {
-  const fromEnv = String(process.env.NVIDIA_MODELS || '').split(',').map((m) => m.trim()).filter(Boolean);
-  const defaults = ['nvidia/nemotron-3-ultra-550b-a55b'];
+const LLM_BASE_URL = env('LLM_BASE_URL', 'NVIDIA_BASE_URL') || 'https://freeinference.org/v1';
+
+// Ordered model list. qwen3.6-35b is the only default. The first configured,
+// non-empty entry wins per-run (all listed are tried in order until one
+// succeeds). Legacy NVIDIA_MODELS is honored as a fallback alias.
+function modelList() {
+  const fromEnv = env('LLM_MODELS', 'NVIDIA_MODELS').split(',').map((m) => m.trim()).filter(Boolean);
+  const defaults = ['qwen3.6-35b'];
   return fromEnv.length ? fromEnv : defaults;
 }
 
@@ -37,17 +49,23 @@ function keySet(name) { return !!String(process.env[name] || '').trim(); }
 
 // Build the OpenAI request body (used by the OpenAI providers directly).
 // `opts.reasoning === false` disables the model's chain-of-thought so the token
-// budget goes to the answer (see chatCompletion's contract below).
+// budget goes to the answer (see chatCompletion's contract below). For a
+// thinking-hybrid model (Qwen3 / Nemotron) this keeps a short-explanation call
+// (coach overview) from burning its whole max_tokens budget on "Wait, let me
+// parse the FEN…" and showing the user raw reasoning instead of an answer.
 function buildOpenAIBody({ messages, tools, toolChoice, model, stream, maxTokens, temperature, reasoning }) {
   const body = { model, messages, stream: !!stream };
   if (typeof temperature === 'number') body.temperature = temperature;
   if (typeof maxTokens === 'number') body.max_tokens = maxTokens;
   if (reasoning === false) {
-    // Nemotron 3 (thinking hybrid) renders its chain of thought as output
-    // tokens unless the template flag is off. Without this, a short-explanation
-    // call (coach overview) burned the whole max_tokens budget on "Wait, let me
-    // parse the FEN…" and the user saw raw reasoning instead of an answer.
-    body.chat_template_kwargs = { ...(body.chat_template_kwargs || {}), thinking: false };
+    // The disable signal differs by model family / provider:
+    //   - NVIDIA NIM nemotron uses chat_template_kwargs.thinking=false
+    //   - vllm-hosted Qwen3 uses chat_template_kwargs.enable_thinking=false
+    // Only send a flag the target model understands — a wrong/unknown key can
+    // 400 on some providers, so gate on the model name when we know it.
+    body.chat_template_kwargs = { ...(body.chat_template_kwargs || {}) };
+    if (/qwen/i.test(model)) body.chat_template_kwargs.enable_thinking = false;
+    else body.chat_template_kwargs.thinking = false;
   }
   if (Array.isArray(tools) && tools.length) {
     body.tools = tools;
@@ -134,7 +152,7 @@ async function streamDeltas(response, onToken, opts = {}) {
       const delta = choice && choice.delta;
       if (choice && choice.finish_reason) finishReason = choice.finish_reason;
       if (!delta) continue;
-      // Reasoning models (e.g. gpt-oss on NVIDIA NIM) stream their chain of
+      // Reasoning-hybrid models (e.g. Qwen3, Nemotron) stream their chain of
       // thought in delta.reasoning_content (OpenAI-compat) or delta.reasoning.
       // These are NOT part of the answer — surface them via onReasoning so the
       // client can show a live "thinking" view while the model works.
@@ -172,23 +190,23 @@ function assembleStreamResult(content, toolCalls, finishReason, usage) {
   return { content, toolCalls: calls, finishReason, usage: usage || null };
 }
 
-// One NVIDIA call. Returns the raw fetch Response (already OpenAI-shaped).
-// modelKey is an entry from nvidiaModelList(), e.g. 'nvidia/nemotron-3-ultra-550b-a55b'.
-// NVIDIA's base URL already ends in /v1, so chat/completions is appended directly.
-async function callNvidia({ opts, model }) {
-  const apiKey = process.env.NVIDIA_API_KEY;
+// One provider call. Returns the raw fetch Response (already OpenAI-shaped).
+// modelKey is an entry from modelList(), e.g. 'qwen3.6-35b'.
+// LLM_BASE_URL already ends in /v1, so chat/completions is appended directly.
+async function callProvider({ opts, model }) {
+  const apiKey = env('LLM_API_KEY', 'NVIDIA_API_KEY');
   if (!apiKey) {
-    const err = new Error('NVIDIA not configured (set NVIDIA_API_KEY).');
-    err.provider = 'nvidia';
+    const err = new Error(`LLM not configured (set LLM_API_KEY or NVIDIA_API_KEY).`);
+    err.provider = 'llm';
     err.code = 'llm_not_configured';
     throw err;
   }
-  // Unknown/legacy models reject chat_template_kwargs with 400. Only send the
-  // thinking switch when the model is known to support it (or unknown-but-new
-  // nemotron-3+ family); everything else falls back to prompt-only control.
-  const wantsNoThinking = opts.reasoning === false
-    && (process.env.NVIDIA_NO_THINKING === '1' || /nemotron-(3|4)/i.test(model));
-  const res = await fetchCompat(`${NVIDIA_BASE_URL}/chat/completions`, {
+  // Disable built-in chain-of-thought for thinking-hybrid models (Qwen3 /
+  // nemotron) when the caller asked for reasoning:false. buildOpenAIBody picks
+  // the per-family flag from the model name, so no provider-specific gate is
+  // needed here — just forward the intent.
+  const wantsNoThinking = opts.reasoning === false;
+  const res = await fetchCompat(`${LLM_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -205,13 +223,13 @@ async function callNvidia({ opts, model }) {
   if (!res.ok) {
     let detail = '';
     try { detail = JSON.stringify(await res.json()); } catch (_) { try { detail = await res.text(); } catch (_e) {} }
-    const err = new Error(`NVIDIA API error ${res.status} (${model}): ${detail.slice(0, 300)}`);
-    err.provider = 'nvidia';
+    const err = new Error(`LLM API error ${res.status} (${model}): ${detail.slice(0, 300)}`);
+    err.provider = 'llm';
     err.model = model;
     err.statusCode = res.status;
     err.code = 'llm_provider_error';
     // Quota/exhaustion signals mean this model is OUT — don't bother retrying
-    // it (the fallback model should be tried immediately). NVIDIA returns 429
+    // it (the fallback model should be tried immediately). Providers return 429
     // with details like "quota" / "exceeded" / "rate", and a 503 when the model
     // is temporarily unavailable. Either is the signal to fail over fast.
     const rejectedForQuota = res.status === 429
@@ -235,29 +253,29 @@ function isRetryable(err) {
   return sc === 429 || (sc >= 500 && sc <= 599);
 }
 
-// chatCompletion tries each model in nvidiaModelList() in order. Goal is SPEED:
+// chatCompletion tries each model in modelList() in order. Goal is SPEED:
 // on a quota-exhaustion/rate-limit error from a model we fail over to the next
 // model IMMEDIATELY (no retry backoff on the one that is out).
 // `opts.model` is accepted for back-compat but IGNORED — the model list fully
 // governs. When `opts.reasoning === false`, each call additionally disables the
 // model's built-in chain-of-thought (see buildOpenAIBody).
 async function chatCompletion(opts) {
-  if (!keySet('NVIDIA_API_KEY')) {
-    const err = new Error('No LLM provider configured (set NVIDIA_API_KEY).');
+  if (!keySet('LLM_API_KEY') && !keySet('NVIDIA_API_KEY')) {
+    const err = new Error('No LLM provider configured (set LLM_API_KEY).');
     err.code = 'llm_not_configured';
     throw err;
   }
-  const models = nvidiaModelList();
+  const models = modelList();
 
   let lastErr;
   // Whether the PREVIOUS model was quota-exhausted. If so, we skip retrying it
   // and fail over to the next model immediately — that's the whole point of the
-  // 120b→20b fallback being fast when 120b "runs out".
+  // primary→fallback failover being fast when the primary "runs out".
   for (const model of models) {
     if (lastErr && lastErr.quotaExhausted) {
-      console.warn(`[llm] nvidia/${lastErr.model} quota-exhausted; failing over to ${model} immediately (speed).`);
+      console.warn(`[llm] ${lastErr.model} quota-exhausted; failing over to ${model} immediately (speed).`);
       try {
-        const response = await callNvidia({ opts, model });
+        const response = await callProvider({ opts, model });
         response.__singChessModel = model;
         return response;
       } catch (err) { lastErr = err; continue; }
@@ -265,7 +283,7 @@ async function chatCompletion(opts) {
     let tried = 0;
     for (; tried < PROVIDER_RETRIES; tried++) {
       try {
-        const response = await callNvidia({ opts, model });
+        const response = await callProvider({ opts, model });
         response.__singChessModel = model;
         return response;
       } catch (err) {
@@ -273,7 +291,7 @@ async function chatCompletion(opts) {
         const applyNoRetry = !isRetryable(err) || err.quotaExhausted;
         if (tried < PROVIDER_RETRIES - 1 && !applyNoRetry) {
           const wait = RETRY_DELAY_MS * (tried + 1);
-          console.warn(`[llm] nvidia/${model} attempt ${tried + 1}/${PROVIDER_RETRIES} failed (${err.statusCode}); retrying in ${wait}ms…`);
+          console.warn(`[llm] ${model} attempt ${tried + 1}/${PROVIDER_RETRIES} failed (${err.statusCode}); retrying in ${wait}ms…`);
           await sleep(wait);
         } else {
           // Quota error or exhausted retries → move to the next model now.
@@ -282,10 +300,10 @@ async function chatCompletion(opts) {
       }
     }
     if (tried > 0) {
-      console.warn(`[llm] nvidia/${model} gave up; ${models.indexOf(model) < models.length - 1 ? 'failing over' : 'no more models'}.`);
+      console.warn(`[llm] ${model} gave up; ${models.indexOf(model) < models.length - 1 ? 'failing over' : 'no more models'}.`);
     }
   }
-  throw lastErr || new Error('All LLM models on NVIDIA failed.');
+  throw lastErr || new Error('All LLM models on the provider failed.');
 }
 
 const SYSTEM_PROMPT = `You are the Coach, a chess coach inside the Sing Chess Review web app.
@@ -346,5 +364,5 @@ module.exports = {
   parseToolCalls,
   streamDeltas,
   SYSTEM_PROMPT,
-  nvidiaModelList,
+  modelList,
 };

@@ -74,6 +74,8 @@ export function installQualityOfLife(app) {
       if (node.type === 'checkbox') node.checked = value;
       else node.value = value;
     }
+    // Keep the review's inline AI coach flag in sync with the Settings toggle.
+    try { localStorage.setItem('sidastuff.coachInline', p.inlineCoach === false ? 'off' : 'on'); } catch (_) {}
     for (const mute of document.querySelectorAll('[data-qol-mute]')) { setButtonLabel(mute, p.sounds ? 'Mute' : 'Unmute'); mute.setAttribute('aria-pressed', String(!p.sounds)); }
     if ($('#qol-collapse')) setButtonLabel($('#qol-collapse'), p.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
     $('#qol-collapse')?.setAttribute('aria-expanded', String(!p.sidebarCollapsed));
@@ -353,6 +355,7 @@ export function installQualityOfLife(app) {
     ['Accessibility', [['contrast', 'Contrast', ['normal', 'high']], ['palette', 'Highlight colors', ['default', 'blue-orange', 'purple-gold']], ['reducedMotion', 'Reduce motion', 'check'], ['fontSize', 'Move list and explanation text size', 'range', 11, 22]]],
     ['Play', [['multiPremoves', 'Queue multiple premoves', 'check'], ['tenths', 'Clock tenths below 10 seconds', 'check'], ['notifications', 'Notify when a game starts or it is your turn', 'check']]],
     ['Study', [['firstMistake', 'Open completed reviews at first mistake', 'check'], ['puzzleDifficulty', 'Puzzle difficulty', ['easier', 'normal', 'harder']], ['puzzleTheme', 'Puzzle theme', ['mix', 'mate', 'fork', 'pin', 'endgame']]]],
+    ['Coach', [['inlineCoach', 'Auto-explain each move with the AI coach in review', 'check']]],
   ];
   for (const [name, items] of fields) {
     const fieldset = el('fieldset'); fieldset.append(el('legend', name));
@@ -367,6 +370,14 @@ export function installQualityOfLife(app) {
         if (key === 'notifications' && value) {
           if (!('Notification' in window)) { input.checked = false; return tell('Notifications are unavailable in this browser.', true); }
           Notification.requestPermission().then(permission => { save({ notifications: permission === 'granted' }); if (permission !== 'granted') tell('Notifications were not enabled.'); }); return;
+        }
+        // The inline per-move AI coach flag is read by the review controller
+        // (app.js _coachInlineOnMove) via localStorage; mirror it here so the
+        // Settings toggle stays in sync with the flag.
+        if (key === 'inlineCoach') {
+          try { localStorage.setItem('sidastuff.coachInline', value ? 'on' : 'off'); } catch (_) {}
+          save({ inlineCoach: value });
+          return;
         }
         save({ [key]: value });
       });

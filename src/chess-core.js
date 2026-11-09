@@ -12,7 +12,7 @@ const MoveClassification = Object.freeze({
   BOOK: { key: 'BOOK', name: 'Book', symbol: '📖', color: '#d5a47d', icon: 'book', iconType: 'image', description: 'A conventional opening move' },
   INACCURACY: { key: 'INACCURACY', name: 'Inaccuracy', symbol: '?!', color: '#f7c631', icon: 'inaccuracy', iconType: 'image', description: 'A weak move' },
   MISTAKE: { key: 'MISTAKE', name: 'Mistake', symbol: '?', color: '#ffa459', icon: 'mistake', iconType: 'image', description: 'A bad move that immediately worsens your position' },
-  MISS: { key: 'MISS', name: 'Miss', symbol: 'X', color: '#ff7768', icon: 'miss', iconType: 'image', description: 'A move that missed a tactical opportunity or a chance to punish the opponent' },
+  MISS: { key: 'MISS', name: 'Miss', symbol: 'X', color: '#ff7768', icon: 'miss', iconType: 'image', description: 'A move that missed a tactical opportunity, a chance to punish the opponent, or a cleaner conversion of a winning advantage' },
   BLUNDER: { key: 'BLUNDER', name: 'Blunder', symbol: '??', color: '#f9412d', icon: 'blunder', iconType: 'image', description: 'A very bad move that also loses material or the game' },
 });
 
@@ -2106,6 +2106,23 @@ class MoveAnalyzer {
     // Fixed cpLoss ladder — BLUNDER / MISTAKE / INACCURACY. A move can't be a
     // Blunder for "losing the game" if the position was already lost.
     const blunderForMaterialOrGame = losesMaterialOrGame && cpLoss >= 200;
+
+    // KEPT WIN — a move in an already-decisive winning position that stays
+    // decisively winning and does NOT throw away material or the game. A large
+    // cpLoss here (e.g. +12 → +10, or +12 → +5) is a missed faster/more
+    // converting continuation, not a blunder: the win never escapes. Label it
+    // MISS, not BLUNDER. Real piece blunders / allowed mates still fall through
+    // to BLUNDER because losesMaterialOrGame is set (the "blundering pieces"
+    // exception). If the move drops OUT of the decisive band, it genuinely lost
+    // the win → normal ladder (BLUNDER).
+    const DECISIVE_WIN_CP = 500;   // ~85%+ win probability at 1200 rating
+    if (cpLoss >= BLUNDER_CP
+      && playerEdgeBefore >= DECISIVE_WIN_CP
+      && playerEdgeAfter >= DECISIVE_WIN_CP
+      && !losesMaterialOrGame) {
+      return MoveClassification.MISS;
+    }
+
     if (cpLoss >= BLUNDER_CP || blunderForMaterialOrGame) {
       return wasBeingMated ? MoveClassification.MISTAKE : MoveClassification.BLUNDER;
     }
